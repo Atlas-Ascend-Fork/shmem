@@ -9,7 +9,7 @@ check_docs_changes
 # 加载cann 环境变量
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
 export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver:$LD_LIBRARY_PATH
-
+unset ASCEND_RT_VISIBLE_DEVICES
 # 打印环境信息
 env_info
 

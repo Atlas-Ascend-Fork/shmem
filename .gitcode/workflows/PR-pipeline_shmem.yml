@@ -97,18 +97,18 @@ stages:
         with:
           task_name: 'UT_examples'
           image_version: ${{ jobs.JOB_image.outputs.UT_Test }}
-      # JOB_UT_part1:
-      #   name: UT_part1
-      #   uses: .gitcode/workflows/llt_action.yml
-      #   with:
-      #     task_name: 'UT_part1'
-      #     image_version: ${{ jobs.JOB_image.outputs.UT_Test }}
-      # JOB_UT_part2:
-      #   name: UT_part2
-      #   uses: .gitcode/workflows/llt_action.yml
-      #   with:
-      #     task_name: 'UT_part2'
-      #     image_version: ${{ jobs.JOB_image.outputs.UT_Test }}
+      JOB_UT_part1:
+        name: UT_part1
+        uses: .gitcode/workflows/ut_action.yml
+        with:
+          task_name: 'UT_part1'
+          image_version: ${{ jobs.JOB_image.outputs.UT_Test }}
+      JOB_UT_part2:
+        name: UT_part2
+        uses: .gitcode/workflows/ut_action.yml
+        with:
+          task_name: 'UT_part2'
+          image_version: ${{ jobs.JOB_image.outputs.UT_Test }}
     pre:
     - type: auto
     fail-fast: true
