@@ -7,7 +7,7 @@
 ## 支持的产品型号
 
 - Atlas A3 训练系列产品/Atlas A3 推理系列产品
-- Ascend 950PR（暂不支持 Ascend 950DT）
+- Ascend 950
 
 ## 样例实现
 

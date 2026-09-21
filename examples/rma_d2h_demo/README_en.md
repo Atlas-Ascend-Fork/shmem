@@ -4,8 +4,8 @@ This example describes how to use the scalar put and get data transfer APIs to a
 
 ## Supported Product Models
 
-- Atlas A3 training products and Atlas A3 inference products
-- Ascend 950PR (Ascend 950DT is not supported yet)
+- Atlas A3 training products and Atlas A3 inference products (requires CANN 8.5.0 or later)
+- Ascend 950 (requires CANN 9.0.0 or later)
 
 ## Example Implementation
 
