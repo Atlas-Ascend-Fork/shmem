@@ -68,7 +68,7 @@ Welcome to Shmem's Documentation!
     :caption: Security hardening and public IP address
     :name: Security hardening and public IP address
 
-    SECURITY.md
+    SECURITY_en.md
 
 Indices and tables
 ==================
