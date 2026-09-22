@@ -116,32 +116,9 @@ ACLSHMEM_DEVICE void aclshmemi_hns_1825_sync_func(uint32_t sync_id)
     AscendC::WaitFlag<EVENT>((AscendC::TEventID)sync_id);
 }
 
-/**
- * @brief Write UB data to GM with S/MTE3 synchronization.
- *
- * This function copies data from a UB LocalTensor to GM using the following order:
- * 1. S_MTE3 synchronization before DataCopyPad
- * 2. DataCopyPad from UB to GM
- * 3. PIPE_MTE3 barrier
- * 4. MTE3_S synchronization after the copy
- *
- * @note Used for NIC-visible GM records such as WQEs and software doorbells. Callers issue
- *       dcci_cachelines afterwards where a cache flush is required.
- */
-template <typename T>
-ACLSHMEM_DEVICE void aclshmemi_hns_1825_write_ub_to_gm_with_sync(
-    uint64_t addr, AscendC::LocalTensor<T>& ub_local, uint32_t size, uint32_t sync_id)
-{
-    AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(sync_id);
-    AscendC::GlobalTensor<T> tmp_global_tensor;
-    tmp_global_tensor.SetGlobalBuffer((__gm__ T*)addr);
-    AscendC::DataCopyExtParams copy_params{1, size, 0, 0, 0};
-    AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(sync_id);
-    AscendC::DataCopyPad(tmp_global_tensor, ub_local, copy_params);
-    AscendC::PipeBarrier<PIPE_MTE3>();
-    AscendC::SetFlag<AscendC::HardEvent::MTE3_S>(sync_id);
-    AscendC::WaitFlag<AscendC::HardEvent::MTE3_S>(sync_id);
-}
+// aclshmemi_roce_write_ub_to_gm_with_sync (shared, see rdma_device_backend_base.hpp) replaces the former
+// backend-local copy: used for NIC-visible GM records such as WQEs and software doorbells. Callers issue
+// dcci_cachelines afterwards where a cache flush is required.
 
 ACLSHMEM_DEVICE void aclshmemi_hns_1825_clear_wqe_ub(AscendC::LocalTensor<uint32_t>& wqe_ub_local)
 {
@@ -234,7 +211,7 @@ ACLSHMEM_DEVICE void aclshmemi_roce_ring_cq_doorbell<aclshmemi_rdma_backend_t::H
     aclshmemi_hns_1825_write_u32_gm(sq_context->tail_addr, cur_tail);
 
     ub_local32.SetValue(0, aclshmemi_hns_1825_htobe32(cur_tail & ACLSHMEMI_HNS_1825_CQ_UPDATE_CI_MASK));
-    aclshmemi_hns_1825_write_ub_to_gm_with_sync(cq_context->db_sw_addr, ub_local32, sizeof(uint32_t), sync_id);
+    aclshmemi_roce_write_ub_to_gm_with_sync(cq_context->db_sw_addr, ub_local32, sizeof(uint32_t), sync_id);
     dcci_cachelines((__gm__ uint8_t*)cq_context->db_sw_addr, sizeof(uint32_t));
 }
 
@@ -449,7 +426,7 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_hns_1825_fill_wqe_write_read(
         aclshmemi_roce_hns_1825_fill_wqe_ctrl_seg(wqe_ub_local, cur_head, sq_context->depth), wr, opcode);
     (void)aclshmemi_roce_hns_1825_fill_wqe_data_seg(data_ub, wr);
     aclshmemi_roce_hns_1825_write_invalid_wqebb(sq_context, cur_head + 1);
-    aclshmemi_hns_1825_write_ub_to_gm_with_sync(
+    aclshmemi_roce_write_ub_to_gm_with_sync(
         (uint64_t)wqe_addr, wqe_ub_local, ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE, sync_id);
     return ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE;
 }

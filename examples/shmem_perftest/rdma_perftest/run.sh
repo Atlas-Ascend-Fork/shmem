@@ -35,12 +35,12 @@ UB_SIZE="192"
 # RDMA特有参数
 BATCH="0"
 MAX_BATCH_SIZE="1024"
-XSCALE_AGGREGATE_CACHE_SIZE="64"
-XSCALE_AGGREGATE_ITEM_SIZE="128"
-XSCALE_MULTI_QP_AGGREGATE_THRESHOLD=$((64 * 1024))
-XSCALE_AGGREGATE_THRESHOLD_EXPONENT="16"
+AGGREGATE_CACHE_SIZE="64"
+AGGREGATE_ITEM_SIZE="128"
+AGGREGATE_THRESHOLD=$((32 * 1024))
+AGGREGATE_THRESHOLD_EXPONENT="15"
 PERFTEST_WARMUP_ITERS="100"
-XSCALE_DEFAULT_BATCH_SIZE="100"
+DEFAULT_BATCH_SIZE="100"
 SYNC_ID="0"
 QP_NUM="1"
 QP_INDEX="-1"
@@ -144,8 +144,8 @@ while [[ $# -gt 0 ]]; do
             echo "  -e|--exponent <exponent>        数据量幂数"
             echo "  --exponent-range <min> <max>    数据量幂数范围"
             echo "  --loop-count <count>            循环次数 (默认 1000)"
-            echo "  --ub-size <size>                UB size(B), 192B~131136B, 自动对齐；XSCALE 聚合路径会警告并自动修正到最小值 (默认 192)"
-            echo "  --batch <count>                 连续发起多少次操作后等待完成；XSCALE 聚合路径下会自动修正到可运行值 (默认 0)"
+            echo "  --ub-size <size>                UB size(B), 192B~131136B, 自动对齐；聚合路径会警告并自动修正到最小值 (默认 192)"
+            echo "  --batch <count>                 连续发起多少次操作后等待完成；bw 聚合路径自动修正到可运行值；lat 下作为聚合接口的窗口大小（默认自动 100），lat 会遍历所有接口形态 (默认 0)"
             echo "  --sync-id <id>                  显式传给 Put、Get、Quiet 的同步 ID (默认 0)"
             echo "  -q|--qp|--qp-count <num>        每个 PE 对的 QP 个数，范围 1~32；XSCALE 和 HNS_1825 支持 (默认 1)"
             echo "  -i|--qp-index <index>           固定使用的 QP 编号；-1 表示多 QP 并行模式自动分配 (默认 -1)"
@@ -219,14 +219,24 @@ is_roce_multi_qp_runtime() {
     is_xscale_runtime || is_hns_1825_runtime
 }
 
-get_xscale_required_ub_size() {
+get_aggregate_required_ub_size() {
     local batch="$1"
-    echo $((XSCALE_AGGREGATE_CACHE_SIZE + XSCALE_AGGREGATE_ITEM_SIZE * batch))
+    echo $((AGGREGATE_CACHE_SIZE + AGGREGATE_ITEM_SIZE * batch))
 }
 
-uses_xscale_aggregation() {
-    is_xscale_runtime && [[ "$METRIC" == "bw" ]] && [[ "$QP_NUM" -le "2" ]] && \
-        [[ "$MIN_EXPONENT" -lt "$XSCALE_AGGREGATE_THRESHOLD_EXPONENT" ]]
+aggregate_qp_supported() {
+    if is_xscale_runtime; then
+        [[ "$QP_NUM" -le "2" ]]
+    else
+        [[ "$QP_NUM" -eq "1" ]]
+    fi
+}
+
+uses_aggregate() {
+    # lat 模式自动遍历所有接口形态（普通/QP/聚合），必然经过聚合路径；bw 模式保持小消息聚合
+    ! is_hns_1825_runtime && aggregate_qp_supported && \
+        { [[ "$METRIC" == "lat" ]] || \
+          { [[ "$METRIC" == "bw" ]] && [[ "$MIN_EXPONENT" -lt "$AGGREGATE_THRESHOLD_EXPONENT" ]]; } }
 }
 
 # 验证测试类型
@@ -253,7 +263,7 @@ fi
 # 验证metric参数
 VALID_METRICS="bw lat"
 if [[ ! " $VALID_METRICS " =~ " $METRIC " ]]; then
-    echo "错误: metric 必须是 'bw' 或 'lat' (got '$METRIC')"
+    echo "错误: metric 必须是 'bw' / 'lat' (got '$METRIC')"
     exit 1
 fi
 
@@ -319,48 +329,63 @@ fi
 
 if is_xscale_runtime; then
     RDMA_NIC_TYPE="XSCALE"
-
-    if uses_xscale_aggregation; then
-        # Normalize batch before calculating the aggregate count and required UB size.
-        if [[ "$BATCH" -eq 0 ]]; then
-            echo "提示: --batch 未指定，自动设为 $XSCALE_DEFAULT_BATCH_SIZE"
-            BATCH="$XSCALE_DEFAULT_BATCH_SIZE"
-        elif [[ "$BATCH" -gt "$LOOP_COUNT" || "$BATCH" -ge "$MAX_BATCH_SIZE" ]]; then
-            CORRECT_BATCH="$XSCALE_DEFAULT_BATCH_SIZE"
-            if [[ "$LOOP_COUNT" -lt "$CORRECT_BATCH" ]]; then
-                CORRECT_BATCH="$LOOP_COUNT"
-            fi
-            echo "警告: --batch 的值 $BATCH 无效（需不大于 loop-count $LOOP_COUNT 且小于 1024），已修正为 $CORRECT_BATCH"
-            BATCH="$CORRECT_BATCH"
-        fi
-
-        # XSCALE bandwidth aggregation is enabled only for qp_num <= 2 and messages below 64 KiB.
-        MAX_AGGREGATE_COUNT="$PERFTEST_WARMUP_ITERS"
-        if [[ "$BATCH" -gt "$MAX_AGGREGATE_COUNT" ]]; then
-            MAX_AGGREGATE_COUNT="$BATCH"
-        fi
-
-        # 聚合数不得达到 QP 队列深度上限（1024），否则聚合提交会失败
-        if [[ "$MAX_AGGREGATE_COUNT" -ge "$MAX_BATCH_SIZE" ]]; then
-            echo "错误: XSCALE 最大聚合数 $MAX_AGGREGATE_COUNT 已达到 QP 队列深度上限 $MAX_BATCH_SIZE"
-            echo "       请减小 --batch（当前 $BATCH）到 $((MAX_BATCH_SIZE - 1)) 以下"
-            exit 1
-        fi
-
-        REQUIRED_UB_SIZE=$(get_xscale_required_ub_size "$MAX_AGGREGATE_COUNT")
-        if [[ "$REQUIRED_UB_SIZE" -gt "131136" ]]; then
-            echo "错误: 所需 UB 大小 ${REQUIRED_UB_SIZE}B 超过上限 131136B，请减小 --batch"
-            exit 1
-        fi
-        if [[ "$UB_SIZE" -lt "$REQUIRED_UB_SIZE" ]]; then
-            echo "警告: 聚合场景要求 --ub-size >= ${REQUIRED_UB_SIZE}B，当前为 ${UB_SIZE}B，已自动修正"
-            UB_SIZE="$REQUIRED_UB_SIZE"
-        fi
-    fi
+    AGGREGATE_THRESHOLD=$((64 * 1024))
+    AGGREGATE_THRESHOLD_EXPONENT="16"
 elif is_hns_1825_runtime; then
     RDMA_NIC_TYPE="HNS_1825"
 else
-    RDMA_NIC_TYPE="non-XSCALE or unknown"
+    RDMA_NIC_TYPE="IN_DIE/default"
+fi
+
+if uses_aggregate; then
+    # Normalize the window before deriving the full batch size and UB capacity.
+    if [[ "$BATCH" -eq 0 ]]; then
+        echo "提示: --batch 未指定，自动设为 $DEFAULT_BATCH_SIZE"
+        BATCH="$DEFAULT_BATCH_SIZE"
+    elif [[ "$METRIC" == "lat" ]]; then
+        if [[ "$BATCH" -gt "$LOOP_COUNT" ]]; then
+            BATCH="$LOOP_COUNT"
+        fi
+    elif [[ "$BATCH" -gt "$LOOP_COUNT" || "$BATCH" -ge "$MAX_BATCH_SIZE" ]]; then
+        CORRECT_BATCH="$DEFAULT_BATCH_SIZE"
+        if [[ "$LOOP_COUNT" -lt "$CORRECT_BATCH" ]]; then
+            CORRECT_BATCH="$LOOP_COUNT"
+        fi
+        echo "警告: --batch 的值 $BATCH 无效（需不大于 loop-count $LOOP_COUNT 且小于 1024），已修正为 $CORRECT_BATCH"
+        BATCH="$CORRECT_BATCH"
+    fi
+
+    if [[ "$METRIC" == "lat" ]]; then
+        # N defer calls append one submit WQE; N+1 must remain below SQ depth.
+        MAX_LAT_WINDOW=$((MAX_BATCH_SIZE - 2))
+        if [[ "$BATCH" -gt "$MAX_LAT_WINDOW" ]]; then
+            echo "提示: 时延窗口缩小为 $MAX_LAT_WINDOW，为 submit 预留一条 WQE"
+            BATCH="$MAX_LAT_WINDOW"
+        fi
+        FULL_BATCH_COUNT=$((BATCH + 1))
+    else
+        # In bandwidth mode, submit is the last of N operations, not an extra one.
+        FULL_BATCH_COUNT="$BATCH"
+    fi
+
+    MAX_AGGREGATE_COUNT="$PERFTEST_WARMUP_ITERS"
+    if [[ "$FULL_BATCH_COUNT" -gt "$MAX_AGGREGATE_COUNT" ]]; then
+        MAX_AGGREGATE_COUNT="$FULL_BATCH_COUNT"
+    fi
+    if [[ "$MAX_AGGREGATE_COUNT" -ge "$MAX_BATCH_SIZE" ]]; then
+        echo "错误: 完整聚合批次 $MAX_AGGREGATE_COUNT 必须小于 QP 队列深度 $MAX_BATCH_SIZE"
+        exit 1
+    fi
+
+    REQUIRED_UB_SIZE=$(get_aggregate_required_ub_size "$MAX_AGGREGATE_COUNT")
+    if [[ "$REQUIRED_UB_SIZE" -gt "131136" ]]; then
+        echo "错误: 所需 UB 大小 ${REQUIRED_UB_SIZE}B 超过上限 131136B，请减小 --batch"
+        exit 1
+    fi
+    if [[ "$UB_SIZE" -lt "$REQUIRED_UB_SIZE" ]]; then
+        echo "警告: 聚合场景要求 --ub-size >= ${REQUIRED_UB_SIZE}B，当前为 ${UB_SIZE}B，已自动修正"
+        UB_SIZE="$REQUIRED_UB_SIZE"
+    fi
 fi
 
 echo "测试类型: $TEST_TYPE"
@@ -375,8 +400,8 @@ echo "QP index: $QP_INDEX"
 echo "QP specified: $QP_SPECIFIED"
 echo "Metric: $METRIC"
 echo "RDMA NIC type: $RDMA_NIC_TYPE"
-if uses_xscale_aggregation; then
-    echo "XSCALE bandwidth aggregation: qp <= 2 and message below ${XSCALE_MULTI_QP_AGGREGATE_THRESHOLD}B"
+if uses_aggregate; then
+    echo "RDMA bandwidth aggregation: qp <= 2 and message below ${AGGREGATE_THRESHOLD}B"
 fi
 echo "PE_SIZE: $PE_SIZE, GNPU_NUM: $GNPU_NUM"
 echo "FIRST_NPU: $FIRST_NPU"

@@ -108,7 +108,10 @@ void test_rdma_put_high_level(uint32_t block_dim, void* stream, uint8_t* gva, ui
     RDMAPutTestHighLevel<<<block_dim, nullptr, stream>>>(gva, config);
 }
 
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
+// Aggregate stage/commit entries (non-QP aclshmemx_roce_get_nbi/put_nbi with defer/submit actions) are
+// dispatched to the XSCALE and IN_DIE backends; HNS_1825 has no aggregate support. IN_DIE is the default
+// backend when no backend macro is defined.
+#if !defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
 
 namespace {
 
@@ -336,4 +339,4 @@ void test_rdma_aggregate(uint32_t block_dim, void* stream, uint8_t* gva, uint64_
     RDMAAggregateTest<<<block_dim, nullptr, stream>>>(gva, config);
 }
 
-#endif // ACLSHMEMI_RDMA_K_BACKEND_XSCALE
+#endif // !ACLSHMEMI_RDMA_K_BACKEND_HNS_1825

@@ -18,7 +18,8 @@ void test_rdma_get_low_level(uint32_t block_dim, void* stream, uint8_t* gva, uin
 void test_rdma_put_high_level(uint32_t block_dim, void* stream, uint8_t* gva, uint64_t config);
 void test_rdma_get_high_level(uint32_t block_dim, void* stream, uint8_t* gva, uint64_t config);
 
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
+// Aggregate tests are available on the XSCALE and IN_DIE (default) backends.
+#if !defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
 void test_rdma_aggregate(uint32_t block_dim, void* stream, uint8_t* gva, uint64_t config);
 #endif
 

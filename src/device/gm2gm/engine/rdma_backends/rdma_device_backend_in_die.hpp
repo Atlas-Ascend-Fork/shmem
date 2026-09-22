@@ -132,6 +132,91 @@ ACLSHMEM_DEVICE void aclshmemi_roce_ring_sq_doorbell<aclshmemi_rdma_backend_t::I
     AscendC::WaitFlag<AscendC::HardEvent::MTE3_S>(sync_id);
 }
 
+/**
+ * @brief Fill one IN_DIE RDMA WQE in the UB aggregate staging buffer (WRITE/READ opcodes).
+ *
+ * Shared helper behind the aclshmemi_roce_fill_wqe_ub<IN_DIE, OP_CODE> specializations,
+ * mirroring aclshmemi_roce_xscale_fill_wqe_ub_write_read.
+ *
+ * @param wqe_addr           [in] Start address of the WQE in UB buffer.
+ * @param wqe_head           [in] WQE head index (owner bit derived from head >> 13).
+ * @param message_len        [in] Message length in bytes.
+ * @param opcode             [in] IN_DIE RDMA opcode (WRITE / READ).
+ * @param rkey               [in] Remote memory key.
+ * @param remote_addr        [in] Remote GM address.
+ * @param lkey               [in] Local memory key.
+ * @param local_addr         [in] Local GM address.
+ * @param isSubmit           [in] Unused: every IN_DIE WQE is SIGNALED, CQE compression is not yet
+ *                             supported (follow-up item alongside XSCALE's ce=1 optimization).
+ * @return                   [out] WQE size in bytes (sizeof(aclshmemi_wqe_ctx) + sizeof(aclshmemi_sge_ctx)).
+ */
+ACLSHMEM_DEVICE uint32_t aclshmemi_roce_in_die_fill_wqe_ub_write_read(
+    __ubuf__ uint8_t* wqe_addr, uint32_t wqe_head, uint32_t message_len, aclshmemi_rdma_in_die_opcode_t opcode,
+    uint32_t rkey, __gm__ uint8_t* remote_addr, uint32_t lkey, __gm__ uint8_t* local_addr, bool isSubmit)
+{
+    (void)isSubmit;
+    uint32_t owner = (wqe_head >> 13) & 1;
+    uint32_t byte4 = static_cast<uint32_t>(opcode) | ((~owner << 7) & (1u << 7)) | (1u << 8);
+    *(__ubuf__ uint32_t*)wqe_addr = byte4;
+    *(__ubuf__ uint32_t*)(wqe_addr + 4) = message_len;
+    *(__ubuf__ uint32_t*)(wqe_addr + 8) = 0;
+    *(__ubuf__ uint32_t*)(wqe_addr + 12) = 1 << 24;
+    *(__ubuf__ uint32_t*)(wqe_addr + 16) = 0;
+    *(__ubuf__ uint32_t*)(wqe_addr + 20) = rkey;
+    *(__ubuf__ uint64_t*)(wqe_addr + 24) = reinterpret_cast<uint64_t>(remote_addr);
+    __ubuf__ uint8_t* sge_addr = wqe_addr + sizeof(aclshmemi_wqe_ctx);
+    *(__ubuf__ uint32_t*)sge_addr = message_len;
+    *(__ubuf__ uint32_t*)(sge_addr + 4) = lkey;
+    *(__ubuf__ uint64_t*)(sge_addr + 8) = reinterpret_cast<uint64_t>(local_addr);
+    return sizeof(aclshmemi_wqe_ctx) + sizeof(aclshmemi_sge_ctx);
+}
+
+template <>
+ACLSHMEM_DEVICE uint32_t
+aclshmemi_roce_fill_wqe_ub<aclshmemi_rdma_backend_t::IN_DIE, aclshmemi_rdma_opcode_t::OP_RDMA_WRITE>(
+    __ubuf__ uint8_t* wqe_addr, uint32_t wqe_head, uint32_t message_len, uint32_t rkey, __gm__ uint8_t* remote_addr,
+    uint32_t lkey, __gm__ uint8_t* local_addr, uint32_t depth, bool isSubmit)
+{
+    (void)depth;
+    return aclshmemi_roce_in_die_fill_wqe_ub_write_read(
+        wqe_addr, wqe_head, message_len, aclshmemi_rdma_in_die_opcode_t::OP_RDMA_WRITE, rkey, remote_addr, lkey,
+        local_addr, isSubmit);
+}
+
+template <>
+ACLSHMEM_DEVICE uint32_t
+aclshmemi_roce_fill_wqe_ub<aclshmemi_rdma_backend_t::IN_DIE, aclshmemi_rdma_opcode_t::OP_RDMA_READ>(
+    __ubuf__ uint8_t* wqe_addr, uint32_t wqe_head, uint32_t message_len, uint32_t rkey, __gm__ uint8_t* remote_addr,
+    uint32_t lkey, __gm__ uint8_t* local_addr, uint32_t depth, bool isSubmit)
+{
+    (void)depth;
+    return aclshmemi_roce_in_die_fill_wqe_ub_write_read(
+        wqe_addr, wqe_head, message_len, aclshmemi_rdma_in_die_opcode_t::OP_RDMA_READ, rkey, remote_addr, lkey,
+        local_addr, isSubmit);
+}
+
+template <>
+ACLSHMEM_DEVICE void aclshmemi_roce_ring_sq_doorbell_from_cache<aclshmemi_rdma_backend_t::IN_DIE>(
+    __ubuf__ aclshmemi_roce_aggregate_cache_t* cache, uint32_t cur_head, AscendC::LocalTensor<uint64_t>& ub_local64,
+    AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
+{
+    // Snapshot cache fields before ub_local32/ub_local64 overwrite the shared UB workspace.
+    uint64_t doorbell_info = 0;
+    doorbell_info |= cache->sq_wqn;                                 // [0:23] DB_TAG = qp_num
+    doorbell_info |= 0 << 24;                                       // [24:27] DB_CMD = HNS_ROCE_V2_SQ_DB(0)
+    doorbell_info |= ((uint64_t)cur_head % 65536) << 32;            // [32:47] DB_PI = sq.head
+    doorbell_info |= (uint64_t)(cache->backend.in_die.sq_sl) << 48; // [48:50] DB_SL = qp.sl
+
+    uint64_t sq_head_addr = cache->sq_head_addr;
+    uint64_t sq_db_addr = cache->sq_db_addr;
+
+    ub_local64.SetValue(0, doorbell_info);
+    aclshmemi_roce_write_ub_to_gm_with_sync(sq_db_addr, ub_local64, sizeof(uint64_t), sync_id);
+
+    ub_local32.SetValue(0, cur_head);
+    aclshmemi_roce_write_ub_to_gm_with_sync(sq_head_addr, ub_local32, sizeof(uint32_t), sync_id);
+}
+
 // Shard Helper: Post-Send orchestration for RDMA WRITE/READ
 template <aclshmemi_rdma_opcode_t OP_CODE>
 ACLSHMEM_DEVICE void aclshmemi_roce_post_send_read_write(

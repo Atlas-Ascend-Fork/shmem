@@ -31,7 +31,8 @@ extern void test_finalize(aclrtStream stream, int device_id);
 namespace {
 constexpr int TIMEOUT = 30;
 
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
+// Aggregate tests are available on the XSCALE and IN_DIE (default) backends.
+#if !defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
 constexpr uint32_t RDMA_AGGREGATE_ELEMENT_COUNT = 16;
 constexpr uint32_t RDMA_AGGREGATE_SLOT_COUNT = 34;
 
@@ -250,7 +251,8 @@ TEST(TestMemApi, TestShmemRDMAExceptionReport)
     test_mutil_task(test_aclshmem_rdma_exception_report, local_mem_size, test_gnpu_num);
 }
 
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
+// Aggregate tests are available on the XSCALE and IN_DIE (default) backends.
+#if !defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
 
 static void test_rdma_aggregate_mem_func(aclrtStream stream, uint8_t* gva, uint32_t pe_id, uint32_t pe_size)
 {
@@ -333,4 +335,4 @@ TEST(TestMemApi, TestShmemRDMAAggregateNbi)
     test_mutil_task(test_aclshmem_rdma_aggregate, local_mem_size, processCount);
 }
 
-#endif // ACLSHMEMI_RDMA_K_BACKEND_XSCALE
+#endif // !ACLSHMEMI_RDMA_K_BACKEND_HNS_1825

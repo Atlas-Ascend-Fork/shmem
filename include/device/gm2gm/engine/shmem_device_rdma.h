@@ -266,7 +266,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  *
  * @warning n is the total number of operations in the batch, including the final submit call,
  *          and must be less than the SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported only on XSCALE, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Get operation, buf base, and sync_id.
  * @note Finish the batch with an aclshmemx_submit_t action. After submit, call
  *       aclshmemx_roce_quiet(pe, buf, sync_id) before reading or reusing dst.
@@ -292,7 +292,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  *
  * @warning n is the total number of operations in the batch, including this submit call, and must be less than the
  *          SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported only on XSCALE, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Get operation, buf base, and sync_id.
  * @note The submit call contributes one operation to n. On a submit failure, the calling device kernel is aborted
  *       and the submit state is not reset.
@@ -318,7 +318,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  *
  * @warning n is the total number of operations in the batch, including the final submit call,
  *          and must be less than the SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported only on XSCALE, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Get operation, buf base, and sync_id.
  * @note Finish the batch with an aclshmemx_submit_t action. After submit, call
  *       aclshmemx_roce_quiet(pe, buf, sync_id) before reading or reusing dst.
@@ -344,7 +344,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  *
  * @warning n is the total number of operations in the batch, including this submit call, and must be less than the
  *          SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported only on XSCALE, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Get operation, buf base, and sync_id.
  * @note The submit call contributes one operation to n. On a submit failure, the calling device kernel is aborted
  *       and the submit state is not reset.
@@ -583,7 +583,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  *
  * @warning n is the total number of operations in the batch, including the final submit call,
  *          and must be less than the SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported only on XSCALE, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Put operation, buf base, and sync_id.
  * @note Finish the batch with an aclshmemx_submit_t action. After submit, call
  *       aclshmemx_roce_quiet(pe, buf, sync_id); src must remain valid and unchanged until it returns.
@@ -609,7 +609,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  *
  * @warning n is the total number of operations in the batch, including this submit call, and must be less than the
  *          SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported only on XSCALE, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Put operation, buf base, and sync_id.
  * @note The submit call contributes one operation to n. On a submit failure, the calling device kernel is aborted
  *       and the submit state is not reset.
@@ -636,7 +636,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  *
  * @warning n is the total number of operations in the batch, including the final submit call,
  *          and must be less than the SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported only on XSCALE, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Put operation, buf base, and sync_id.
  * @note Finish the batch with an aclshmemx_submit_t action. After submit, call
  *       aclshmemx_roce_quiet(pe, buf, sync_id); src must remain valid and unchanged until it returns.
@@ -663,7 +663,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  *
  * @warning n is the total number of operations in the batch, including this submit call, and must be less than the
  *          SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported only on XSCALE, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Put operation, buf base, and sync_id.
  * @note The submit call contributes one operation to n. On a submit failure, the calling device kernel is aborted
  *       and the submit state is not reset.

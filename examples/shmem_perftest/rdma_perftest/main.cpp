@@ -21,6 +21,11 @@
 
 constexpr int UB_ALIGN_SIZE = 64;
 
+// 时延模式每 PE 的接口形态槽位（普通/QP/defer/submit），与 kernel 侧 RDMA_PERF_IFACE_* 对应；
+// timing 总槽位 = 2 PE × 4 接口，布局 slot = pe * 4 + iface
+constexpr int LAT_IFACE_COUNT = 4;
+constexpr int LAT_TIMING_SLOT_COUNT = LAT_IFACE_COUNT * 2;
+
 #define CHECK_ACL_GOTO(call, ret_var, label)                        \
     do {                                                            \
         auto _ret = (call);                                         \
@@ -186,7 +191,7 @@ int test_rdma_perf_test_impl(
         size_t dst_off = 0;
         size_t src_off = ((dst_off + alloc_datasize) + 63) & ~(size_t)63;
         size_t tim_off = ((src_off + alloc_datasize) + 63) & ~(size_t)63;
-        size_t total = tim_off + sizeof(int64_t) * 2;
+        size_t total = tim_off + sizeof(int64_t) * LAT_TIMING_SLOT_COUNT;
 
         combo_ptr = aclshmem_malloc(total);
         if (combo_ptr == nullptr) {
@@ -199,10 +204,11 @@ int test_rdma_perf_test_impl(
         timing_out_ptr = static_cast<uint8_t*>(combo_ptr) + tim_off;
 
         {
-            std::vector<int64_t> zero(2, 0);
+            std::vector<int64_t> zero(LAT_TIMING_SLOT_COUNT, 0);
             CHECK_ACL_GOTO(
                 aclrtMemcpy(
-                    timing_out_ptr, sizeof(int64_t) * 2, zero.data(), sizeof(int64_t) * 2, ACL_MEMCPY_HOST_TO_DEVICE),
+                    timing_out_ptr, sizeof(int64_t) * LAT_TIMING_SLOT_COUNT, zero.data(),
+                    sizeof(int64_t) * LAT_TIMING_SLOT_COUNT, ACL_MEMCPY_HOST_TO_DEVICE),
                 ret, cleanup);
         }
 
@@ -234,11 +240,11 @@ int test_rdma_perf_test_impl(
         if (is_put_get_mode) {
             // Read back timing output: [0]=PE0_time(forward), [1]=PE1_time(reverse)
             // After cross-PE exchange in kernel, both PEs have both values.
-            std::vector<int64_t> timing_host(2, 0);
+            std::vector<int64_t> timing_host(LAT_TIMING_SLOT_COUNT, 0);
             CHECK_ACL_GOTO(
                 aclrtMemcpy(
-                    timing_host.data(), sizeof(int64_t) * 2, timing_out_ptr, sizeof(int64_t) * 2,
-                    ACL_MEMCPY_DEVICE_TO_HOST),
+                    timing_host.data(), sizeof(int64_t) * LAT_TIMING_SLOT_COUNT, timing_out_ptr,
+                    sizeof(int64_t) * LAT_TIMING_SLOT_COUNT, ACL_MEMCPY_DEVICE_TO_HOST),
                 ret, cleanup);
 
             bool is_bidir =
@@ -250,50 +256,88 @@ int test_rdma_perf_test_impl(
             if (soc_name != nullptr && std::string(soc_name).find("Ascend950") != std::string::npos) {
                 cycle2us = 1000;
             }
+
+            // CSV: compute BW from timing_out
             double per_iter_us0 = (loop_count > 0) ? static_cast<double>(timing_host[0]) / cycle2us / loop_count : 0.0;
             double per_iter_us1 = (loop_count > 0) ? static_cast<double>(timing_host[1]) / cycle2us / loop_count : 0.0;
             const uint32_t active_blocks = block_dim;
             const double bytes_per_iter = static_cast<double>(datasize) * static_cast<double>(mem_factor);
 
             double bw_gb = 0.0, bw_gib = 0.0, per_iter_us = 0.0;
-            if (is_bidir) {
-                if (metric == perftest::PERF_METRIC_LAT) {
-                    per_iter_us = (per_iter_us0 + per_iter_us1) / 2;
-                    std::cout << "[LAT] PE" << pe_id << " forward(PE0→PE1)=" << per_iter_us0 << " us"
-                              << " reverse(PE1→PE0)=" << per_iter_us1 << " us"
-                              << " avg=" << per_iter_us << " us" << std::endl;
-                } else {
-                    double bps0 = (per_iter_us0 > 0) ? bytes_per_iter / per_iter_us0 * 1000000.0 : 0.0;
-                    double bps1 = (per_iter_us1 > 0) ? bytes_per_iter / per_iter_us1 * 1000000.0 : 0.0;
-                    double bw_gb_0 = bps0 / 1000.0 / 1000.0 / 1000.0;
-                    double bw_gb_1 = bps1 / 1000.0 / 1000.0 / 1000.0;
-                    bw_gb = bw_gb_0 + bw_gb_1;
-                    double bw_gib_0 = bps0 / 1024.0 / 1024.0 / 1024.0;
-                    double bw_gib_1 = bps1 / 1024.0 / 1024.0 / 1024.0;
-                    bw_gib = bw_gib_0 + bw_gib_1;
-                    std::cout << "[BW] PE" << pe_id << " forward(PE0→PE1)=" << bw_gb_0 << " GB/s"
-                              << " reverse(PE1→PE0)=" << bw_gb_1 << " GB/s"
-                              << " total=" << bw_gb << " GB/s" << std::endl;
-                    per_iter_us = per_iter_us0 + per_iter_us1;
+            std::string lat_cell[LAT_IFACE_COUNT] = {"-", "-", "-", "-"};
+            if (metric == perftest::PERF_METRIC_LAT) {
+                // 时延模式：kernel 自动遍历接口形态（普通/QP/defer/submit），槽位 slot = pe * 4 + iface，
+                // 值为单次调用摊薄 cycles；-1 表示当前后端不支持该形态
+                static const char* kLatIfaceNames[LAT_IFACE_COUNT] = {"plain", "qp", "defer", "submit"};
+                for (int iface = 0; iface < LAT_IFACE_COUNT; ++iface) {
+                    const int64_t cycles0 = timing_host[iface];
+                    const int64_t cycles1 = timing_host[LAT_IFACE_COUNT + iface];
+                    if (is_bidir) {
+                        if (cycles0 < 0 || cycles1 < 0) {
+                            std::cout << "[LAT][" << kLatIfaceNames[iface] << "] PE" << pe_id
+                                      << ": N/A (unsupported by backend)" << std::endl;
+                            continue;
+                        }
+                        const double us0 = static_cast<double>(cycles0) / cycle2us;
+                        const double us1 = static_cast<double>(cycles1) / cycle2us;
+                        const double avg = (us0 + us1) / 2;
+                        std::cout << "[LAT][" << kLatIfaceNames[iface] << "] PE" << pe_id << " forward(PE0→PE1)=" << us0
+                                  << " us reverse(PE1→PE0)=" << us1 << " us avg=" << avg << " us" << std::endl;
+                        lat_cell[iface] = double_to_string(avg);
+                    } else if (pe_id == 0) {
+                        if (cycles0 < 0) {
+                            std::cout << "[LAT][" << kLatIfaceNames[iface] << "] PE0: N/A (unsupported by backend)"
+                                      << std::endl;
+                            continue;
+                        }
+                        const double us0 = static_cast<double>(cycles0) / cycle2us;
+                        std::cout << "[LAT][" << kLatIfaceNames[iface] << "] PE0: " << us0 << " us" << std::endl;
+                        lat_cell[iface] = double_to_string(us0);
+                    }
                 }
+                if (!is_bidir && pe_id != 0) {
+                    std::cout << "[LAT] PE" << pe_id << ": idle (unidirectional)" << std::endl;
+                }
+            } else if (is_bidir) {
+                double bps0 = (per_iter_us0 > 0) ? bytes_per_iter / per_iter_us0 * 1000000.0 : 0.0;
+                double bps1 = (per_iter_us1 > 0) ? bytes_per_iter / per_iter_us1 * 1000000.0 : 0.0;
+                double bw_gb_0 = bps0 / 1000.0 / 1000.0 / 1000.0;
+                double bw_gb_1 = bps1 / 1000.0 / 1000.0 / 1000.0;
+                bw_gb = bw_gb_0 + bw_gb_1;
+                double bw_gib_0 = bps0 / 1024.0 / 1024.0 / 1024.0;
+                double bw_gib_1 = bps1 / 1024.0 / 1024.0 / 1024.0;
+                bw_gib = bw_gib_0 + bw_gib_1;
+                std::cout << "[BW] PE" << pe_id << " forward(PE0→PE1)=" << bw_gb_0 << " GB/s"
+                          << " reverse(PE1→PE0)=" << bw_gb_1 << " GB/s"
+                          << " total=" << bw_gb << " GB/s" << std::endl;
+                per_iter_us = per_iter_us0 + per_iter_us1;
             } else {
-                if (metric == perftest::PERF_METRIC_LAT) {
-                    per_iter_us = (pe_id == 0) ? per_iter_us0 : per_iter_us1;
-                    std::cout << "[LAT] PE" << pe_id << ": " << per_iter_us << " us" << std::endl;
-                } else {
-                    per_iter_us = (pe_id == 0) ? per_iter_us0 : per_iter_us1;
-                    double bps = (per_iter_us > 0) ? bytes_per_iter / per_iter_us * 1000000.0 : 0.0;
-                    bw_gb = bps / 1000.0 / 1000.0 / 1000.0;
-                    bw_gib = bps / 1024.0 / 1024.0 / 1024.0;
-                    std::cout << "[BW] PE" << pe_id << ": " << bw_gb << " GB/s" << std::endl;
-                }
+                per_iter_us = (pe_id == 0) ? per_iter_us0 : per_iter_us1;
+                double bps = (per_iter_us > 0) ? bytes_per_iter / per_iter_us * 1000000.0 : 0.0;
+                bw_gb = bps / 1000.0 / 1000.0 / 1000.0;
+                bw_gib = bps / 1024.0 / 1024.0 / 1024.0;
+                std::cout << "[BW] PE" << pe_id << ": " << bw_gb << " GB/s" << std::endl;
             }
 
-            std::vector<std::string> row = {
-                uint64_to_string(datasize),           int_to_string(g_npus),   uint64_to_string(active_blocks),
-                double_to_string(ub_size_b / 1024.0), double_to_string(bw_gb), double_to_string(bw_gib),
-                double_to_string(per_iter_us),
-            };
+            std::vector<std::string> row;
+            if (metric == perftest::PERF_METRIC_LAT) {
+                row = {
+                    uint64_to_string(datasize),
+                    int_to_string(g_npus),
+                    uint64_to_string(active_blocks),
+                    double_to_string(ub_size_b / 1024.0),
+                    lat_cell[0],
+                    lat_cell[1],
+                    lat_cell[2],
+                    lat_cell[3],
+                };
+            } else {
+                row = {
+                    uint64_to_string(datasize),           int_to_string(g_npus),   uint64_to_string(active_blocks),
+                    double_to_string(ub_size_b / 1024.0), double_to_string(bw_gb), double_to_string(bw_gib),
+                    double_to_string(per_iter_us),
+                };
+            }
             csv_data.push_back(row);
         }
 
@@ -549,7 +593,10 @@ int main(int argc, char* argv[])
         std::cerr << "Error: --loop-count must be >= 1 (got " << loop_count << ")" << std::endl;
         return 1;
     }
-    if (batch == 0 || batch > loop_count) {
+    if (metric == perftest::PERF_METRIC_LAT) {
+        if (batch == 0)
+            batch = perftest::PERFTEST_WARMUP_ITERS;
+    } else if (batch > loop_count) {
         batch = loop_count;
     }
     if (qp_num < 1 || qp_num > static_cast<int>(ACLSHMEM_MAX_QP_NUM)) {
@@ -630,8 +677,15 @@ int main(int argc, char* argv[])
         local_mem_size = gb_needed * ONE_GB;
     }
 
-    std::vector<std::vector<std::string>> csv_data = {
-        {"DataSize/B", "Npus", "Blocks", "UBsize/KB", "Bandwidth/GB/s", "Bandwidth/GiB/s", "CoreMaxTime/us"}};
+    // lat 模式输出各接口形态时延列；bw 模式输出带宽列
+    std::vector<std::vector<std::string>> csv_data;
+    if (metric == perftest::PERF_METRIC_LAT) {
+        csv_data = {
+            {"DataSize/B", "Npus", "Blocks", "UBsize/KB", "PlainLat/us", "QpLat/us", "DeferLat/us", "SubmitLat/us"}};
+    } else {
+        csv_data = {
+            {"DataSize/B", "Npus", "Blocks", "UBsize/KB", "Bandwidth/GB/s", "Bandwidth/GiB/s", "CoreMaxTime/us"}};
+    }
 
     int status = 0;
 #define RDMA_TEST_IMPL_OP(type)                                                                                     \

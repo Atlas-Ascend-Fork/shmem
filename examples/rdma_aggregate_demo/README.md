@@ -15,7 +15,7 @@
 
 ## 支持范围和约束
 
-- 当前只支持 Ascend950 `XSCALE`后端。
+- 支持 `XSCALE`（Ascend950）和 `IN_DIE`（默认后端）两种 RDMA 后端，`HNS_1825` 不支持 aggregate。
 - 示例固定使用 2 个 PE、1 个 AI Core 和 QP0。
 - 每个 aggregate batch 必须复用同一个 submit state、peer、操作方向、UB buffer 和 `sync_id`。
 - 4 defer + 1 submit 的 Put 指针 batch 包含 5 条操作，需要 704B UB workspace，满足 `64 + 128 * n` 的容量要求。
@@ -34,11 +34,14 @@
 在项目根目录执行：
 
 ```bash
+# A2/A3 IN_DIE
+bash scripts/build.sh -enable_rdma -examples
+
 # XSCALE
 bash scripts/build.sh -soc_type Ascend950 -enable_rdma -rdma_backend XSCALE -examples
 ```
 
-`rdma_aggregate_demo` 只会在 `XSCALE` 后端配置下加入 examples 构建目标。
+`rdma_aggregate_demo` 在 `IN_DIE` 和 `XSCALE` 后端配置下加入 examples 构建目标，`HNS_1825` 后端下不构建。
 
 ## 运行
 
