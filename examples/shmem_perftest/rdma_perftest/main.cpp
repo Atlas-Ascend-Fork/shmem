@@ -18,6 +18,7 @@
 #include "utils.h"
 #include "perftest_common_types.h"
 #include "mte_perftest_common.h"
+#include "perftest_error_check.h"
 
 constexpr int UB_ALIGN_SIZE = 64;
 
@@ -25,48 +26,6 @@ constexpr int UB_ALIGN_SIZE = 64;
 // timing 总槽位 = 2 PE × 4 接口，布局 slot = pe * 4 + iface
 constexpr int LAT_IFACE_COUNT = 4;
 constexpr int LAT_TIMING_SLOT_COUNT = LAT_IFACE_COUNT * 2;
-
-#define CHECK_ACL_GOTO(call, ret_var, label)                        \
-    do {                                                            \
-        auto _ret = (call);                                         \
-        if (_ret != 0) {                                            \
-            std::cerr << #call << " failed: " << _ret << std::endl; \
-            ret_var = _ret;                                         \
-            goto label;                                             \
-        }                                                           \
-    } while (0)
-
-#define CHECK_SHMEM_GOTO(call, ret_var, label)                      \
-    do {                                                            \
-        auto _ret = (call);                                         \
-        if (_ret != 0) {                                            \
-            std::cerr << #call << " failed: " << _ret << std::endl; \
-            ret_var = _ret;                                         \
-            goto label;                                             \
-        }                                                           \
-    } while (0)
-
-#define CHECK_ACL_CLEANUP(call, ret_var)                            \
-    do {                                                            \
-        auto _ret = (call);                                         \
-        if (_ret != 0) {                                            \
-            std::cerr << #call << " failed: " << _ret << std::endl; \
-            if (ret_var == 0) {                                     \
-                ret_var = _ret;                                     \
-            }                                                       \
-        }                                                           \
-    } while (0)
-
-#define CHECK_SHMEM_CLEANUP(call, ret_var)                          \
-    do {                                                            \
-        auto _ret = (call);                                         \
-        if (_ret != 0) {                                            \
-            std::cerr << #call << " failed: " << _ret << std::endl; \
-            if (ret_var == 0) {                                     \
-                ret_var = _ret;                                     \
-            }                                                       \
-        }                                                           \
-    } while (0)
 
 int g_npus = 8;
 const char* ipport;
@@ -159,13 +118,13 @@ int test_rdma_perf_test_impl(
     int ret = 0;
     uint64_t fftsAddr = 0;
 
-    CHECK_ACL_GOTO(aclInit(nullptr), ret, cleanup);
+    PERFTEST_CHECK_GOTO(aclInit(nullptr), ret, cleanup);
     acl_initialized = true;
 
-    CHECK_ACL_GOTO(aclrtSetDevice(device_id), ret, cleanup);
+    PERFTEST_CHECK_GOTO(aclrtSetDevice(device_id), ret, cleanup);
     device_set = true;
 
-    CHECK_ACL_GOTO(aclrtCreateStream(&stream), ret, cleanup);
+    PERFTEST_CHECK_GOTO(aclrtCreateStream(&stream), ret, cleanup);
     stream_created = true;
 
     fftsAddr = util_get_ffts_config();
@@ -176,9 +135,9 @@ int test_rdma_perf_test_impl(
     // The process-wide QP setting is only consumed by the RDMA v2 backend.
     // Legacy RDMA (used on A2/indie) rejects this API, even for the default
     // single-QP configuration, so do not call it in that build.
-    CHECK_SHMEM_GOTO(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_ROCE, static_cast<uint32_t>(qp_num)), ret, cleanup);
+    PERFTEST_CHECK_GOTO(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_ROCE, static_cast<uint32_t>(qp_num)), ret, cleanup);
 #endif
-    CHECK_SHMEM_GOTO(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes), ret, cleanup);
+    PERFTEST_CHECK_GOTO(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes), ret, cleanup);
     shmem_initialized = true;
 
     for (int exponent = min_exponent; exponent <= max_exponent; exponent++) {
@@ -205,7 +164,7 @@ int test_rdma_perf_test_impl(
 
         {
             std::vector<int64_t> zero(LAT_TIMING_SLOT_COUNT, 0);
-            CHECK_ACL_GOTO(
+            PERFTEST_CHECK_GOTO(
                 aclrtMemcpy(
                     timing_out_ptr, sizeof(int64_t) * LAT_TIMING_SLOT_COUNT, zero.data(),
                     sizeof(int64_t) * LAT_TIMING_SLOT_COUNT, ACL_MEMCPY_HOST_TO_DEVICE),
@@ -221,10 +180,10 @@ int test_rdma_perf_test_impl(
             src_input[i] = (T)(pe_id + 10);
             dst_input[i] = (T)(pe_id + 100);
         }
-        CHECK_ACL_GOTO(
+        PERFTEST_CHECK_GOTO(
             aclrtMemcpy(src_ptr, alloc_datasize, src_input.data(), alloc_datasize, ACL_MEMCPY_HOST_TO_DEVICE), ret,
             cleanup);
-        CHECK_ACL_GOTO(
+        PERFTEST_CHECK_GOTO(
             aclrtMemcpy(dst_ptr, alloc_datasize, dst_input.data(), alloc_datasize, ACL_MEMCPY_HOST_TO_DEVICE), ret,
             cleanup);
 
@@ -232,7 +191,7 @@ int test_rdma_perf_test_impl(
             block_dim, stream, fftsAddr, (uint8_t*)dst_ptr, (uint8_t*)src_ptr, trans_size, static_cast<int>(test_mode),
             static_cast<int>(data_type_enum), ub_size_b, loop_count, static_cast<int>(metric), batch, sync_id, qp_num,
             qp_index, (uint8_t*)timing_out_ptr);
-        CHECK_ACL_GOTO(aclrtSynchronizeStream(stream), ret, cleanup);
+        PERFTEST_CHECK_GOTO(aclrtSynchronizeStream(stream), ret, cleanup);
 
         bool is_put_get_mode =
             (test_mode == perftest::TEST_MODE_RDMA_PUT || test_mode == perftest::TEST_MODE_RDMA_BI_PUT ||
@@ -241,7 +200,7 @@ int test_rdma_perf_test_impl(
             // Read back timing output: [0]=PE0_time(forward), [1]=PE1_time(reverse)
             // After cross-PE exchange in kernel, both PEs have both values.
             std::vector<int64_t> timing_host(LAT_TIMING_SLOT_COUNT, 0);
-            CHECK_ACL_GOTO(
+            PERFTEST_CHECK_GOTO(
                 aclrtMemcpy(
                     timing_host.data(), sizeof(int64_t) * LAT_TIMING_SLOT_COUNT, timing_out_ptr,
                     sizeof(int64_t) * LAT_TIMING_SLOT_COUNT, ACL_MEMCPY_DEVICE_TO_HOST),
@@ -355,10 +314,10 @@ int test_rdma_perf_test_impl(
 
         std::vector<T> dst_host(alloc_elements, 0);
         std::vector<T> src_host(alloc_elements, 0);
-        CHECK_ACL_GOTO(
+        PERFTEST_CHECK_GOTO(
             aclrtMemcpy(dst_host.data(), alloc_datasize, dst_ptr, alloc_datasize, ACL_MEMCPY_DEVICE_TO_HOST), ret,
             cleanup);
-        CHECK_ACL_GOTO(
+        PERFTEST_CHECK_GOTO(
             aclrtMemcpy(src_host.data(), alloc_datasize, src_ptr, alloc_datasize, ACL_MEMCPY_DEVICE_TO_HOST), ret,
             cleanup);
 
@@ -408,7 +367,7 @@ int test_rdma_perf_test_impl(
         dst_ptr = nullptr;
         src_ptr = nullptr;
         timing_out_ptr = nullptr;
-        CHECK_ACL_GOTO(aclrtSynchronizeStream(stream), ret, cleanup);
+        PERFTEST_CHECK_GOTO(aclrtSynchronizeStream(stream), ret, cleanup);
     }
 
     // Summary: report any verification failures across all exponents
@@ -426,16 +385,16 @@ cleanup:
         timing_out_ptr = nullptr;
     }
     if (shmem_initialized) {
-        CHECK_SHMEM_CLEANUP(aclshmem_finalize(), ret);
+        PERFTEST_CHECK_CLEANUP(aclshmem_finalize(), ret);
     }
     if (stream_created) {
-        CHECK_ACL_CLEANUP(aclrtDestroyStream(stream), ret);
+        PERFTEST_CHECK_CLEANUP(aclrtDestroyStream(stream), ret);
     }
     if (device_set) {
-        CHECK_ACL_CLEANUP(aclrtResetDevice(device_id), ret);
+        PERFTEST_CHECK_CLEANUP(aclrtResetDevice(device_id), ret);
     }
     if (acl_initialized) {
-        CHECK_ACL_CLEANUP(aclFinalize(), ret);
+        PERFTEST_CHECK_CLEANUP(aclFinalize(), ret);
     }
     return ret;
 }

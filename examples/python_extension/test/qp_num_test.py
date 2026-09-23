@@ -20,7 +20,7 @@ from shmem._soc import select_backend
 
 G_IP_PORT = "tcp://127.0.0.1:8669"
 LOCAL_MEM_SIZE = 1024 * 1024 * 1024
-MAX_QP_NUM = 32
+MAX_QP_NUM = 56
 
 
 def assert_nonzero(ret, description):

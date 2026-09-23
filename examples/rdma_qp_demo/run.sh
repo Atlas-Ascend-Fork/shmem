@@ -46,7 +46,7 @@ done
 for value in "${PES}" "${FPE}" "${GNPUS}" "${FNPU}" "${QP}"; do
     [[ "${value}" =~ ^[0-9]+$ ]] || usage
 done
-if ((PES < 2 || GNPUS < 1 || QP < 1 || QP > 32 || FPE + GNPUS > PES)); then
+if ((PES < 2 || GNPUS < 1 || QP < 1 || QP > 56 || FPE + GNPUS > PES)); then
     usage
 fi
 case "${OP}" in

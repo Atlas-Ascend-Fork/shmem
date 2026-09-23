@@ -775,7 +775,7 @@ __aicore__ inline void rdma_perf_test_get_impl(
 }
 
 #define DEFINE_RDMA_PERF_KERNEL_FOR_TYPE(type_name, cpp_type)                                                       \
-    extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void rdma_perf_test_##type_name##_put(           \
+    extern "C" __global__ __vector__ void rdma_perf_test_##type_name##_put(                                         \
         uint64_t fftsAddr, GM_ADDR dst_gva, GM_ADDR src_gva, int elements, perftest::rdma_mode_t test_mode,         \
         int ub_size_b, int loop_count, int metric, int batch, uint32_t sync_id, uint32_t qp_num, int qp_index,      \
         GM_ADDR timing_out_gva)                                                                                     \
@@ -784,7 +784,7 @@ __aicore__ inline void rdma_perf_test_get_impl(
             fftsAddr, dst_gva, src_gva, elements, test_mode, ub_size_b, loop_count, metric, batch, sync_id, qp_num, \
             qp_index, timing_out_gva);                                                                              \
     }                                                                                                               \
-    extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void rdma_perf_test_##type_name##_get(           \
+    extern "C" __global__ __vector__ void rdma_perf_test_##type_name##_get(                                         \
         uint64_t fftsAddr, GM_ADDR dst_gva, GM_ADDR src_gva, int elements, perftest::rdma_mode_t test_mode,         \
         int ub_size_b, int loop_count, int metric, int batch, uint32_t sync_id, uint32_t qp_num, int qp_index,      \
         GM_ADDR timing_out_gva)                                                                                     \

@@ -19,6 +19,7 @@
 #include "utils.h"
 #include "perftest_common_types.h"
 #include "mte_perftest_common.h"
+#include "perftest_error_check.h"
 
 int g_npus = 8;
 const char* ipport;
@@ -63,37 +64,54 @@ int test_udma_perf_test_impl(
     perftest::udma_mode_t test_mode, perftest::perf_data_type_t data_type_enum, int prof_pe, int ub_size_kb,
     perftest::perf_metric_t metric, int batch, int qp_count, std::vector<std::vector<std::string>>& csv_data)
 {
+    static const char* kFunc = "test_udma_perf_test_impl";
+    const uint32_t block_dim =
+        (test_mode == perftest::TEST_MODE_UDMA_PUT_SIGNAL) ? 1U : static_cast<uint32_t>(qp_count);
     int32_t device_id = (pe_id % g_npus + f_npu);
-    int status = 0;
+    int ret = 0;
     aclrtStream stream = nullptr;
-
-    status = aclInit(nullptr);
-    status = aclrtSetDevice(device_id);
-    status = aclrtCreateStream(&stream);
-
+    void* sig_ptr = nullptr;
+    void* dst_ptr = nullptr;
+    void* src_ptr = nullptr;
     aclshmemx_init_attr_t attributes;
+    bool acl_initialized = false;
+    bool device_set = false;
+    bool stream_created = false;
+    bool shmem_initialized = false;
+    int frame_id = 0;
+    int executed_points = 0;
+
+    PERFTEST_CHECK_GOTO(aclInit(nullptr), ret, cleanup);
+    acl_initialized = true;
+
+    PERFTEST_CHECK_GOTO(aclrtSetDevice(device_id), ret, cleanup);
+    device_set = true;
+
+    PERFTEST_CHECK_GOTO(aclrtCreateStream(&stream), ret, cleanup);
+    stream_created = true;
+
     test_set_attr(pe_id, n_pes, local_mem_size, ipport, default_flag_uid, &attributes);
     attributes.option_attr.data_op_engine_type = ACLSHMEM_DATA_OP_UDMA;
     if (qp_count > 1) {
-        status = aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, static_cast<uint32_t>(qp_count));
-        if (status != 0) {
-            std::cerr << "aclshmemx_set_qp_num failed, qp_count=" << qp_count << ", status=" << status << std::endl;
-            return status;
-        }
+        PERFTEST_CHECK_GOTO(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, static_cast<uint32_t>(qp_count)), ret, cleanup);
     }
-    status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes);
+    PERFTEST_CHECK_GOTO(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes), ret, cleanup);
+    shmem_initialized = true;
 
-    void* sig_ptr = nullptr;
     if (test_mode == perftest::TEST_MODE_UDMA_PUT_SIGNAL) {
         sig_ptr = aclshmem_malloc(n_pes * sizeof(uint64_t));
+        if (sig_ptr == nullptr) {
+            std::cerr << "[ERROR] [" << kFunc << "] aclshmem_malloc failed for signal words" << std::endl;
+            ret = -1;
+            goto cleanup;
+        }
         std::vector<uint64_t> sig_init(n_pes, 0);
-        aclrtMemcpy(
-            sig_ptr, n_pes * sizeof(uint64_t), sig_init.data(), n_pes * sizeof(uint64_t), ACL_MEMCPY_HOST_TO_DEVICE);
+        PERFTEST_CHECK_GOTO(
+            aclrtMemcpy(
+                sig_ptr, n_pes * sizeof(uint64_t), sig_init.data(), n_pes * sizeof(uint64_t),
+                ACL_MEMCPY_HOST_TO_DEVICE),
+            ret, cleanup);
     }
-
-    uint32_t block_dim = (test_mode == perftest::TEST_MODE_UDMA_PUT_SIGNAL) ? 1U : static_cast<uint32_t>(qp_count);
-    int frame_id = 0;
-    int executed_points = 0;
     for (int exponent = min_exponent; exponent <= max_exponent; exponent++) {
         const uint64_t datasize = 1ULL << exponent;
         const uint64_t total_datasize = datasize * static_cast<uint64_t>(qp_count);
@@ -109,8 +127,13 @@ int test_udma_perf_test_impl(
         const int elements = static_cast<int>(elements_per_qp);
         const size_t total_elements = static_cast<size_t>(elements_per_qp) * static_cast<size_t>(qp_count);
         executed_points++;
-        void* dst_ptr = aclshmem_malloc(total_datasize);
-        void* src_ptr = aclshmem_malloc(total_datasize);
+        dst_ptr = aclshmem_malloc(total_datasize);
+        src_ptr = aclshmem_malloc(total_datasize);
+        if (dst_ptr == nullptr || src_ptr == nullptr) {
+            std::cerr << "[ERROR] [" << kFunc << "] aclshmem_malloc failed, size=" << total_datasize << std::endl;
+            ret = -1;
+            goto cleanup;
+        }
 
         std::vector<T> src_input(total_elements, 0);
         std::vector<T> dst_input(total_elements, 0);
@@ -118,15 +141,19 @@ int test_udma_perf_test_impl(
             src_input[i] = (T)(pe_id + 10);
             dst_input[i] = (T)(pe_id + 100);
         }
-        status = aclrtMemcpy(src_ptr, total_datasize, src_input.data(), total_datasize, ACL_MEMCPY_HOST_TO_DEVICE);
-        status = aclrtMemcpy(dst_ptr, total_datasize, dst_input.data(), total_datasize, ACL_MEMCPY_HOST_TO_DEVICE);
+        PERFTEST_CHECK_GOTO(
+            aclrtMemcpy(src_ptr, total_datasize, src_input.data(), total_datasize, ACL_MEMCPY_HOST_TO_DEVICE), ret,
+            cleanup);
+        PERFTEST_CHECK_GOTO(
+            aclrtMemcpy(dst_ptr, total_datasize, dst_input.data(), total_datasize, ACL_MEMCPY_HOST_TO_DEVICE), ret,
+            cleanup);
 
         uint64_t signal_base = static_cast<uint64_t>(frame_id) * 1000000ULL + 1;
         launch_udma_perf_kernel(
             block_dim, stream, (uint8_t*)dst_ptr, (uint8_t*)src_ptr, (uint8_t*)sig_ptr, elements, frame_id,
             static_cast<int>(test_mode), static_cast<int>(data_type_enum), ub_size_kb, prof_pe, loop_count, signal_base,
             static_cast<int>(metric), batch, qp_count);
-        status = aclrtSynchronizeStream(stream);
+        PERFTEST_CHECK_GOTO(aclrtSynchronizeStream(stream), ret, cleanup);
 
         bool verify_success = true;
         auto compare_values = [&](const T* values, T expected, size_t count, const char* value_label,
@@ -143,8 +170,12 @@ int test_udma_perf_test_impl(
 
         std::vector<T> dst_host(total_elements, 0);
         std::vector<T> src_host(total_elements, 0);
-        status = aclrtMemcpy(dst_host.data(), total_datasize, dst_ptr, total_datasize, ACL_MEMCPY_DEVICE_TO_HOST);
-        status = aclrtMemcpy(src_host.data(), total_datasize, src_ptr, total_datasize, ACL_MEMCPY_DEVICE_TO_HOST);
+        PERFTEST_CHECK_GOTO(
+            aclrtMemcpy(dst_host.data(), total_datasize, dst_ptr, total_datasize, ACL_MEMCPY_DEVICE_TO_HOST), ret,
+            cleanup);
+        PERFTEST_CHECK_GOTO(
+            aclrtMemcpy(src_host.data(), total_datasize, src_ptr, total_datasize, ACL_MEMCPY_DEVICE_TO_HOST), ret,
+            cleanup);
 
         int peer_pe = (pe_id + 1) % n_pes;
         if (test_mode == perftest::TEST_MODE_UDMA_PUT) {
@@ -183,9 +214,11 @@ int test_udma_perf_test_impl(
                     verify_success = false;
                 }
                 std::vector<uint64_t> sig_init(n_pes, 0);
-                aclrtMemcpy(
-                    sig_init.data(), n_pes * sizeof(uint64_t), sig_ptr, n_pes * sizeof(uint64_t),
-                    ACL_MEMCPY_DEVICE_TO_HOST);
+                PERFTEST_CHECK_GOTO(
+                    aclrtMemcpy(
+                        sig_init.data(), n_pes * sizeof(uint64_t), sig_ptr, n_pes * sizeof(uint64_t),
+                        ACL_MEMCPY_DEVICE_TO_HOST),
+                    ret, cleanup);
                 uint64_t expected_sig =
                     signal_base + static_cast<uint64_t>(perftest::PERFTEST_WARMUP_ITERS + loop_count - 1);
                 if (sig_init[prof_pe] != expected_sig) {
@@ -200,6 +233,9 @@ int test_udma_perf_test_impl(
             std::cout << "[Verification] SUCCESS" << std::endl;
         } else {
             std::cout << "[Verification] FAILED" << std::endl;
+            if (ret == 0) {
+                ret = ACLSHMEM_INVALID_VALUE;
+            }
         }
 
         aclshmemx_get_prof(&out_profs, false);
@@ -208,8 +244,10 @@ int test_udma_perf_test_impl(
             csv_data);
 
         aclshmem_free(dst_ptr);
+        dst_ptr = nullptr;
         aclshmem_free(src_ptr);
-        status = aclrtSynchronizeStream(stream);
+        src_ptr = nullptr;
+        PERFTEST_CHECK_GOTO(aclrtSynchronizeStream(stream), ret, cleanup);
 
         frame_id++;
         if (frame_id >= ACLSHMEM_CYCLE_PROF_FRAME_CNT) {
@@ -219,17 +257,33 @@ int test_udma_perf_test_impl(
     }
     aclshmemx_get_prof(nullptr, true);
 
+cleanup:
+    if (dst_ptr != nullptr) {
+        aclshmem_free(dst_ptr);
+    }
+    if (src_ptr != nullptr) {
+        aclshmem_free(src_ptr);
+    }
     if (sig_ptr != nullptr) {
         aclshmem_free(sig_ptr);
     }
-    if (executed_points == 0) {
-        std::cerr << "Error: no data size in the exponent range is valid for dtype size and kernel limits" << std::endl;
+    if (shmem_initialized) {
+        PERFTEST_CHECK_CLEANUP(aclshmem_finalize(), ret);
     }
-    status = aclshmem_finalize();
-    status = aclrtDestroyStream(stream);
-    status = aclrtResetDevice(device_id);
-    status = aclFinalize();
-    return (executed_points > 0) ? 0 : 1;
+    if (stream_created) {
+        PERFTEST_CHECK_CLEANUP(aclrtDestroyStream(stream), ret);
+    }
+    if (device_set) {
+        PERFTEST_CHECK_CLEANUP(aclrtResetDevice(device_id), ret);
+    }
+    if (acl_initialized) {
+        PERFTEST_CHECK_CLEANUP(aclFinalize(), ret);
+    }
+    if (ret == 0 && executed_points == 0) {
+        std::cerr << "Error: no data size in the exponent range is valid for dtype size and kernel limits" << std::endl;
+        ret = 1;
+    }
+    return ret;
 }
 
 int main(int argc, char* argv[])
@@ -357,7 +411,7 @@ int main(int argc, char* argv[])
         return 1;
     }
     if (metric == perftest::PERF_METRIC_BW && batch > 1 && strcmp(test_type, "put_signal") != 0) {
-        constexpr uint64_t UDMA_SQ_RING_DEPTH = 32768;  // UDMA SQ ring depth in WQEs.
+        constexpr uint64_t UDMA_SQ_RING_DEPTH = 32768;  // UDMA SQ ring capacity in 64B WQEBBs (8192 WQEs x 4 BB).
         constexpr uint64_t UDMA_WQE_STAGING_BYTES = 64; // One staged data-mover WQE.
         const uint64_t effective_batch = static_cast<uint64_t>(batch > loop_count ? loop_count : batch);
         const uint64_t ub_bytes = ub_size_kb > 0 ? static_cast<uint64_t>(ub_size_kb) * 1024ULL : 0ULL;

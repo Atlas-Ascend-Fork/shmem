@@ -18,7 +18,7 @@
 本样例的 RDMA 网卡、驱动、Ascend950 CANN 版本及 `IBV_EXTEND_DRIVERS` 配置要求，统一参考 [rdma_demo 环境要求](../rdma_demo/README.md#环境要求)。
 
 - 本样例支持 Ascend950 平台的 XSCALE 和 HNS_1825 RDMA 后端。
-- 所有 PE 必须配置相同的 QP 数量，取值范围为 `[1, 32]`。
+- 所有 PE 必须配置相同的 QP 数量，取值范围为 `[1, 56]`。
 - 每个 QP 固定处理 512 KiB。XSCALE 聚合模式将分片均分为 8 个 chunk，使用 1088B UB workspace。
 
 ## 样例实现
@@ -108,6 +108,6 @@ bash examples/rdma_qp_demo/run.sh -pes 4 -fpe 2 -gnpus 2 -fnpu 0 -qp 4 \
 | `-fpe` | `0` | 当前机器启动的首个全局 PE |
 | `-gnpus` | `2` | 当前机器启动的 NPU/PE 进程数量 |
 | `-fnpu` | `0` | 当前机器使用的首个逻辑 NPU 编号 |
-| `-qp` | `2` | 每个对端 PE 的 QP 数，范围 1~32 |
+| `-qp` | `2` | 每个对端 PE 的 QP 数，范围 1~56 |
 | `-op` | `all` | `put`、`get`、`aggregate_put`、`aggregate_get` 或 `all`；聚合选项仅 XSCALE 支持 |
 | `-ipport` | 动态本机端口 | SHMEM 初始化地址 |

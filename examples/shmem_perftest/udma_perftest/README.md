@@ -50,14 +50,14 @@ cd examples/shmem_perftest/udma_perftest/
 |------|------|------|--------|
 | `--test-type <type>` | `-t <type>` | 测试类型 (put / bi_put / get / bi_get / put_signal / all) | `put` |
 | `--datatype <type>` | `-d <type>` | 数据类型 (float / int8 / int16 / int32 / int64 / uint8 / uint16 / uint32 / uint64 / char / all) | `float` |
-| `--block-size <size>` | `-b <size>` | UDMA 使用的 block 数，同时作为 QP 数（一个 block 对应一个 QP） | 1 |
+| `--block-size <size>` | `-b <size>` | UDMA 使用的 block 数，同时作为 QP 数（一个 block 对应一个 QP），范围 `[1, 56]` | 1 |
 | `--block-range <min> <max>` | - | UDMA 兼容解析但不参与测试；使用 `-b` 指定 block/QP 数 | 1 1 |
 | `--exponent <exponent>` | `-e <exponent>` | 单个 QP 的数据量幂数 (2^exponent 字节)；多 QP 时总数据量为该值乘 QP 数 | - |
 | `--exponent-range <min> <max>` | - | 单个 QP 的数据量幂数范围 | 3 17 |
 | `--loop-count <count>` | - | 循环次数 | 1000 |
 | `--ub-size <size>` | - | UB size (KB)；本 perftest 传给低阶 UDMA 接口并写入 CSV。高阶 UDMA RMA 默认 MTE staging 的 UB 配置要求至少 128 B | 16 |
 | `--metric <bw\|lat>` | - | 性能口径：`bw` 测带宽，`lat` 测单次 put_nbi 下发延时（仅 `-t put` 支持） | bw |
-| `--batch <N>` | - | BW 测试批大小：`0` 或 `1` 使用普通 NBI；`N > 1` 时每批前 `N-1` 个操作使用 `defer`，最后一个使用 `submit`，随后调用 `quiet`。每个 WQE 在 UB 中占用 64 B，要求有效 batch 小于 32768 且 `N * 64 <= --ub-size * 1024`；`lat` 模式忽略此参数。 | 0 |
+| `--batch <N>` | - | BW 测试批大小：`0` 或 `1` 使用普通 NBI；`N > 1` 时每批前 `N-1` 个操作使用 `defer`，最后一个使用 `submit`，随后调用 `quiet`。每个 WQE 在 UB 中占用 64 B，要求有效 batch 小于 4096 且 `N * 64 <= --ub-size * 1024`；`lat` 模式忽略此参数。 | 0 |
 | `-pes <size>` | - | PE 数量 | 2 |
 | `-ipport <ip:port>` | - | 通信地址 | tcp://127.0.0.1:8768 |
 | `-gnpus <num>` | - | NPU 数量 | 2 |
@@ -167,7 +167,7 @@ pe: 0 size(per QP): 1024B, total: 1024B frame_id: 0
 ## 已知约束
 
 1. UDMA 头文件 `include/device/gm2gm/engine/shmem_device_udma.h` 注明：concurrent RMA/AMO operations to the same PE are not supported。单 QP 模式保持 `block_dim=1`；多 QP 模式由每个 block 独占一个显式 QP，避免多个 block 争用同一个 SQ。
-2. UDMA 聚合 action 要求 `PIPE_MTE3`。当 `batch > 1` 时，每批 WQE 数必须小于 32768（SQ ring depth），UB scratch 至少需要 `64 * batch` 字节；多 QP 依赖的 QP 专有接口要求 `ACLSHMEM_RELAY_SUPPORT=OFF`，仅直连 UDMA build 支持。
+2. UDMA 聚合 action 要求 `PIPE_MTE3`。当 `batch > 1` 时，每批 WQE 数必须小于 4096（UB 上限 256 KB，每 WQE 占 64 B），UB scratch 至少需要 `64 * batch` 字节；多 QP 依赖的 QP 专有接口要求 `ACLSHMEM_RELAY_SUPPORT=OFF`，仅直连 UDMA build 支持。
 3. UDMA 仅在 Ascend950 编译期使能；在其他 SOC 上 kernel 会通过 `aclshmemi_kernel_abort` 报错退出。
 4. **不支持 D2H / `HOST_SIDE` (DRAM)**：UDMA 引擎当前未对 Host 侧 DRAM 提供 RMA 路径，仅测 HBM。
 5. 原子操作 (`aclshmemx_udma_atomic_add` 等) 不在本 perftest 范围。

@@ -29,7 +29,7 @@ enum class DemoOperation : int32_t {
  *
  * Host 启动的 block 数必须等于 QP 数，使每个 QP 只有一个 AIV 提交者。
  */
-extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void udma_qp_demo_kernel(
+extern "C" __global__ __vector__ void udma_qp_demo_kernel(
     GM_ADDR symmetric, GM_ADDR local_buffer, GM_ADDR signal_words, uint64_t elements, int32_t peer, int32_t operation)
 {
     const uint32_t qp_idx = AscendC::GetBlockIdx();

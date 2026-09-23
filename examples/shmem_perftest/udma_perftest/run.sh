@@ -166,8 +166,8 @@ if ! [[ "$BATCH" =~ ^[0-9]+$ ]]; then
     echo "错误: --batch 必须是非负整数 (got '$BATCH')"
     exit 1
 fi
-if ! [[ "$BLOCK_SIZE_INPUT" =~ ^[0-9]+$ ]] || [ "$BLOCK_SIZE_INPUT" -lt 1 ] || [ "$BLOCK_SIZE_INPUT" -gt 32 ]; then
-    echo "错误: --block-size 必须是 [1,32] 内的整数"
+if ! [[ "$BLOCK_SIZE_INPUT" =~ ^[0-9]+$ ]] || [ "$BLOCK_SIZE_INPUT" -lt 1 ] || [ "$BLOCK_SIZE_INPUT" -gt 56 ]; then
+    echo "错误: --block-size 必须是 [1,56] 内的整数"
     exit 1
 fi
 if [[ "$BLOCK_SIZE_INPUT" -gt 1 && ( "$TEST_TYPE" == "put_signal" || "$TEST_TYPE" == "all" ) ]]; then

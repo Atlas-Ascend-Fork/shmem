@@ -31,7 +31,7 @@ constexpr uint16_t ACLSHMEM_UNIQUE_ID_INNER_LEN = 124;
 /// \brief Default timeout value (in seconds) for ACLSHMEM operations
 constexpr int DEFAULT_TIMEOUT = 120;
 /// \brief Maximum number of QPs per peer connection.
-constexpr uint32_t ACLSHMEM_MAX_QP_NUM = 32;
+constexpr uint32_t ACLSHMEM_MAX_QP_NUM = 56;
 
 /**@} */
 

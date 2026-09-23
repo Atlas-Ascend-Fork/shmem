@@ -1506,7 +1506,7 @@
     |参数/返回值|方向|含义|
     |-|-|-|
     |engine|[in]|数据操作引擎。该接口仅支持 Ascend950；``OpEngineType.UDMA`` 在 Ascend950 上可用，``OpEngineType.ROCE`` 要求 XSCALE 或 HNS_1825 后端|
-    |qp_num|[in]|每个对端连接的 QP 数量，取值范围为 ``[1, ACLSHMEM_MAX_QP_NUM]``（当前最大值为 32）|
+    |qp_num|[in]|每个对端连接的 QP 数量，取值范围为 ``[1, ACLSHMEM_MAX_QP_NUM]``（当前最大值为 56）|
     |返回值|[out]|成功返回 ``0``；参数非法返回 ``ACLSHMEM_INVALID_VALUE``；引擎或当前配置不支持时返回 ``ACLSHMEM_NOT_SUPPORTED``|
 
     配置在任一 ACLSHMEM 实例初始化后被冻结；最后一个实例 ``aclshmem_finalize`` 后，QP 数量重置为 1。启用 UDMA relay（``ACLSHMEM_RELAY_SUPPORT=ON``）时仅支持 ``qp_num == 1``，多 QP 配置会在初始化阶段返回 ``ACLSHMEM_NOT_SUPPORTED``。

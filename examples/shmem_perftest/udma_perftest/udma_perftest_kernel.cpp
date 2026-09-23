@@ -272,7 +272,7 @@ __aicore__ inline void udma_perf_test_put_signal_impl(
 }
 
 #define DEFINE_UDMA_PERF_KERNEL_FOR_TYPE(type_name, cpp_type)                                                         \
-    extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void udma_perf_test_##type_name##_put(             \
+    extern "C" __global__ __vector__ void udma_perf_test_##type_name##_put(                                           \
         GM_ADDR dst_gva, GM_ADDR src_gva, int elements, int32_t frame_id, perftest::udma_mode_t test_mode,            \
         int ub_size_kb, int64_t prof_pe_val, int loop_count, int metric, int batch, int qp_count)                     \
     {                                                                                                                 \
@@ -284,7 +284,7 @@ __aicore__ inline void udma_perf_test_put_signal_impl(
                 dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kb, prof_pe_val, loop_count, metric, batch); \
         }                                                                                                             \
     }                                                                                                                 \
-    extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void udma_perf_test_##type_name##_get(             \
+    extern "C" __global__ __vector__ void udma_perf_test_##type_name##_get(                                           \
         GM_ADDR dst_gva, GM_ADDR src_gva, int elements, int32_t frame_id, perftest::udma_mode_t test_mode,            \
         int ub_size_kb, int64_t prof_pe_val, int loop_count, int batch, int qp_count)                                 \
     {                                                                                                                 \
@@ -296,7 +296,7 @@ __aicore__ inline void udma_perf_test_put_signal_impl(
                 dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kb, prof_pe_val, loop_count, batch);         \
         }                                                                                                             \
     }                                                                                                                 \
-    extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void udma_perf_test_##type_name##_put_signal(      \
+    extern "C" __global__ __vector__ void udma_perf_test_##type_name##_put_signal(                                    \
         GM_ADDR dst_gva, GM_ADDR src_gva, GM_ADDR sig_gva, int elements, int32_t frame_id, int64_t prof_pe_val,       \
         int loop_count, uint64_t signal_base, int batch)                                                              \
     {                                                                                                                 \

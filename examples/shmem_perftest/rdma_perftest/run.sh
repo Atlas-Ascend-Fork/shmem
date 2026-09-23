@@ -147,7 +147,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --ub-size <size>                UB size(B), 192B~131136B, 自动对齐；聚合路径会警告并自动修正到最小值 (默认 192)"
             echo "  --batch <count>                 连续发起多少次操作后等待完成；bw 聚合路径自动修正到可运行值；lat 下作为聚合接口的窗口大小（默认自动 100），lat 会遍历所有接口形态 (默认 0)"
             echo "  --sync-id <id>                  显式传给 Put、Get、Quiet 的同步 ID (默认 0)"
-            echo "  -q|--qp|--qp-count <num>        每个 PE 对的 QP 个数，范围 1~32；XSCALE 和 HNS_1825 支持 (默认 1)"
+            echo "  -q|--qp|--qp-count <num>        每个 PE 对的 QP 个数，范围 1~56；XSCALE 和 HNS_1825 支持 (默认 1)"
             echo "  -i|--qp-index <index>           固定使用的 QP 编号；-1 表示多 QP 并行模式自动分配 (默认 -1)"
             echo "  --metric <bw|lat>              性能指标: bw=带宽, lat=接口延迟 (默认 bw)"
             echo "  -pes <size>                     PE 数量 (目前强制为 2)"
@@ -293,8 +293,8 @@ if [[ "$MIN_EXPONENT" -gt "$MAX_EXPONENT" ]]; then
 fi
 
 # 验证 QP_NUM
-if [[ "$QP_NUM" -lt "1" || "$QP_NUM" -gt "32" ]]; then
-    echo "错误: QP_NUM 必须在 1~32 范围内"
+if [[ "$QP_NUM" -lt "1" || "$QP_NUM" -gt "56" ]]; then
+    echo "错误: QP_NUM 必须在 1~56 范围内"
     exit 1
 fi
 

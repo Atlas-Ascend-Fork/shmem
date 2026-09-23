@@ -75,7 +75,7 @@ __aicore__ inline void AggregateGet(
  * @note @p elements must be divisible by the QP count. XSCALE aggregate operations additionally require each QP
  * slice to be divisible by AGGREGATE_OP_COUNT.
  */
-extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void rdma_qp_demo_kernel(
+extern "C" __global__ __vector__ void rdma_qp_demo_kernel(
     uint64_t ffts_addr, GM_ADDR symmetric, uint64_t elements, int32_t peer, int32_t operation, uint32_t sync_id)
 {
     util_set_ffts_config(ffts_addr);
