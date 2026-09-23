@@ -16,7 +16,7 @@
 
 Incorrect sample code:
 
-The following uses `allgather_matmul` in the `example` directory as an example to describe a simple scenario of asymmetric shared memory allocation:
+The following uses `sdma` in the `examples` directory as an example to describe a simple scenario of asymmetric shared memory allocation:
 
 ```cpp
 // Inappropriate calling of aclshmem_malloc
