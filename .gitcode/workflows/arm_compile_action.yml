@@ -51,7 +51,7 @@ jobs:
             export WORKSPACE=${{ steps.process_checkout.outputs.path }}
             cd ${{ steps.process_checkout.outputs.path }}
             export task_name=${{ inputs.task_name }}
-            export target_branch=${{ env.target_branch }}
+            export target_branch=${{ env.TARGET_BRANCH }}
             if [ ${task_name} =  "Compile_check" ];then
               cp compile_check.sh ./scripts/compile_check.sh
               BuildAccelerate bash -x ./scripts/compile_check.sh
