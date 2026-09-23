@@ -94,7 +94,7 @@ ACLSHMEM_MEM_PUT_GET_FUNC(put_SIGNAL)
                 output_signal.data(), sizeof(int32_t), signal_addr, sizeof(int32_t), ACL_MEMCPY_DEVICE_TO_HOST),     \
             0);                                                                                                      \
         int32_t flag = 0;                                                                                            \
-        for (int i = 0; i < 4; i++) {                                                                                \
+        for (int i = 0; i < 16; i++) {                                                                               \
             if (output[i] != input[i]) {                                                                             \
                 flag = 1;                                                                                            \
             }                                                                                                        \
