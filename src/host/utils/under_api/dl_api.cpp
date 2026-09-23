@@ -8,15 +8,61 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 #include "dl_api.h"
+
+#include <cstdlib>
+
 #include "dl_acl_api.h"
 #include "dl_hal_api.h"
 #include "dl_hccp_api.h"
 #include "dl_hcomm_api.h"
-#include "dl_rt_api.h"
 #include "dl_opapi_api.h"
+#include "dl_rt_api.h"
+#include "utils/shmemi_file_util.h"
 #include "utils/shmemi_logger.h"
 
 namespace shm {
+namespace {
+Result GetLibraryPath(std::string& libPath)
+{
+    const char* path = std::getenv("ASCEND_HOME_PATH");
+    SHM_VALIDATE_RETURN(path != nullptr, "Environment ASCEND_HOME_PATH not set.", ACLSHMEM_INNER_ERROR);
+
+    libPath = std::string(path).append("/lib64");
+    if (!utils::FileUtil::Realpath(libPath) || !utils::FileUtil::IsDir(libPath)) {
+        SHM_LOG_ERROR("Environment ASCEND_HOME_PATH check failed: realpath or isdir validation failed.");
+        return ACLSHMEM_INNER_ERROR;
+    }
+    if (!utils::FileUtil::IsOwnedByCurrentUserOrRoot(libPath)) {
+        SHM_LOG_ERROR("Security check failed: ASCEND_HOME_PATH/lib64 is not owned by current user or root.");
+        return ACLSHMEM_INNER_ERROR;
+    }
+    if (!utils::FileUtil::HasSecurePermissions(libPath)) {
+        SHM_LOG_ERROR("Security check failed: ASCEND_HOME_PATH/lib64 has insecure permissions.");
+        return ACLSHMEM_INNER_ERROR;
+    }
+    return ACLSHMEM_SUCCESS;
+}
+} // namespace
+
+Result DlApi::LoadLibrary()
+{
+    std::string libPath;
+    auto result = GetLibraryPath(libPath);
+    if (result != ACLSHMEM_SUCCESS) {
+        return result;
+    }
+    return LoadLibrary(libPath);
+}
+
+Result DlApi::LoadAclLibrary()
+{
+    std::string libPath;
+    auto result = GetLibraryPath(libPath);
+    if (result != ACLSHMEM_SUCCESS) {
+        return result;
+    }
+    return DlAclApi::LoadLibrary(libPath);
+}
 
 Result DlApi::LoadLibrary(const std::string& libDirPath)
 {

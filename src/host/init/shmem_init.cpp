@@ -30,6 +30,7 @@
 #include "prof/prof_util.h"
 #include "shmemi_scope_guard.h"
 #include "utils/exception/shmem_exception_report.h"
+#include "utils/under_api/dl_api.h"
 #include "utils/under_api/dl_acl_api.h"
 
 #define DEFAULT_MY_PE (-1)
@@ -319,6 +320,44 @@ static bool reserved_fields_are_zero(const uint64_t* reserved, size_t count)
     return reserved != nullptr && std::all_of(reserved, reserved + count, [](uint64_t value) { return value == 0; });
 }
 
+static int32_t validate_and_normalize_buffer_property(
+    int32_t current_device, size_t index, bool validate_device_ownership, aclrtPhysicalMemProp* property)
+{
+    SHM_ASSERT_RETURN(property != nullptr, ACLSHMEM_INVALID_PARAM);
+    if (property->handleType != ACL_MEM_HANDLE_TYPE_NONE ||
+        property->allocationType != ACL_MEM_ALLOCATION_TYPE_PINNED ||
+        property->location.type != ACL_MEM_LOCATION_TYPE_DEVICE ||
+        (property->memAttr != ACL_HBM_MEM_HUGE && property->memAttr != ACL_HBM_MEM_HUGE1G)) {
+        SHM_LOG_ERROR(
+            "Unsupported physical allocation properties for buffer "
+            << index << ": handleType=" << static_cast<int>(property->handleType)
+            << ", allocationType=" << static_cast<int>(property->allocationType) << ", locationType="
+            << static_cast<int>(property->location.type) << ", locationId=" << property->location.id
+            << ", currentDevice=" << current_device << ", memAttr=" << static_cast<int>(property->memAttr));
+        return ACLSHMEM_NOT_SUPPORTED;
+    }
+    if (validate_device_ownership) {
+        int32_t current_logic_device = -1;
+        const auto map_status = shm::DlAclApi::RtGetLogicDevIdByUserDevId(current_device, &current_logic_device);
+        if (map_status != ACLSHMEM_SUCCESS || current_logic_device < 0) {
+            SHM_LOG_ERROR(
+                "Failed to map current user device " << current_device
+                                                     << " to a Driver logic device, ret=" << map_status);
+            return ACLSHMEM_NOT_SUPPORTED;
+        }
+        if (property->location.id != current_logic_device) {
+            SHM_LOG_ERROR(
+                "Buffer " << index << " belongs to Driver logic device " << property->location.id
+                          << ", currentUserDevice=" << current_device
+                          << ", currentLogicDevice=" << current_logic_device);
+            return ACLSHMEM_NOT_SUPPORTED;
+        }
+        // Subsequent ACL APIs take a user-visible device ID and perform their own user-to-logic conversion.
+        property->location.id = current_device;
+    }
+    return ACLSHMEM_SUCCESS;
+}
+
 static int32_t query_buffer_property(
     aclrtDrvMemHandle mem_handle, int32_t current_device, size_t index, aclrtPhysicalMemProp* property)
 {
@@ -339,19 +378,7 @@ static int32_t query_buffer_property(
             "aclrtMemGetAllocationPropertiesFromHandle failed for buffer " << index << ", ret=" << acl_status);
         return ACLSHMEM_NOT_SUPPORTED;
     }
-    if (property->handleType != ACL_MEM_HANDLE_TYPE_NONE ||
-        property->allocationType != ACL_MEM_ALLOCATION_TYPE_PINNED ||
-        property->location.type != ACL_MEM_LOCATION_TYPE_DEVICE || property->location.id != current_device ||
-        (property->memAttr != ACL_HBM_MEM_HUGE && property->memAttr != ACL_HBM_MEM_HUGE1G)) {
-        SHM_LOG_ERROR(
-            "Unsupported physical allocation properties for buffer "
-            << index << ": handleType=" << static_cast<int>(property->handleType)
-            << ", allocationType=" << static_cast<int>(property->allocationType) << ", locationType="
-            << static_cast<int>(property->location.type) << ", locationId=" << property->location.id
-            << ", currentDevice=" << current_device << ", memAttr=" << static_cast<int>(property->memAttr));
-        return ACLSHMEM_NOT_SUPPORTED;
-    }
-    return ACLSHMEM_SUCCESS;
+    return validate_and_normalize_buffer_property(current_device, index, acl_status == ACL_SUCCESS, property);
 }
 
 static int32_t validate_user_buffer_metadata(size_t buffer_count, int32_t npes)
@@ -1155,7 +1182,10 @@ static int32_t aclshmemi_init_attr_impl(
 #ifdef HAS_ACLRT_MEM_FABRIC_HANDLE
         const auto* buffers = static_cast<const aclshmemx_buffer_desc_t*>(buffer_descs);
         shm::UserBufferHeapLayoutHeader local_header{};
-        (void)build_local_layout_header(buffers, buffer_count, attributes, &user_buffer_heap_input, &local_header);
+        local_header.local_status = shm::DlApi::LoadAclLibrary();
+        if (local_header.local_status == ACLSHMEM_SUCCESS) {
+            (void)build_local_layout_header(buffers, buffer_count, attributes, &user_buffer_heap_input, &local_header);
+        }
         std::vector<shm::UserBufferHeapLayoutHeader> all_headers;
         try {
             all_headers.resize(static_cast<size_t>(attributes->n_pes));

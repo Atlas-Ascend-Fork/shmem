@@ -35,7 +35,7 @@ int CopyStatuses(const void* sendbuf, void* recvbuf, int size, aclshmemi_bootstr
 
 int FailAllgather(const void*, void*, int, aclshmemi_bootstrap_handle_t*) { return ACLSHMEM_INNER_ERROR; }
 
-bool CreateSourceMapping(aclrtDrvMemHandle handle, uint64_t size, int32_t deviceId, void** sourceAddress)
+bool CreateSourceMapping(aclrtDrvMemHandle handle, uint64_t size, int32_t logicDeviceId, void** sourceAddress)
 {
     if (handle == nullptr || size == 0 || sourceAddress == nullptr) {
         return false;
@@ -50,7 +50,7 @@ bool CreateSourceMapping(aclrtDrvMemHandle handle, uint64_t size, int32_t device
     }
     aclrtMemAccessDesc access{};
     access.location.type = ACL_MEM_LOCATION_TYPE_DEVICE;
-    access.location.id = deviceId;
+    access.location.id = logicDeviceId;
     access.flags = ACL_RT_MEM_ACCESS_FLAGS_READWRITE;
     if (aclrtMemSetAccess(*sourceAddress, size, &access, 1) != ACL_SUCCESS) {
         (void)aclrtUnmapMem(*sourceAddress);
@@ -201,6 +201,8 @@ void RunTwoPeMixedHeap(int rankId, int rankCount, uint64_t localMemSize, bool pr
     const int deviceId = rankId % test_gnpu_num + test_first_npu;
     ASSERT_EQ(aclInit(nullptr), ACL_SUCCESS);
     ASSERT_EQ(aclrtSetDevice(deviceId), ACL_SUCCESS);
+    int32_t logicDeviceId = -1;
+    ASSERT_EQ(aclrtGetLogicDevIdByUserDevId(deviceId, &logicDeviceId), ACL_SUCCESS);
 
     aclrtPhysicalMemProp prop{};
     prop.handleType = ACL_MEM_HANDLE_TYPE_NONE;
@@ -214,7 +216,7 @@ void RunTwoPeMixedHeap(int rankId, int rankCount, uint64_t localMemSize, bool pr
     aclrtDrvMemHandle inputHandle = nullptr;
     ASSERT_EQ(aclrtMallocPhysical(&inputHandle, externalBytes, &prop, 0), ACL_SUCCESS);
     void* sourceAddress = nullptr;
-    ASSERT_TRUE(CreateSourceMapping(inputHandle, externalBytes, deviceId, &sourceAddress));
+    ASSERT_TRUE(CreateSourceMapping(inputHandle, externalBytes, logicDeviceId, &sourceAddress));
 
     aclshmemx_buffer_desc_t buffer{};
     aclshmemx_buffer_optional_attr_t optionalAttr{};
@@ -325,6 +327,8 @@ TEST(UserBufferHeapTest, SinglePeMixedHeapInitMallocAndFinalize)
     if (aclInit(nullptr) != ACL_SUCCESS || aclrtSetDevice(0) != ACL_SUCCESS) {
         GTEST_SKIP() << "本机没有可用的 NPU Runtime，跳过 mixed-heap 真机 smoke";
     }
+    int32_t logicDeviceId = -1;
+    ASSERT_EQ(aclrtGetLogicDevIdByUserDevId(0, &logicDeviceId), ACL_SUCCESS);
 
     aclrtPhysicalMemProp prop{};
     prop.handleType = ACL_MEM_HANDLE_TYPE_NONE;
@@ -342,7 +346,7 @@ TEST(UserBufferHeapTest, SinglePeMixedHeapInitMallocAndFinalize)
         GTEST_SKIP() << "本机不能创建 physical allocation，跳过 mixed-heap 真机 smoke";
     }
     void* sourceAddress = nullptr;
-    if (!CreateSourceMapping(inputHandle, externalBytes, 0, &sourceAddress)) {
+    if (!CreateSourceMapping(inputHandle, externalBytes, logicDeviceId, &sourceAddress)) {
         (void)aclrtFreePhysical(inputHandle);
         (void)aclrtResetDevice(0);
         (void)aclFinalize();

@@ -24,7 +24,9 @@ enum DlApiExtendLibraryType {
 
 class DlApi {
 public:
+    static Result LoadLibrary();
     static Result LoadLibrary(const std::string& libDirPath);
+    static Result LoadAclLibrary();
     static void CleanupLibrary();
     static Result LoadExtendLibrary(DlApiExtendLibraryType libraryType);
     static AscendSocType GetAscendSocType();

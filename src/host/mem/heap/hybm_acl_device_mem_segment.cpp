@@ -111,8 +111,21 @@ Result AclMemSegmentDevice::ReserveMemorySpace(void** address) noexcept
     } catch (const std::bad_alloc&) {
         return ACLSHMEM_MALLOC_FAILED;
     }
-    uint64_t expectSt;
-    if (FindAvaliableVirtualAddr(totalReservedSize, expectSt) != ACLSHMEM_SUCCESS) {
+    uint64_t expectSt = HYBM_GVM_START_ADDR;
+    const bool isAscend910BOr910C = socType_ == AscendSocType::ASCEND_910B || socType_ == AscendSocType::ASCEND_910C;
+    const bool useFixedBase = options_.userBufferHeapInput != nullptr && isAscend910BOr910C &&
+                              totalReservedSize >= HYBM_MAX_SINGLE_RESERVE_SIZE;
+    if (useFixedBase) {
+        if (expectSt >= HYBM_DEVICE_META_ADDR || totalReservedSize > HYBM_DEVICE_META_ADDR - expectSt) {
+            SHM_LOG_ERROR(
+                "user-buffer virtual memory size(" << totalReservedSize
+                                                   << ") exceeds the fixed virtual address range.");
+            return ACLSHMEM_INVALID_VALUE;
+        }
+        SHM_LOG_INFO(
+            "use fixed user-buffer base " << reinterpret_cast<void*>(expectSt) << " for virtual memory size "
+                                          << totalReservedSize);
+    } else if (FindAvaliableVirtualAddr(totalReservedSize, expectSt) != ACLSHMEM_SUCCESS) {
         SHM_LOG_ERROR("prepare virtual memory size(" << totalReservedSize << ") failed.");
         return ACLSHMEM_MALLOC_FAILED;
     }

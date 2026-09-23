@@ -188,15 +188,21 @@ void test_aclshmem_init_zero_mem(int rank_id, int n_ranks, uint64_t local_mem_si
 
 void test_shmem_init_huge_pool(int pe_id, int n_pes, uint64_t local_mem_size)
 {
+    constexpr uint64_t gib = 1024ULL * 1024ULL * 1024ULL;
+    constexpr uint32_t hbm_half_divisor = 2;
     uint32_t device_id = pe_id % test_gnpu_num + test_first_npu;
     int status = ACLSHMEM_SUCCESS;
     EXPECT_EQ(aclInit(nullptr), 0);
     EXPECT_EQ(status = aclrtSetDevice(device_id), 0);
     size_t hbm_free, hbm_total;
-    EXPECT_EQ(aclrtGetMemInfo(ACL_HBM_MEM, &hbm_free, &hbm_total), 0);
-    if (local_mem_size > hbm_total) {
-        constexpr uint64_t hbm_ratio_percent = 60;
-        local_mem_size = ALIGN_UP(hbm_total * hbm_ratio_percent / 100, 1024ULL * 1024 * 1024);
+    ASSERT_EQ(aclrtGetMemInfo(ACL_HBM_MEM, &hbm_free, &hbm_total), 0);
+    const uint64_t hbm_safe_limit = hbm_total / hbm_half_divisor;
+    ASSERT_GT(hbm_safe_limit, ACLSHMEM_EXTRA_SIZE);
+    const uint64_t max_local_mem_size = (hbm_safe_limit - ACLSHMEM_EXTRA_SIZE) / gib * gib;
+    if (local_mem_size > max_local_mem_size) {
+        std::cout << "[TEST] reduce huge-pool size from " << local_mem_size << " to " << max_local_mem_size
+                  << " bytes because total HBM is " << hbm_total << " bytes" << std::endl;
+        local_mem_size = max_local_mem_size;
     }
     shmem_set_conf_store_tls(false, nullptr, 0);
     aclshmemx_init_attr_t attributes;

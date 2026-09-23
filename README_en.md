@@ -46,7 +46,7 @@ shmem-config --diagnose  # Check native library loading and package integrity
 >   `--extra-index-url https://pypi.org/simple/` when installing `cann-shmem`. Pip merges candidates from both indexes
 >   and does not guarantee that a same-named package comes from `--index-url`. For production environments, install the
 >   matching `torch-npu` version first as described in the official TorchNPU compatibility documentation.
-> - The runtime environment requires glibc 2.34 or later. Otherwise, `libshmem.so` may fail to load due to missing
+> - The runtime environment requires glibc 2.28 or later. Otherwise, `libshmem.so` may fail to load due to missing
 >   symbols. Run `ldd --version` to check the local glibc version.
 
 **Method 2: Binary package installation**

@@ -66,7 +66,7 @@ bool AlignUp(uint64_t value, uint64_t alignment, uint64_t* result)
     return true;
 }
 
-bool CreateSourceMapping(aclrtDrvMemHandle handle, uint64_t size, int32_t deviceId, SourceMapping* mapping)
+bool CreateSourceMapping(aclrtDrvMemHandle handle, uint64_t size, int32_t logicDeviceId, SourceMapping* mapping)
 {
     if (handle == nullptr || size == 0 || mapping == nullptr ||
         !CheckAcl(aclrtReserveMemAddress(&mapping->addr, size, 0, nullptr, 0), "aclrtReserveMemAddress") ||
@@ -77,7 +77,7 @@ bool CreateSourceMapping(aclrtDrvMemHandle handle, uint64_t size, int32_t device
 
     aclrtMemAccessDesc access{};
     access.location.type = ACL_MEM_LOCATION_TYPE_DEVICE;
-    access.location.id = deviceId;
+    access.location.id = logicDeviceId;
     access.flags = ACL_RT_MEM_ACCESS_FLAGS_READWRITE;
     return CheckAcl(aclrtMemSetAccess(mapping->addr, size, &access, 1), "aclrtMemSetAccess");
 }
@@ -156,6 +156,10 @@ int RunExample(int32_t myPe, int32_t nPes, int32_t deviceId, const char* ipPort,
             break;
         }
         deviceSet = true;
+        int32_t logicDeviceId = -1;
+        if (!CheckAcl(aclrtGetLogicDevIdByUserDevId(deviceId, &logicDeviceId), "aclrtGetLogicDevIdByUserDevId")) {
+            break;
+        }
         if (!CheckAcl(aclrtCreateStream(&stream), "aclrtCreateStream")) {
             break;
         }
@@ -186,7 +190,7 @@ int RunExample(int32_t myPe, int32_t nPes, int32_t deviceId, const char* ipPort,
         for (size_t bufferIndex = 0; bufferIndex < kUserBufferCount; ++bufferIndex) {
             if (!CheckAcl(
                     aclrtMallocPhysical(&handles[bufferIndex], bufferBytes, &property, 0), "aclrtMallocPhysical") ||
-                !CreateSourceMapping(handles[bufferIndex], bufferBytes, deviceId, &sourceMappings[bufferIndex]) ||
+                !CreateSourceMapping(handles[bufferIndex], bufferBytes, logicDeviceId, &sourceMappings[bufferIndex]) ||
                 !CheckAcl(aclrtMemset(sourceMappings[bufferIndex].addr, bufferBytes, 0, bufferBytes), "aclrtMemset")) {
                 buffersPrepared = false;
                 break;
