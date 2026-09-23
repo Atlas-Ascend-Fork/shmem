@@ -91,6 +91,7 @@ public:
 
     virtual const void* GetQpInfo() const;
     virtual TransportDeviceInfo GetDeviceInfo() const;
+    virtual Result GetQpNetLayer(data_op_engine_type_t engine, uint32_t peer, uint32_t qpIdx, uint32_t& netLayer) const;
 
 protected:
     bool connected_{false};

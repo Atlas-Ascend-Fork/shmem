@@ -12,6 +12,14 @@
 
 #include <limits>
 
+// Test-only access override scoped strictly to dl_hcomm_api.h so this fixture can replace
+// dynamically loaded HCOMM entry points with local recorders. Keep the undef immediately
+// after this include; do not place other headers inside this scope or copy this pattern to
+// other tests. Prefer an explicit injection interface if production code adds one later.
+#define private public
+#include "dl_hcomm_api.h"
+#undef private
+
 #include "device_udma_transport_manager.h"
 #include "shmemi_host_common.h"
 
@@ -27,13 +35,34 @@ protected:
     void SetUp() override
     {
         saved_handle_ = g_boot_handle;
+        saved_mem_reg_ = DlHcommApi::gHcommMemReg;
+        saved_mem_unreg_ = DlHcommApi::gHcommMemUnreg;
+        saved_endpoint_destroy_ = DlHcommApi::gHcommEndpointDestroy;
+        saved_channel_create_ = DlHcommApi::gHcommChannelCreate;
+        saved_channel_destroy_ = DlHcommApi::gHcommChannelDestroy;
         g_boot_handle.npes = 3;
         g_boot_handle.allgather = AllGather;
         lengths_.clear();
         fail_call_ = 0;
+        mem_reg_endpoints_.clear();
+        channel_endpoints_.clear();
+        next_handle_ = 1000;
+        DlHcommApi::gHcommMemReg = RecordMemReg;
+        DlHcommApi::gHcommMemUnreg = SucceedMemUnreg;
+        DlHcommApi::gHcommEndpointDestroy = SucceedEndpointDestroy;
+        DlHcommApi::gHcommChannelCreate = RecordChannelCreate;
+        DlHcommApi::gHcommChannelDestroy = SucceedChannelDestroy;
     }
 
-    void TearDown() override { g_boot_handle = saved_handle_; }
+    void TearDown() override
+    {
+        DlHcommApi::gHcommMemReg = saved_mem_reg_;
+        DlHcommApi::gHcommMemUnreg = saved_mem_unreg_;
+        DlHcommApi::gHcommEndpointDestroy = saved_endpoint_destroy_;
+        DlHcommApi::gHcommChannelCreate = saved_channel_create_;
+        DlHcommApi::gHcommChannelDestroy = saved_channel_destroy_;
+        g_boot_handle = saved_handle_;
+    }
 
     static int AllGather(const void* send, void* recv, int len, aclshmemi_bootstrap_handle_t* handle)
     {
@@ -77,9 +106,97 @@ protected:
         return std::numeric_limits<int>::max() / sizeof(UdmaTransportManager::ExchangedEndpointDesc);
     }
 
+    static EndpointHandle Handle(uintptr_t value) { return reinterpret_cast<EndpointHandle>(value); }
+
+    static HcommResult RecordMemReg(EndpointHandle endpoint, const char*, CommMem*, HcommMemHandle* mem_handle)
+    {
+        mem_reg_endpoints_.push_back(endpoint);
+        *mem_handle = reinterpret_cast<HcommMemHandle>(next_handle_++);
+        return 0;
+    }
+
+    static HcommResult SucceedMemUnreg(EndpointHandle, HcommMemHandle) { return 0; }
+    static HcommResult SucceedEndpointDestroy(EndpointHandle) { return 0; }
+    static HcommResult SucceedChannelDestroy(const ChannelHandle*, uint32_t) { return 0; }
+
+    static HcommResult RecordChannelCreate(
+        EndpointHandle endpoint, CommEngine, HcommChannelDesc*, uint32_t count, ChannelHandle* channels)
+    {
+        for (uint32_t idx = 0; idx < count; ++idx) {
+            channel_endpoints_.push_back(endpoint);
+            channels[idx] = next_handle_++;
+        }
+        return 0;
+    }
+
+    static void AddEndpoint(UdmaTransportManager& manager, uint32_t eid, uint32_t peer, uintptr_t handle)
+    {
+        const auto key = std::make_pair(eid, peer);
+        EndpointDesc desc{};
+        manager.endpoint_handle_map_[eid] = Handle(handle);
+        manager.endpoint_local_desc_map_[eid] = desc;
+        manager.endpoint_desc_map_[key] = desc;
+        manager.endpoint_listen_port_map_[eid] = static_cast<uint16_t>(1000 + handle);
+    }
+
+    static size_t RegisteredEndpointCount(const UdmaTransportManager& manager, uint64_t addr)
+    {
+        const auto region = manager.mem_record_map_.find(addr);
+        return region == manager.mem_record_map_.end() ? 0U : region->second.size();
+    }
+
+    static size_t LogicalEndpointCount(const UdmaTransportManager& manager)
+    {
+        return manager.endpoint_desc_map_.size();
+    }
+
+    static void ConfigureManager(UdmaTransportManager& manager, uint32_t rank, uint32_t ranks, uint32_t qp_num)
+    {
+        manager.rank_id_ = rank;
+        manager.rank_count_ = ranks;
+        manager.qp_num_ = qp_num;
+    }
+
+    static void AddRoute(
+        UdmaTransportManager& manager, uint32_t peer, uint32_t local_eid, uint32_t remote_eid, uint32_t net_layer)
+    {
+        manager.peer_routes_[peer].qp_routes.push_back(UdmaTransportManager::QpRoute{
+            local_eid, remote_eid, NetType::TopoFileDesc, net_layer, "instance", "plane", 1});
+    }
+
+    static void AddRemoteDescriptor(
+        Exchange& exchange, uint32_t rank, uint32_t index, uint32_t local_rank, uint32_t eid)
+    {
+        Descriptor& descriptor = exchange.descs[static_cast<size_t>(rank) * exchange.max_count + index];
+        descriptor.valid = 1;
+        descriptor.peer_rank = local_rank;
+        descriptor.eid_index = eid;
+        descriptor.listen_port = static_cast<uint16_t>(2000 + eid);
+    }
+
+    static Result BuildDirect(
+        UdmaTransportManager& manager, const Exchange& exchange, std::vector<uint32_t>& slots,
+        std::vector<uint32_t>& dst_pes, std::vector<uint32_t>& qp_indices)
+    {
+        UdmaTransportManager::ChannelBuildState state;
+        const Result result = manager.BuildDirectChannels(exchange, state);
+        slots = state.slots;
+        dst_pes = state.dst_pes;
+        qp_indices = state.qp_indices;
+        return result;
+    }
+
     aclshmemi_bootstrap_handle_t saved_handle_{};
+    HcommMemRegFunc saved_mem_reg_{nullptr};
+    HcommMemUnregFunc saved_mem_unreg_{nullptr};
+    HcommEndpointDestroyFunc saved_endpoint_destroy_{nullptr};
+    HcommChannelCreateFunc saved_channel_create_{nullptr};
+    HcommChannelDestroyFunc saved_channel_destroy_{nullptr};
     inline static std::vector<int> lengths_;
     inline static size_t fail_call_{0};
+    inline static std::vector<EndpointHandle> mem_reg_endpoints_;
+    inline static std::vector<EndpointHandle> channel_endpoints_;
+    inline static uintptr_t next_handle_{1000};
 };
 
 TEST_F(UdmaEndpointExchangeTest, AcceptsBoundaryAndRejectsNextEndpoint)
@@ -171,6 +288,88 @@ TEST_F(UdmaEndpointExchangeTest, StopsAtFailedChunk)
     Exchange exchange;
     EXPECT_EQ(Gather(2, exchange), ACLSHMEM_BOOTSTRAP_ERROR);
     EXPECT_EQ(lengths_.size(), 2U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, RegistersOneHeapOnEverySelectedUniqueEndpoint)
+{
+    UdmaTransportManager manager;
+    AddEndpoint(manager, 10, 1, 1);
+    AddEndpoint(manager, 11, 1, 2);
+    AddEndpoint(manager, 12, 2, 3);
+
+    TransportMemoryRegion region{};
+    region.addr = 0x100000;
+    region.size = 0x2000;
+    region.flags = REG_MR_FLAG_HBM;
+    ASSERT_EQ(manager.RegisterMemoryRegion(region), ACLSHMEM_SUCCESS);
+
+    EXPECT_EQ(mem_reg_endpoints_, (std::vector<EndpointHandle>{Handle(1), Handle(2), Handle(3)}));
+    EXPECT_EQ(RegisteredEndpointCount(manager, region.addr), 3U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, RegistersSharedLocalEidOnlyOnceAcrossPeers)
+{
+    UdmaTransportManager manager;
+    AddEndpoint(manager, 7, 1, 7);
+    AddEndpoint(manager, 7, 2, 7);
+    AddEndpoint(manager, 7, 3, 7);
+
+    TransportMemoryRegion region{};
+    region.addr = 0x100000;
+    region.size = 0x2000;
+    region.flags = REG_MR_FLAG_HBM;
+    ASSERT_EQ(manager.RegisterMemoryRegion(region), ACLSHMEM_SUCCESS);
+
+    EXPECT_EQ(mem_reg_endpoints_, (std::vector<EndpointHandle>{Handle(7)}));
+    EXPECT_EQ(RegisteredEndpointCount(manager, region.addr), 1U);
+    EXPECT_EQ(LogicalEndpointCount(manager), 3U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, BuildsOneChannelForEveryPeerQpFromFinalRoutes)
+{
+    UdmaTransportManager manager;
+    ConfigureManager(manager, 0, 3, 3);
+
+    // Repeated local EIDs model two QPs sharing one endpoint. The channel count
+    // must still be peer_count * qp_num, while endpoint/MR resources are reused.
+    AddRoute(manager, 1, 10, 20, 0);
+    AddRoute(manager, 1, 10, 20, 0);
+    AddRoute(manager, 1, 11, 21, 1);
+    AddRoute(manager, 2, 12, 22, 0);
+    AddRoute(manager, 2, 13, 23, 1);
+    AddRoute(manager, 2, 12, 22, 0);
+    AddEndpoint(manager, 10, 1, 10);
+    AddEndpoint(manager, 11, 1, 11);
+    AddEndpoint(manager, 12, 2, 12);
+    AddEndpoint(manager, 13, 2, 13);
+
+    TransportMemoryRegion region{};
+    region.addr = 0x200000;
+    region.size = 0x4000;
+    region.flags = REG_MR_FLAG_HBM;
+    ASSERT_EQ(manager.RegisterMemoryRegion(region), ACLSHMEM_SUCCESS);
+    ASSERT_EQ(mem_reg_endpoints_.size(), 4U);
+
+    Exchange exchange;
+    exchange.max_count = 3;
+    exchange.counts = {0, 3, 3};
+    exchange.descs.resize(9);
+    AddRemoteDescriptor(exchange, 1, 0, 0, 20);
+    AddRemoteDescriptor(exchange, 1, 1, 0, 21);
+    AddRemoteDescriptor(exchange, 2, 0, 0, 22);
+    AddRemoteDescriptor(exchange, 2, 1, 0, 23);
+
+    std::vector<uint32_t> slots;
+    std::vector<uint32_t> dst_pes;
+    std::vector<uint32_t> qp_indices;
+    ASSERT_EQ(BuildDirect(manager, exchange, slots, dst_pes, qp_indices), ACLSHMEM_SUCCESS);
+
+    EXPECT_EQ(
+        channel_endpoints_,
+        (std::vector<EndpointHandle>{Handle(10), Handle(10), Handle(11), Handle(12), Handle(13), Handle(12)}));
+    EXPECT_EQ(slots, (std::vector<uint32_t>{1, 1, 1, 2, 2, 2}));
+    EXPECT_EQ(dst_pes, (std::vector<uint32_t>{1, 1, 1, 2, 2, 2}));
+    EXPECT_EQ(qp_indices, (std::vector<uint32_t>{0, 1, 2, 0, 1, 2}));
 }
 
 } // namespace device

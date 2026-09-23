@@ -374,6 +374,14 @@ HYBM_API int32_t hybm_entity_reach_types(hybm_entity_t e, uint32_t rank, hybm_da
     return ACLSHMEM_SUCCESS;
 }
 
+HYBM_API int32_t hybm_get_qp_net_layer(
+    hybm_entity_t e, data_op_engine_type_t engine, uint32_t peer, uint32_t qp_idx, uint32_t& net_layer)
+{
+    auto entity = static_cast<shm::MemEntity*>(e);
+    SHM_ASSERT_RETURN(entity != nullptr, ACLSHMEM_INVALID_PARAM);
+    return entity->GetQpNetLayer(engine, peer, qp_idx, net_layer);
+}
+
 HYBM_API int32_t hybm_remove_imported(hybm_entity_t e, uint32_t rank, uint32_t flags)
 {
     SHM_ASSERT_RETURN(e != nullptr, ACLSHMEM_INVALID_PARAM);

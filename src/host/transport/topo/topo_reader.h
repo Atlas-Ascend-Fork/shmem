@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "nlohmann/json.hpp"
+#include "host/shmem_host_def.h"
 #include "sotre_net.h"
 
 namespace shm {
@@ -105,6 +106,7 @@ struct SyncEndpoint {
     std::string planeId{};
     std::vector<EidPort> ports{}; // used to reverse-map a peer port to its eidIndex
     uint32_t eidIndex{};
+    RankAddrType addrType{RankAddrType::EID};
 };
 
 inline void to_json(nlohmann::json& json, const SyncEndpoint& endpoint)
@@ -114,6 +116,7 @@ inline void to_json(nlohmann::json& json, const SyncEndpoint& endpoint)
         {"netInstanceId", endpoint.netInstanceId},
         {"netType", static_cast<uint32_t>(endpoint.netType)},
         {"fabric", static_cast<uint32_t>(endpoint.fabric)},
+        {"addrType", static_cast<uint32_t>(endpoint.addrType)},
         {"planeId", endpoint.planeId},
         {"ports", endpoint.ports},
         {"eidIndex", endpoint.eidIndex},
@@ -142,6 +145,13 @@ inline void from_json(const nlohmann::json& json, SyncEndpoint& endpoint)
     } else {
         endpoint.fabric = TopoFabric::Unknown;
     }
+    if (json.contains("addrType")) {
+        uint32_t addrType = 0;
+        json.at("addrType").get_to(addrType);
+        endpoint.addrType = static_cast<RankAddrType>(addrType);
+    } else {
+        endpoint.addrType = RankAddrType::EID;
+    }
     json.at("planeId").get_to(endpoint.planeId);
     json.at("ports").get_to(endpoint.ports);
     json.at("eidIndex").get_to(endpoint.eidIndex);
@@ -151,6 +161,11 @@ struct EidRoute {
     uint32_t localEidIndex{};
     EidData localEidRaw{};
     uint32_t remoteEidIndex{};
+    NetType netType{};
+    uint32_t netLayer{};
+    std::string netInstanceId{};
+    std::string planeId{};
+    size_t portCount{};
 };
 
 class EidConverter {
@@ -188,21 +203,23 @@ class TopoQuerier {
 public:
     explicit TopoQuerier(
         const RootInfo& r, const TopoInfo& t, uint32_t myRank, const std::vector<uint32_t>& rankToLocalId,
-        const std::vector<std::vector<SyncEndpoint>>& rankIdxToSyncEndpoint)
+        const std::vector<std::vector<SyncEndpoint>>& rankIdxToSyncEndpoint,
+        const std::map<uint32_t, uint32_t>& netLayerPolicy = {}, bool multiLinkEnabled = false)
         : rootInfo_(r),
           topoInfo_(t),
           myRank_(myRank),
           rankToLocalId_(rankToLocalId),
-          rankIdxToSyncEndpoint_(rankIdxToSyncEndpoint)
+          rankIdxToSyncEndpoint_(rankIdxToSyncEndpoint),
+          netLayerPolicy_(netLayerPolicy),
+          multiLinkEnabled_(multiLinkEnabled)
     {}
 
-    bool GetEidRoutes(uint32_t targetRank, uint32_t routeCount, std::vector<EidRoute>& routes);
+    Result GetEidRoutes(uint32_t targetRank, uint32_t routeCount, std::vector<EidRoute>& routes);
     bool GetEidRoute(uint32_t targetRank, uint32_t& localEidIndex, EidData& localEidRaw, uint32_t& remoteEidIndex);
 
 private:
-    bool ResolveEidRoutes(uint32_t targetRank, uint32_t routeCount, std::vector<EidRoute>& routes);
-    bool GetEidRouteMesh1D(
-        uint32_t targetRank, uint32_t& localEidIndex, EidData& localEidRaw, uint32_t& remoteEidIndex);
+    Result ResolveEidRoutes(uint32_t targetRank, uint32_t routeCount, std::vector<EidRoute>& routes);
+    bool GetEidRouteMesh1D(uint32_t targetRank, EidRoute& route);
 
     const RootInfo& rootInfo_;
     const TopoInfo& topoInfo_;
@@ -210,6 +227,8 @@ private:
 
     const std::vector<uint32_t>& rankToLocalId_;
     const std::vector<std::vector<SyncEndpoint>>& rankIdxToSyncEndpoint_;
+    std::map<uint32_t, uint32_t> netLayerPolicy_;
+    bool multiLinkEnabled_{false};
 };
 
 } // namespace transport

@@ -17,6 +17,7 @@
 #include <vector>
 #include <ostream>
 #include <iomanip>
+#include <map>
 #include <unordered_map>
 #include "sotre_net.h"
 #include "hybm_def.h"
@@ -45,6 +46,12 @@ enum TransportType {
 
 struct UdmaQpConfig {
     uint32_t qpNum{1};
+    std::map<uint32_t, uint32_t> netLayerPolicy{};
+#ifdef ACLSHMEM_MULTI_LINK_SUPPORT
+    bool multiLinkEnabled{true};
+#else
+    bool multiLinkEnabled{false};
+#endif
 };
 struct SdmaQpConfig {
     uint32_t qpNum{1};
@@ -70,7 +77,8 @@ struct TransportOptions {
                << ", protocol=" << options.protocol << ", rdmaQpNum=" << options.rdmaQpConfig.qpNum
                << ", sdmaQpNum=" << options.sdmaQpNum << ", role=" << static_cast<uint32_t>(options.role)
                << ", nid=" << options.nic << ", iptype=" << options.type << ", udmaQpNum=" << options.udmaQpConfig.qpNum
-               << ")";
+               << ", udmaNetLayerPolicyCount=" << options.udmaQpConfig.netLayerPolicy.size()
+               << ", udmaMultiLink=" << options.udmaQpConfig.multiLinkEnabled << ")";
         return output;
     }
 };

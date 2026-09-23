@@ -94,6 +94,7 @@ function print_usage()
     echo "  -enable_rdma               Enable RDMA support. For Ascend950, must be used with -rdma_backend"
     echo "  -enable_simt               Enable SIMT support"
     echo "  -enable_relay              Enable UDMA relay (detour) support. Requires -soc_type Ascend950 (UDMA)"
+    echo "  -multi_link                Enable per-QP UDMA multi-link routing. Requires direct UDMA on Ascend950"
     echo "  -python_extension          Build Python extension"
     echo "  -python_example            Build Python example"
     echo "  -gendoc                    Generate documentation"
@@ -125,7 +126,7 @@ function fn_build()
 
     # Remove script-managed feature values from a reused cache; options requested by this
     # invocation are added back through build_compile_options, otherwise CMake uses OFF defaults.
-    local cache_reset_options="-UUSE_UNIT_TEST -UENABLE_CANN_BUILD -UUSE_EXAMPLES -UACLSHMEM_RDMA_SUPPORT -UACLSHMEM_SIMT_SUPPORT -UACLSHMEM_RELAY_SUPPORT -UENABLE_ASCENDC_DUMP -UACLSHMEM_RDMA_BACKEND"
+    local cache_reset_options="-UUSE_UNIT_TEST -UENABLE_CANN_BUILD -UUSE_EXAMPLES -UACLSHMEM_RDMA_SUPPORT -UACLSHMEM_SIMT_SUPPORT -UACLSHMEM_RELAY_SUPPORT -UACLSHMEM_MULTI_LINK_SUPPORT -UENABLE_ASCENDC_DUMP -UACLSHMEM_RDMA_BACKEND"
     cmake $cache_reset_options $build_compile_options -DCMAKE_INSTALL_PREFIX=../install -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DUSE_CXX11_ABI=$USE_CXX11_ABI -DUSE_MSSANITIZER=$USE_MSSANITIZER -DSOC_TYPE=${SOC_TYPE} -DPYEXPAND_EXAMPLE=$PYEXPAND_EXAMPLE ..
     cmake --build . --target install
     cd -
@@ -585,6 +586,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -enable_relay)
             COMPILE_OPTIONS="${COMPILE_OPTIONS} -DACLSHMEM_RELAY_SUPPORT=ON"
+            shift
+            ;;
+        -multi_link)
+            COMPILE_OPTIONS="${COMPILE_OPTIONS} -DACLSHMEM_MULTI_LINK_SUPPORT=ON"
             shift
             ;;
         -python_extension)

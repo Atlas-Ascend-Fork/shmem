@@ -11,6 +11,7 @@
 #define MEM_FABRIC_HYBRID_HYBM_BIG_MEM_C_H
 
 #include <cstddef>
+#include "host_device/shmem_common_types.h"
 #include "hybm_def.h"
 #include "transport_def.h"
 
@@ -164,6 +165,8 @@ int32_t hybm_mmap(hybm_entity_t e, uint32_t flags);
  * @return 0 if successful, error code if failed
  */
 int32_t hybm_entity_reach_types(hybm_entity_t e, uint32_t rank, hybm_data_op_type& reachTypes, uint32_t flags);
+int32_t hybm_get_qp_net_layer(
+    hybm_entity_t e, data_op_engine_type_t engine, uint32_t peer, uint32_t qp_idx, uint32_t& net_layer);
 
 /**
  * @brief join one rank after start

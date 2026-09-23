@@ -35,13 +35,10 @@ extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void udma_qp_demo
     const uint32_t qp_idx = AscendC::GetBlockIdx();
     const uint32_t qp_num = AscendC::GetBlockNum();
 
-    /*
-     * Host 已保证元素总数能被 QP 数整除，因此每个 QP 处理等长的连续分片。
-     * slice_count 表示单个 QP 的元素数，slice_offset 表示该分片在完整缓冲区中的起始位置。
-     * 所有 QP 的区间首尾相接，正好覆盖 [0, elements)，不需要额外的分片分支。
-     */
-    const uint64_t slice_count = elements / qp_num;
-    const uint64_t slice_offset = qp_idx * slice_count;
+    const uint64_t base_count = elements / qp_num;
+    const uint64_t remainder = elements % qp_num;
+    const uint64_t slice_count = base_count + (qp_idx < remainder ? 1 : 0);
+    const uint64_t slice_offset = qp_idx * base_count + (qp_idx < remainder ? qp_idx : remainder);
 
     AscendC::TPipe pipe;
     AscendC::TBuf<AscendC::TPosition::VECOUT> scratch;

@@ -81,6 +81,11 @@ TransportDeviceInfo TransportManager::GetDeviceInfo() const
     return info;
 }
 
+Result TransportManager::GetQpNetLayer(data_op_engine_type_t, uint32_t, uint32_t, uint32_t&) const
+{
+    return ACLSHMEM_NOT_SUPPORTED;
+}
+
 Result TransportManager::ConnectWithOptions(const HybmTransPrepareOptions& options)
 {
     SHM_LOG_DEBUG("ConnectWithOptions now connected=" << connected_);

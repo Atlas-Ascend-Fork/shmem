@@ -55,9 +55,15 @@ OP=put
 ELEMS=1048576
 HEAP_MB=1024
 FIRST_NPU=0
+DEVICE_IDS=""
 IPPORT_ARG=""
+EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
+    if [[ $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 2
+    fi
     case "$1" in
         -pes) PES="$2"; shift 2 ;;
         -qp_count) QP_COUNT="$2"; shift 2 ;;
@@ -65,11 +71,44 @@ while [[ $# -gt 0 ]]; do
         -elems) ELEMS="$2"; shift 2 ;;
         -heap_mb) HEAP_MB="$2"; shift 2 ;;
         -first_npu) FIRST_NPU="$2"; shift 2 ;;
+        -device_ids) DEVICE_IDS="$2"; shift 2 ;;
         -ipport) IPPORT_ARG="$2"; shift 2 ;;
+        -qp_net_layers|-peer_stride) EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
 done
 
+for value in "$PES" "$FIRST_NPU"; do
+    if [[ ! "$value" =~ ^(0|[1-9][0-9]{0,8})$ ]]; then
+        echo "PE counts and device IDs must be nonnegative decimal integers" >&2
+        exit 2
+    fi
+done
+if (( PES < 2 || FIRST_NPU + PES > 2147483647 )); then
+    echo "Require PES >= 2 and valid device IDs" >&2
+    exit 2
+fi
+
+DEVICE_ID_ARRAY=()
+if [[ -n "${DEVICE_IDS}" ]]; then
+    IFS=',' read -r -a DEVICE_ID_ARRAY <<< "${DEVICE_IDS}"
+    if (( ${#DEVICE_ID_ARRAY[@]} != PES )); then
+        echo "-device_ids must contain exactly one logical device ID per PE" >&2
+        exit 2
+    fi
+    declare -A SEEN_DEVICE_IDS=()
+    for device_id in "${DEVICE_ID_ARRAY[@]}"; do
+        if [[ ! "${device_id}" =~ ^(0|[1-9][0-9]{0,9})$ ]] || (( device_id > 2147483647 )); then
+            echo "Invalid logical device ID in -device_ids: ${device_id}" >&2
+            exit 2
+        fi
+        if [[ -n "${SEEN_DEVICE_IDS[${device_id}]:-}" ]]; then
+            echo "Duplicate logical device ID in -device_ids: ${device_id}" >&2
+            exit 2
+        fi
+        SEEN_DEVICE_IDS[${device_id}]=1
+    done
+fi
 if [[ -n "${IPPORT_ARG}" ]]; then
     export IPPORT="${IPPORT_ARG}"
 fi
@@ -82,8 +121,16 @@ fi
 
 pids=()
 for ((pe = 0; pe < PES; ++pe)); do
+    if [[ -n "${DEVICE_IDS}" ]]; then
+        DEVICE_ID="${DEVICE_ID_ARRAY[pe]}"
+        DEVICE_ARGS=(-device_ids "${DEVICE_IDS}")
+    else
+        DEVICE_ID="$((FIRST_NPU + pe))"
+        DEVICE_ARGS=(-first_npu "${FIRST_NPU}")
+    fi
+    echo "Launching PE ${pe}/${PES} on device ${DEVICE_ID}, bootstrap=${IPPORT}"
     "${BIN}" -pe "${pe}" -pes "${PES}" -qp_count "${QP_COUNT}" -op "${OP}" -elems "${ELEMS}" \
-        -heap_mb "${HEAP_MB}" -first_npu "${FIRST_NPU}" -ipport "${IPPORT}" &
+        -heap_mb "${HEAP_MB}" "${DEVICE_ARGS[@]}" -ipport "${IPPORT}" "${EXTRA_ARGS[@]}" &
     pids+=("$!")
 done
 

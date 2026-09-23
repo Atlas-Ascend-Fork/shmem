@@ -409,8 +409,8 @@ TEST_P(TopoReaderIndexedTest, TopoFileDescUsesCanonicalClosCandidateOrderAcrossP
 
     std::vector<EidRoute> localRoutes;
     std::vector<EidRoute> peerRoutes;
-    ASSERT_TRUE(localQuerier.GetEidRoutes(1, 4, localRoutes));
-    ASSERT_TRUE(peerQuerier.GetEidRoutes(0, 4, peerRoutes));
+    ASSERT_EQ(localQuerier.GetEidRoutes(1, 4, localRoutes), ACLSHMEM_SUCCESS);
+    ASSERT_EQ(peerQuerier.GetEidRoutes(0, 4, peerRoutes), ACLSHMEM_SUCCESS);
     ASSERT_EQ(localRoutes.size(), 4U);
     ASSERT_EQ(peerRoutes.size(), 4U);
 
@@ -461,8 +461,8 @@ TEST_P(TopoReaderIndexedTest, TopoFileDescKeepsClosRoutesReciprocalWhenPortNames
     TopoQuerier peerQuerier(peerRoot, topoInfo, 1, rankToLocalId, endpoints);
     std::vector<EidRoute> localRoutes;
     std::vector<EidRoute> peerRoutes;
-    ASSERT_TRUE(localQuerier.GetEidRoutes(1, 4, localRoutes));
-    ASSERT_TRUE(peerQuerier.GetEidRoutes(0, 4, peerRoutes));
+    ASSERT_EQ(localQuerier.GetEidRoutes(1, 4, localRoutes), ACLSHMEM_SUCCESS);
+    ASSERT_EQ(peerQuerier.GetEidRoutes(0, 4, peerRoutes), ACLSHMEM_SUCCESS);
     ASSERT_EQ(localRoutes.size(), 4U);
     ASSERT_EQ(peerRoutes.size(), 4U);
 
@@ -499,8 +499,8 @@ TEST_P(TopoReaderIndexedTest, TopoFileDescDistributesRoutesAcrossDistinctAggrega
     TopoQuerier peerQuerier(peerRoot, topoInfo, 1, rankToLocalId, endpoints);
     std::vector<EidRoute> localRoutes;
     std::vector<EidRoute> peerRoutes;
-    ASSERT_TRUE(localQuerier.GetEidRoutes(1, 4, localRoutes));
-    ASSERT_TRUE(peerQuerier.GetEidRoutes(0, 4, peerRoutes));
+    ASSERT_EQ(localQuerier.GetEidRoutes(1, 4, localRoutes), ACLSHMEM_SUCCESS);
+    ASSERT_EQ(peerQuerier.GetEidRoutes(0, 4, peerRoutes), ACLSHMEM_SUCCESS);
     ASSERT_EQ(localRoutes.size(), 4U);
     ASSERT_EQ(peerRoutes.size(), 4U);
     for (uint32_t idx = 0; idx < 4; ++idx) {
@@ -551,8 +551,8 @@ TEST_P(TopoReaderIndexedTest, ExplicitClosKeepsNetLayerAndInstanceScope)
         for (const uint32_t qpCount : {1U, 4U}) {
             std::vector<EidRoute> localRoutes;
             std::vector<EidRoute> peerRoutes;
-            ASSERT_TRUE(localQuerier.GetEidRoutes(1, qpCount, localRoutes));
-            ASSERT_TRUE(peerQuerier.GetEidRoutes(0, qpCount, peerRoutes));
+            ASSERT_EQ(localQuerier.GetEidRoutes(1, qpCount, localRoutes), ACLSHMEM_SUCCESS);
+            ASSERT_EQ(peerQuerier.GetEidRoutes(0, qpCount, peerRoutes), ACLSHMEM_SUCCESS);
             ASSERT_EQ(localRoutes.size(), qpCount);
             ASSERT_EQ(peerRoutes.size(), qpCount);
             for (size_t i = 0; i < localRoutes.size(); ++i) {
@@ -582,7 +582,7 @@ TEST_P(TopoReaderIndexedTest, ExplicitClosRejectsEndpointsFromAnotherLayer)
     std::vector<std::vector<SyncEndpoint>> endpoints{{endpoint}, {endpoint}};
     TopoQuerier querier(localRoot, topoInfo, 0, rankToLocalId, endpoints);
     std::vector<EidRoute> routes;
-    EXPECT_FALSE(querier.GetEidRoutes(1, 1, routes));
+    EXPECT_NE(querier.GetEidRoutes(1, 1, routes), ACLSHMEM_SUCCESS);
 }
 
 TEST_P(TopoReaderIndexedTest, ExplicitClosPrefersLowerLayerWithinSharedInstance)
@@ -615,7 +615,7 @@ TEST_P(TopoReaderIndexedTest, ExplicitClosPrefersLowerLayerWithinSharedInstance)
     endpoints[1] = {low, high};
     TopoQuerier localQuerier(localRoot, topoInfo, 0, rankToLocalId, endpoints);
     std::vector<EidRoute> routes;
-    ASSERT_TRUE(localQuerier.GetEidRoutes(1, 1, routes));
+    ASSERT_EQ(localQuerier.GetEidRoutes(1, 1, routes), ACLSHMEM_SUCCESS);
     ASSERT_EQ(routes.size(), 1U);
     EXPECT_EQ(routes[0].localEidIndex, 0U);
     EXPECT_EQ(routes[0].remoteEidIndex, 2U);

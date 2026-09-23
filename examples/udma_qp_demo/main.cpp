@@ -14,6 +14,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -47,6 +49,9 @@ enum class DemoOperation : int32_t {
 };
 
 struct Options {
+    std::map<uint32_t, uint32_t> qp_net_layers;
+    std::vector<int> device_ids;
+    uint32_t peer_stride{1};
     int pe{0};                      // 当前进程在 SHMEM 通信域中的 PE 编号。
     int pes{2};                     // SHMEM 通信域的 PE 总数，至少为 2，避免向本 PE 发送。
     uint32_t qp_count{2};           // 每个远端 PE 创建的 QP 数，同时也是 kernel block 数。
@@ -57,11 +62,30 @@ struct Options {
     std::string op{"put"};                      // 测试 Put、Get 或 PutSignal，默认只运行 Put。
 };
 
+struct QpSlice {
+    uint64_t offset{0};
+    uint64_t length{0};
+};
+
+std::vector<QpSlice> BuildQpSlices(uint64_t elements, uint32_t qp_count)
+{
+    std::vector<QpSlice> slices(qp_count);
+    const uint64_t base_count = elements / qp_count;
+    const uint64_t remainder = elements % qp_count;
+    for (uint32_t qp_idx = 0; qp_idx < qp_count; ++qp_idx) {
+        slices[qp_idx].length = base_count + (qp_idx < remainder ? 1 : 0);
+        slices[qp_idx].offset = qp_idx * base_count + std::min<uint64_t>(qp_idx, remainder);
+    }
+    return slices;
+}
+
 void PrintUsage(const char* program)
 {
     std::cerr << "Usage: " << program
               << " -pe ID -pes N [-qp_count N] [-op put|get|put_signal] [-elems N] [-heap_mb N]"
-                 " [-first_npu ID] [-ipport tcp://IP:PORT]\n";
+                 " [-first_npu ID] [-device_ids 1,3,2,4 (overrides -first_npu)]"
+                 " [-ipport tcp://IP:PORT] [-qp_net_layers 0:0,2:1]"
+                 " [-peer_stride N]\n";
 }
 
 bool ParseUint64(const char* text, uint64_t& value)
@@ -75,6 +99,78 @@ bool ParseUint64(const char* text, uint64_t& value)
     return errno != ERANGE && end != nullptr && *end == '\0';
 }
 
+bool ParseQpNetLayers(const char* text, std::map<uint32_t, uint32_t>& net_layers)
+{
+    if (text == nullptr || text[0] == '\0') {
+        return false;
+    }
+    net_layers.clear();
+    const std::string value(text);
+    size_t begin = 0;
+    while (begin < value.size()) {
+        const size_t end = value.find(',', begin);
+        const std::string entry = value.substr(begin, end - begin);
+        const size_t separator = entry.find(':');
+        if (separator == std::string::npos || separator == 0 || separator + 1 == entry.size() ||
+            entry.find(':', separator + 1) != std::string::npos) {
+            return false;
+        }
+        const std::string qp = entry.substr(0, separator);
+        const std::string layer = entry.substr(separator + 1);
+        uint64_t qp_idx = 0;
+        uint64_t net_layer = 0;
+        if (!ParseUint64(qp.c_str(), qp_idx) || qp_idx > std::numeric_limits<uint32_t>::max() ||
+            !ParseUint64(layer.c_str(), net_layer) || net_layer > ACLSHMEM_NET_LAYER_3) {
+            return false;
+        }
+        if (!net_layers.emplace(static_cast<uint32_t>(qp_idx), static_cast<uint32_t>(net_layer)).second) {
+            std::cerr << "duplicate qp_idx " << qp_idx << " in -qp_net_layers" << std::endl;
+            return false;
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        begin = end + 1;
+        if (begin == value.size()) {
+            return false;
+        }
+    }
+    return !net_layers.empty();
+}
+
+bool ParseDeviceIds(const char* text, std::vector<int>& device_ids)
+{
+    if (text == nullptr || text[0] == '\0') {
+        return false;
+    }
+    device_ids.clear();
+    const std::string value(text);
+    size_t begin = 0;
+    while (begin < value.size()) {
+        const size_t end = value.find(',', begin);
+        const std::string item = value.substr(begin, end - begin);
+        uint64_t device_id = 0;
+        if (!ParseUint64(item.c_str(), device_id) ||
+            device_id > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+            return false;
+        }
+        const int parsed_id = static_cast<int>(device_id);
+        if (std::find(device_ids.begin(), device_ids.end(), parsed_id) != device_ids.end()) {
+            std::cerr << "duplicate device_id " << parsed_id << " in -device_ids" << std::endl;
+            return false;
+        }
+        device_ids.push_back(parsed_id);
+        if (end == std::string::npos) {
+            break;
+        }
+        begin = end + 1;
+        if (begin == value.size()) {
+            return false;
+        }
+    }
+    return !device_ids.empty();
+}
+
 bool ParseOptions(int argc, char** argv, Options& options)
 {
     // 所有参数都采用“-参数名 参数值”形式，因此每次处理两个命令行参数。
@@ -83,6 +179,18 @@ bool ParseOptions(int argc, char** argv, Options& options)
             return false;
         }
         const std::string key = argv[i];
+        if (key == "-qp_net_layers") {
+            if (!ParseQpNetLayers(argv[i + 1], options.qp_net_layers)) {
+                return false;
+            }
+            continue;
+        }
+        if (key == "-device_ids") {
+            if (!ParseDeviceIds(argv[i + 1], options.device_ids)) {
+                return false;
+            }
+            continue;
+        }
         uint64_t value = 0;
         if (key == "-op" || key == "-ipport") {
             if (key == "-op") {
@@ -110,6 +218,11 @@ bool ParseOptions(int argc, char** argv, Options& options)
                 return false;
             }
             options.qp_count = static_cast<uint32_t>(value);
+        } else if (key == "-peer_stride") {
+            if (value == 0 || value > ACLSHMEM_MAX_PES) {
+                return false;
+            }
+            options.peer_stride = static_cast<uint32_t>(value);
         } else if (key == "-elems") {
             options.elements = value;
         } else if (key == "-heap_mb") {
@@ -260,10 +373,14 @@ int main(int argc, char** argv)
         return 1;
     }
     if (options.pes < 2 || options.pe < 0 || options.pe >= options.pes || options.qp_count == 0 ||
-        options.qp_count > ACLSHMEM_MAX_QP_NUM || options.elements == 0 || options.elements % options.qp_count != 0 ||
-        options.elements > UDMA_MAX_REQUEST_BYTES ||
+        options.qp_count > ACLSHMEM_MAX_QP_NUM || options.elements < options.qp_count ||
+        options.peer_stride >= static_cast<uint32_t>(options.pes) || options.elements > UDMA_MAX_REQUEST_BYTES ||
         (options.op != "put" && options.op != "get" && options.op != "put_signal")) {
         PrintUsage(argv[0]);
+        return 1;
+    }
+    if (!options.device_ids.empty() && options.device_ids.size() != static_cast<size_t>(options.pes)) {
+        std::cerr << "-device_ids must contain exactly one unique logical device ID per PE" << std::endl;
         return 1;
     }
     // 后续内存分配和拷贝需要使用实际字节数，因此先排除整数溢出。
@@ -281,9 +398,11 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    const uint64_t device_id = static_cast<uint64_t>(options.first_npu) + static_cast<uint64_t>(options.pe);
+    const uint64_t device_id = options.device_ids.empty() ?
+                                   static_cast<uint64_t>(options.first_npu) + static_cast<uint64_t>(options.pe) :
+                                   static_cast<uint64_t>(options.device_ids[options.pe]);
     if (device_id > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
-        std::cerr << "-first_npu + -pe exceeds the supported device ID range" << std::endl;
+        std::cerr << "Resolved logical device ID exceeds the supported range" << std::endl;
         return 1;
     }
 
@@ -325,13 +444,48 @@ int main(int argc, char** argv)
         std::cerr << "aclshmemx_set_qp_num failed, status=" << status << std::endl;
         return CleanupResources(resources, status);
     }
+    if (!options.qp_net_layers.empty()) {
+        if (options.qp_net_layers.rbegin()->first >= options.qp_count) {
+            std::cerr << "qp_net_layers contains qp_idx outside [0, qp_count)" << std::endl;
+            return CleanupResources(resources, 1);
+        }
+        for (const auto& [qp_idx, net_layer] : options.qp_net_layers) {
+            status = aclshmemx_set_qp_net_layer(
+                ACLSHMEM_DATA_OP_UDMA, qp_idx, static_cast<aclshmemx_net_layer_t>(net_layer));
+            if (status != 0) {
+                std::cerr << "aclshmemx_set_qp_net_layer failed, qp_idx=" << qp_idx << ", status=" << status
+                          << std::endl;
+                return CleanupResources(resources, status);
+            }
+        }
+    }
     status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr);
     if (status != 0) {
         std::cerr << "aclshmemx_init_attr failed, status=" << status << std::endl;
         return CleanupResources(resources, status);
     }
     resources.shmem_initialized = true;
-
+    const int next_pe = (options.pe + static_cast<int>(options.peer_stride)) % options.pes;
+    const std::vector<QpSlice> qp_slices = BuildQpSlices(options.elements, options.qp_count);
+    for (uint32_t qp_idx = 0; qp_idx < options.qp_count; ++qp_idx) {
+        aclshmemx_net_layer_t net_layer = ACLSHMEM_NET_LAYER_0;
+        status = aclshmemx_get_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, next_pe, qp_idx, &net_layer);
+        if (status != 0) {
+            std::cerr << "aclshmemx_get_qp_net_layer failed, qp_idx=" << qp_idx << ", status=" << status << std::endl;
+            return CleanupResources(resources, status);
+        }
+        const auto policy_it = options.qp_net_layers.find(qp_idx);
+        std::ostringstream route_log;
+        route_log << "[QP-ROUTE] src_pe=" << options.pe << " dst_pe=" << next_pe << " qp=" << qp_idx << " policy=";
+        if (policy_it == options.qp_net_layers.end()) {
+            route_log << "default";
+        } else {
+            route_log << "explicit:" << policy_it->second;
+        }
+        route_log << " actual_layer=" << static_cast<uint32_t>(net_layer) << " offset=" << qp_slices[qp_idx].offset
+                  << " length=" << qp_slices[qp_idx].length;
+        std::cout << route_log.str() << std::endl;
+    }
     /*
      * 阶段 4：分配两类用途不同的设备内存。
      * 对称内存由 aclshmem_malloc 分配，各 PE 按相同顺序和大小创建，可被远端 PE 访问。
@@ -360,8 +514,7 @@ int main(int argc, char** argv)
     // 阶段 5：准备校验数据和环形拓扑。
     const std::vector<uint8_t> own_pattern = MakePattern(options.pe, options.elements);
     std::vector<uint8_t> result(options.elements);
-    const int next_pe = options.pe + 1 == options.pes ? 0 : options.pe + 1;
-    const int previous_pe = options.pe == 0 ? options.pes - 1 : options.pe - 1;
+    const int previous_pe = (options.pe + options.pes - static_cast<int>(options.peer_stride)) % options.pes;
     // 记录当前 PE 的校验结果，任一数据校验或运行状态失败时都会标记为失败。
     bool passed = true;
 

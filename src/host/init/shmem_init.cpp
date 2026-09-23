@@ -704,6 +704,12 @@ int aclshmemx_set_qp_num(data_op_engine_type_t engine, uint32_t qp_num)
                 SHM_LOG_ERROR("invalid UDMA qp num: " << qp_num);
                 return ACLSHMEM_INVALID_VALUE;
             }
+            if (!g_udma_qp_config.netLayerPolicy.empty() && g_udma_qp_config.netLayerPolicy.rbegin()->first >= qp_num) {
+                SHM_LOG_ERROR(
+                    "UDMA qp num " << qp_num << " would invalidate configured QP index "
+                                   << g_udma_qp_config.netLayerPolicy.rbegin()->first);
+                return ACLSHMEM_INVALID_VALUE;
+            }
             g_udma_qp_config.qpNum = qp_num;
             break;
         default:
@@ -711,6 +717,107 @@ int aclshmemx_set_qp_num(data_op_engine_type_t engine, uint32_t qp_num)
             return ACLSHMEM_NOT_SUPPORTED;
     }
     SHM_LOG_INFO("set qp num success, engine=" << engine << ", qp_num=" << qp_num);
+    return ACLSHMEM_SUCCESS;
+}
+
+int aclshmemx_get_qp_num(data_op_engine_type_t engine, uint32_t* qp_num)
+{
+    if (qp_num == nullptr) {
+        SHM_LOG_ERROR("Failed to get QP count: qp_num output pointer is null, engine=" << engine);
+        return ACLSHMEM_INVALID_VALUE;
+    }
+    std::lock_guard<std::mutex> lock(g_aclshmem_ctx_mutex);
+    switch (engine) {
+        case ACLSHMEM_DATA_OP_SDMA:
+            *qp_num = g_sdma_qp_config.qpNum;
+            return ACLSHMEM_SUCCESS;
+        case ACLSHMEM_DATA_OP_ROCE:
+#if !defined(ACLSHMEM_RDMA_V2_SUPPORT)
+            SHM_LOG_ERROR("Failed to get QP count: ROCE V2 support is not enabled.");
+            return ACLSHMEM_NOT_SUPPORTED;
+#else
+            *qp_num = g_rdma_qp_config.qpNum;
+            return ACLSHMEM_SUCCESS;
+#endif
+        case ACLSHMEM_DATA_OP_UDMA:
+            *qp_num = g_udma_qp_config.qpNum;
+            return ACLSHMEM_SUCCESS;
+        default:
+            SHM_LOG_ERROR("Failed to get QP count: unsupported engine=" << engine);
+            return ACLSHMEM_NOT_SUPPORTED;
+    }
+}
+
+int aclshmemx_set_qp_net_layer(data_op_engine_type_t engine, uint32_t qp_idx, aclshmemx_net_layer_t net_layer)
+{
+    std::lock_guard<std::mutex> lock(g_aclshmem_ctx_mutex);
+    if (engine != ACLSHMEM_DATA_OP_UDMA) {
+        SHM_LOG_ERROR("QP netLayer policy only supports the UDMA engine, engine=" << engine);
+        return ACLSHMEM_NOT_SUPPORTED;
+    }
+    if (!g_udma_qp_config.multiLinkEnabled) {
+        SHM_LOG_ERROR(
+            "UDMA QP netLayer policy requires multi-link support; rebuild with ACLSHMEM_MULTI_LINK_SUPPORT=ON.");
+        return ACLSHMEM_NOT_SUPPORTED;
+    }
+    if (g_qp_config_frozen) {
+        SHM_LOG_ERROR("UDMA QP netLayer policy cannot be changed while an ACLSHMEM instance is initialized.");
+        return ACLSHMEM_NOT_SUPPORTED;
+    }
+    if (qp_idx >= g_udma_qp_config.qpNum) {
+        SHM_LOG_ERROR("invalid UDMA QP index " << qp_idx << ", qp_num=" << g_udma_qp_config.qpNum);
+        return ACLSHMEM_INVALID_VALUE;
+    }
+    const uint32_t layer = static_cast<uint32_t>(net_layer);
+    if (net_layer == ACLSHMEM_NET_LAYER_DEFAULT) {
+        g_udma_qp_config.netLayerPolicy.erase(qp_idx);
+        return ACLSHMEM_SUCCESS;
+    }
+    if (layer > static_cast<uint32_t>(ACLSHMEM_NET_LAYER_3)) {
+        SHM_LOG_ERROR("Invalid UDMA netLayer value " << layer << " for QP index " << qp_idx);
+        return ACLSHMEM_INVALID_VALUE;
+    }
+    if (layer > static_cast<uint32_t>(ACLSHMEM_NET_LAYER_1)) {
+        SHM_LOG_ERROR("UDMA QP netLayer " << layer << " is defined but not supported in this release.");
+        return ACLSHMEM_NOT_SUPPORTED;
+    }
+    g_udma_qp_config.netLayerPolicy[qp_idx] = layer;
+    return ACLSHMEM_SUCCESS;
+}
+
+int aclshmemx_get_qp_net_layer(
+    data_op_engine_type_t engine, int peer, uint32_t qp_idx, aclshmemx_net_layer_t* net_layer)
+{
+    if (net_layer == nullptr) {
+        SHM_LOG_ERROR(
+            "Failed to get QP netLayer: net_layer output pointer is null, engine=" << engine << ", peer=" << peer
+                                                                                   << ", qp_idx=" << qp_idx);
+        return ACLSHMEM_INVALID_VALUE;
+    }
+    if (engine != ACLSHMEM_DATA_OP_UDMA) {
+        SHM_LOG_ERROR("Failed to get QP netLayer: unsupported engine=" << engine);
+        return ACLSHMEM_NOT_SUPPORTED;
+    }
+    std::lock_guard<std::mutex> lock(g_aclshmem_ctx_mutex);
+    if (init_manager == nullptr || g_instance_ctx == nullptr) {
+        SHM_LOG_ERROR("Failed to get QP netLayer: ACLSHMEM is not initialized.");
+        return ACLSHMEM_NOT_INITED;
+    }
+    if (peer < 0 || peer >= g_state.npes) {
+        SHM_LOG_ERROR(
+            "Failed to get QP netLayer: peer " << peer << " is outside [0, " << g_state.npes << "), qp_idx=" << qp_idx);
+        return ACLSHMEM_INVALID_VALUE;
+    }
+    uint32_t resolved_layer = 0;
+    const int ret =
+        init_manager->get_qp_net_layer(g_instance_ctx->id, engine, static_cast<uint32_t>(peer), qp_idx, resolved_layer);
+    if (ret != ACLSHMEM_SUCCESS) {
+        SHM_LOG_ERROR(
+            "Failed to get QP netLayer from transport manager, instance_id="
+            << g_instance_ctx->id << ", peer=" << peer << ", qp_idx=" << qp_idx << ", ret=" << ret);
+        return ret;
+    }
+    *net_layer = static_cast<aclshmemx_net_layer_t>(resolved_layer);
     return ACLSHMEM_SUCCESS;
 }
 

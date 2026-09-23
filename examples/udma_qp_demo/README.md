@@ -35,7 +35,7 @@
 
 ### Kernel 实现
 
-（1）每个 AIV 使用自身的任务块编号作为 QP 编号，并根据 AIV 总数均分数据。
+（1）每个 AIV 使用自身的任务块编号作为 QP 编号，并根据总字节数按商和余数划分互不重叠的连续分片。
 
 （2）Put 模式调用 `aclshmemx_udma_qp_put_nbi`，Get 模式调用 `aclshmemx_udma_qp_get_nbi`，PutSignal 模式调用 `aclshmemx_udma_qp_put_signal_nbi`。每个 AIV 只提交自己负责的数据分片。
 
@@ -59,6 +59,9 @@ bash examples/udma_qp_demo/run.sh
 # 使用 4 个 QP 验证 put
 bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 4 -op put -elems 1048576
 
+# 稀疏指定 QP0 使用 netLayer 0、QP2 使用 netLayer 1；未指定的 QP1 使用默认选路
+bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 3 -qp_net_layers 0:0,2:1
+
 # 使用 8 个 QP 验证 get
 bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 8 -op get -elems 1048576
 
@@ -67,6 +70,13 @@ bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 4 -op put_signal -elems 10485
 
 # 从逻辑 NPU 4 开始绑定 4 个 PE
 bash examples/udma_qp_demo/run.sh -pes 4 -qp_count 4 -op put -first_npu 4
+
+# 使用非连续逻辑卡号；PE0/1/2/3 分别绑定 NPU1/3/2/4
+bash examples/udma_qp_demo/run.sh -pes 4 -qp_count 4 -op put -device_ids 1,3,2,4
+
+# 相同 QP/层策略仍由所有 PE 执行；这里只改变 PE 到逻辑设备的映射
+bash examples/udma_qp_demo/run.sh -pes 4 -qp_count 3 -device_ids 1,3,2,4 \
+    -qp_net_layers 0:0,2:1
 ```
 
 用例执行成功时，每个 PE 输出：
@@ -95,8 +105,11 @@ PutSignal 还会输出 signal 校验结果：
 | --- | --- | --- |
 | `-pes` | `2` | PE 总数，必须至少为 2；脚本启动相同数量的进程。 |
 | `-qp_count` | `2` | 每个对端 PE 创建的 QP 数，范围为 `[1, 32]`，所有 PE 必须一致。 |
+| `-qp_net_layers` | 未配置 | 以 `qp_idx:netLayer` 形式稀疏指定 UDMA 链路，例如 `0:0,2:1`。每个 `qp_idx` 必须小于 `qp_count` 且不能重复；该参数要求构建时启用 `-multi_link`。当前 setter 支持 layer 0/1。未指定的 QP 使用默认选路。所有 PE 必须使用相同配置。 |
 | `-op` | `put` | 运行模式，支持 `put`、`get`、`put_signal`。 |
-| `-elems` | `1048576` | 每个 PE 搬运的 `uint8_t` 元素数，必须大于 0 且能被 `qp_count` 整除。 |
+| `-elems` | `1048576` | 每个 PE 搬运的字节数，至少为 QP 数；支持不均分。 |
 | `-heap_mb` | `1024` | 每个 PE 的 SHMEM 对称堆大小，单位为 MiB；PutSignal 模式必须同时容纳数据缓冲区和每 QP 一个 `uint64_t` signal word。 |
-| `-first_npu` | `0` | PE0 对应的逻辑 NPU 编号；PE `i` 使用 `first_npu + i`。 |
+| `-peer_stride` | `1` | 环形通信的目标 PE 距离；实际目标、QP 网络层查询和日志均使用 `(pe + peer_stride) % pes`。取值范围为 `[1, pes)`。 |
+| `-first_npu` | `0` | 本机设备起点；本机第 i 个进程使用 `first_npu + i`。 |
+| `-device_ids` | 未配置 | 以逗号分隔的逻辑设备列表，数量必须等于 `pes`，且设备ID不能重复。第 i 项绑定 PE i，例如 `1,3,2,4`。配置后优先于 `first_npu`。 |
 | `-ipport` | 动态本机端口 | 引导初始化地址；未指定时由脚本随机选择本机端口。 |

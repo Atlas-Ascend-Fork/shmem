@@ -56,6 +56,8 @@ public:
     Result Connect() override;
     const void* GetQpInfo() const override;
     TransportDeviceInfo GetDeviceInfo() const override;
+    Result GetQpNetLayer(
+        data_op_engine_type_t engine, uint32_t peer, uint32_t qpIdx, uint32_t& netLayer) const override;
     Result QueryMemoryKey(uint64_t /*addr*/, TransportMemoryKey& /*key*/) override { return ACLSHMEM_SUCCESS; }
     Result ParseMemoryKey(const TransportMemoryKey& /*key*/, uint64_t& /*addr*/, uint64_t& /*size*/) override
     {
@@ -109,13 +111,18 @@ private:
     struct QpRoute {
         uint32_t local_eid_index{0};
         uint32_t remote_eid_index{0};
+        NetType net_type{};
+        uint32_t net_layer{};
+        std::string net_instance_id{};
+        std::string plane_id{};
+        size_t port_count{};
     };
     struct PeerRouteInfo {
         QpRoute default_route{};
         std::vector<QpRoute> qp_routes{};
     };
     bool CreateEndpoint(uint32_t eid_index, uint32_t peer_rank, const std::array<uint8_t, 16>& target_eid_raw);
-    bool PrepareOpenDevice(uint32_t device_id, uint32_t rank_count);
+    Result PrepareOpenDevice(uint32_t device_id, uint32_t rank_count);
     // Allgather the local HCOMM endpoint descriptors into `exchange`.
     Result ExchangeEndpointDescriptors(EndpointExchange& exchange) const;
     // Locate dst_pe's exchanged endpoint descriptor on remote_eid_index, or nullptr if absent.
@@ -171,7 +178,7 @@ private:
     void FillMemInfo(
         const SqContext& sq_context, const RegedBufferEntity& remote_buffer, aclshmemi_ubmem_info_t& dst_mem) const;
     void PrintHostUdmaInfo(const aclshmemi_aiv_udma_info_t& host_info) const;
-    std::vector<HcommMemHandle> CollectChannelMemHandles(uint32_t eid_index, uint32_t peer_rank) const;
+    std::vector<HcommMemHandle> CollectChannelMemHandles(uint32_t eid_index) const;
 #if defined(ACLSHMEM_MSSANITIZER_BUILD)
     // mssanitizer: report/withdraw the URMA-allocated (non-rtMalloc) SQ/CQ rings and doorbells
     // for every active slot/QP context. Compiled out of normal builds.
@@ -192,6 +199,8 @@ private:
     uint32_t rank_id_{0};
     uint32_t rank_count_{1};
     uint32_t qp_num_{1};
+    std::map<uint32_t, uint32_t> net_layer_policy_{};
+    bool multi_link_enabled_{false};
     uint32_t user_id_{0};
     uint32_t phy_id_{0};
     hybm_role_type role_{hybm_role_type::HYBM_ROLE_PEER};
@@ -201,11 +210,13 @@ private:
     // N x N routing matrix: [rank * rank_count_ + peer] = local-port eid_index `rank` uses to reach
     // `peer`. Only read on the relay path to resolve each (actual_pe, relay_pe) slot's target EID.
     std::vector<int32_t> all_local_routes_;
-    std::map<std::pair<uint32_t, uint32_t>, EndpointDesc> endpoint_desc_map_; // (eid_index, peer_rank) -> endpoint desc
-    std::map<std::pair<uint32_t, uint32_t>, EndpointHandle> endpoint_handle_map_; // (eid_index, peer_rank) -> handle
-    std::map<std::pair<uint32_t, uint32_t>, uint16_t> endpoint_listen_port_map_;  // (eid_index, peer_rank) -> port
-    std::map<uint64_t, std::map<std::pair<uint32_t, uint32_t>, HcommMemHandle>>
-        mem_record_map_; // addr -> endpoint key -> handle
+    // HCOMM endpoints and memory registrations are local-EID resources and are shared by all peers using that EID.
+    // endpoint_desc_map_ retains the logical (eid_index, peer_rank) bindings required by descriptor exchange.
+    std::map<std::pair<uint32_t, uint32_t>, EndpointDesc> endpoint_desc_map_;
+    std::map<uint32_t, EndpointDesc> endpoint_local_desc_map_;              // eid_index -> endpoint desc
+    std::map<uint32_t, EndpointHandle> endpoint_handle_map_;                // eid_index -> handle
+    std::map<uint32_t, uint16_t> endpoint_listen_port_map_;                 // eid_index -> port
+    std::map<uint64_t, std::map<uint32_t, HcommMemHandle>> mem_record_map_; // addr -> eid_index -> handle
     // Registration geometry is kept separately from the opaque HCOMM handles. The current UDMA
     // data-plane ABI carries one memory descriptor per channel slot, so Connect requires this map
     // to contain exactly one entry and validates that the peer descriptor covers the same heap.

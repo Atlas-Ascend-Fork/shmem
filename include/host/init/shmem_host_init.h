@@ -139,6 +139,90 @@ ACLSHMEM_HOST_API int aclshmemx_set_attr_uniqueid_args(
  */
 ACLSHMEM_HOST_API int aclshmemx_set_qp_num(data_op_engine_type_t engine, uint32_t qp_num);
 
+typedef enum : uint32_t {
+    ACLSHMEM_NET_LAYER_0 = 0U,                /**< Supported by aclshmemx_set_qp_net_layer; typically direct MESH. */
+    ACLSHMEM_NET_LAYER_1 = 1U,                /**< Supported by aclshmemx_set_qp_net_layer; typically switched CLOS. */
+    ACLSHMEM_NET_LAYER_2 = 2U,                /**< Reserved; not supported by aclshmemx_set_qp_net_layer. */
+    ACLSHMEM_NET_LAYER_3 = 3U,                /**< Reserved; not supported by aclshmemx_set_qp_net_layer. */
+    ACLSHMEM_NET_LAYER_DEFAULT = 0xFFFFFFFFU, /**< Clear the explicit policy and restore default route selection. */
+} aclshmemx_net_layer_t;
+
+/**
+ * @brief Configure the process-wide topology netLayer policy for one QP.
+ *
+ * @note Call before ACLSHMEM initialization. The policy applies to peers in the same layer-0 network instance.
+ *       Repeated calls for the same QP replace the previous value. Pass ACLSHMEM_NET_LAYER_DEFAULT to remove an
+ *
+ * explicit entry and restore default route selection for that QP. The first implementation supports UDMA
+ * netLayer 0
+ * and 1 when multi-link is enabled.
+ *       Before initialization, all participating PEs must use the same effective
+ * configuration for this engine: multi-link mode, QP count, explicitly configured qp_idx set, and requested netLayer
+ * for each configured QP. The policy is sparse; QPs without an explicit entry use default route selection. For
+ * same-domain peers,
+ *       an explicit entry selects the requested layer. Cross-domain peers ignore explicit layer
+ * policies and use
+ *       reachable CLOS candidates only because MESH routes are limited to the same layer-0 network
+ * instance. Thus,
+ *       the same QP is not required to resolve to the same actual netLayer for every peer.
+ * The
+ * policy is frozen while any ACLSHMEM instance is alive and remains available until the last instance is finalized.
+ * Finalizing the last instance clears all explicit QP layer entries; configure the desired entries again before the
+ * next initialization cycle.
+ *
+ * @code
+ * // Execute the same effective configuration on every participating PE before initialization.
+ * aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 3);
+ * aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 0, ACLSHMEM_NET_LAYER_0);
+ *
+ * aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 2, ACLSHMEM_NET_LAYER_1);
+ * // Before initialization, an explicit
+ * entry can be removed if this QP should use default route selection.
+ *
+ * aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 2, ACLSHMEM_NET_LAYER_DEFAULT);
+ * // QP 1 has no explicit entry
+ * and therefore uses default route selection.
+ * aclshmemx_init_attr(...);
+ * @endcode
+ *
+ * @param engine              [in] Data operation engine; currently only UDMA is supported.
+ * @param qp_idx              [in] QP index in [0, configured QP count).
+ * @param net_layer           [in] Effective network layer requested for this QP. Product topology interpretation
+ *                              may map a raw topology-file layer to this public layer value. Use layer 0 for a
+ *
+ * same-domain direct MESH route and layer 1 for a switched CLOS route; layers 2 and 3
+ * are reserved and are not
+ * currently supported by this setter. Use
+ *                              ACLSHMEM_NET_LAYER_DEFAULT to clear this QP's
+ * explicit policy.
+ * @return ACLSHMEM_SUCCESS on success, otherwise an ACLSHMEM error code.
+ */
+ACLSHMEM_HOST_API int aclshmemx_set_qp_net_layer(
+    data_op_engine_type_t engine, uint32_t qp_idx, aclshmemx_net_layer_t net_layer);
+
+/**
+ * @brief Query the effective network layer used by one established peer/QP route.
+ *
+ * @note Call this interface after ACLSHMEM initialization has completed.
+ *
+ * @param engine              [in] Data operation engine; currently only UDMA is supported.
+ * @param peer                [in] Remote PE in the current instance.
+ * @param qp_idx              [in] UDMA QP index for the remote PE.
+ * @param net_layer           [out] Effective network layer of the route selected during initialization.
+ * @return ACLSHMEM_SUCCESS on success, otherwise an ACLSHMEM error code.
+ */
+ACLSHMEM_HOST_API int aclshmemx_get_qp_net_layer(
+    data_op_engine_type_t engine, int peer, uint32_t qp_idx, aclshmemx_net_layer_t* net_layer);
+
+/**
+ * @brief Query the process-wide QP count configured for a data operation engine.
+ *
+ * @param engine              [in] Data operation engine.
+ * @param qp_num              [out] Configured QP count.
+ * @return ACLSHMEM_SUCCESS on success, otherwise an ACLSHMEM error code.
+ */
+ACLSHMEM_HOST_API int aclshmemx_get_qp_num(data_op_engine_type_t engine, uint32_t* qp_num);
+
 /**
  * @brief Initialize the resources required for ACLSHMEM task based on attributes.
  *        Attributes can be created by users or obtained by calling <b>aclshmemx_set_attr_uniqueid_args()</b>.

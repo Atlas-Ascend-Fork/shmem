@@ -13,6 +13,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 #include "host/shmem_host_def.h"
 #include "host_device/shmem_common_types.h"
@@ -49,6 +50,8 @@ typedef struct entity_member {
     aclshmem_device_host_state_t* entity_host_state;
     aclshmem_device_host_state_t* entity_device_state;
     uint32_t udma_qp_num{1};
+    std::map<uint32_t, uint32_t> udma_net_layer_policy{};
+    bool udma_multi_link_enabled{false};
     uint32_t rdma_qp_num{1};
     uint32_t sdma_qp_num{1};
 } entity_member;
@@ -76,6 +79,8 @@ public:
         const shm::transport::UdmaQpConfig& udma_qp_config, uint32_t rdma_qp_num, uint32_t sdma_qp_num);
     void* get_buffer_ptr(const void* local_ptr);
     int release_aclshmem_entity(uint64_t instance_id);
+    int get_qp_net_layer(
+        uint64_t instance_id, data_op_engine_type_t engine, uint32_t peer, uint32_t qp_idx, uint32_t& net_layer);
 
 private:
     int reach_info_init(void*& gva);

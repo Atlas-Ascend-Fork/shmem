@@ -30,7 +30,6 @@
 #include "init/shmemi_init.h"
 #include "unittest_main_test.h"
 #include "unittest/utils/scope_env.h"
-
 namespace shm {
 constexpr uint32_t timeout = 50;
 void logger_test_example(int level, const char* msg)
@@ -42,6 +41,7 @@ void exception_report_test_callback(void* exception_info) { (void)exception_info
 } // namespace shm
 
 static_assert(sizeof(aclshmem_init_optional_attr_t) == 24, "Unexpected init optional attr ABI change");
+static_assert(sizeof(aclshmemx_net_layer_t) == sizeof(uint32_t), "Unexpected netLayer ABI width");
 
 void test_aclshmem_init(int rank_id, int n_ranks, uint64_t local_mem_size)
 {
@@ -79,9 +79,18 @@ void test_qp_reconfiguration_after_last_finalize(int rank_id, int /*n_ranks*/, u
     EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 2), ACLSHMEM_SUCCESS);
 
     aclshmemx_init_attr_t attributes;
+#ifdef ACLSHMEM_MULTI_LINK_SUPPORT
+    EXPECT_EQ(aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 0, ACLSHMEM_NET_LAYER_0), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 1, ACLSHMEM_NET_LAYER_1), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 1), ACLSHMEM_INVALID_VALUE);
+    uint32_t configured_qp_num = 0;
+    EXPECT_EQ(aclshmemx_get_qp_num(ACLSHMEM_DATA_OP_UDMA, &configured_qp_num), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(configured_qp_num, 2U);
+#endif
     test_set_attr(0, 1, local_mem_size, test_global_ipport, &attributes);
     EXPECT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes), ACLSHMEM_SUCCESS);
     EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 4), ACLSHMEM_NOT_SUPPORTED);
+    EXPECT_EQ(aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 0, ACLSHMEM_NET_LAYER_0), ACLSHMEM_NOT_SUPPORTED);
     EXPECT_EQ(aclshmem_finalize(), ACLSHMEM_SUCCESS);
 
     EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 4), ACLSHMEM_SUCCESS);
@@ -595,6 +604,47 @@ TEST(TestInitAPI, TestSetUdmaQpNumBeforeInit)
 
     EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 0), ACLSHMEM_INVALID_VALUE);
     EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, ACLSHMEM_MAX_QP_NUM + 1), ACLSHMEM_INVALID_VALUE);
+    EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 1), ACLSHMEM_SUCCESS);
+}
+
+TEST(TestInitAPI, TestSetQpNetLayerAndGetQpNumBeforeInit)
+{
+    EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 3), ACLSHMEM_SUCCESS);
+#ifdef ACLSHMEM_MULTI_LINK_SUPPORT
+    EXPECT_EQ(aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 0, ACLSHMEM_NET_LAYER_0), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 0, ACLSHMEM_NET_LAYER_1), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 0, ACLSHMEM_NET_LAYER_0), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 3, ACLSHMEM_NET_LAYER_0), ACLSHMEM_INVALID_VALUE);
+    EXPECT_EQ(aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 2, ACLSHMEM_NET_LAYER_1), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 2), ACLSHMEM_INVALID_VALUE);
+    EXPECT_EQ(aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 2, ACLSHMEM_NET_LAYER_DEFAULT), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 2), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 1, ACLSHMEM_NET_LAYER_2), ACLSHMEM_NOT_SUPPORTED);
+    EXPECT_EQ(
+        aclshmemx_set_qp_net_layer(
+            ACLSHMEM_DATA_OP_UDMA, 1, static_cast<aclshmemx_net_layer_t>(ACLSHMEM_NET_LAYER_3 + 1U)),
+        ACLSHMEM_INVALID_VALUE);
+    EXPECT_EQ(aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_SDMA, 0, ACLSHMEM_NET_LAYER_0), ACLSHMEM_NOT_SUPPORTED);
+    EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 5), ACLSHMEM_SUCCESS);
+#else
+    EXPECT_EQ(aclshmemx_set_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 0, ACLSHMEM_NET_LAYER_0), ACLSHMEM_NOT_SUPPORTED);
+#endif
+
+    uint32_t qp_num = 0;
+    EXPECT_EQ(aclshmemx_get_qp_num(ACLSHMEM_DATA_OP_UDMA, &qp_num), ACLSHMEM_SUCCESS);
+#ifdef ACLSHMEM_MULTI_LINK_SUPPORT
+    EXPECT_EQ(qp_num, 5U);
+#else
+    EXPECT_EQ(qp_num, 3U);
+#endif
+    EXPECT_EQ(aclshmemx_get_qp_num(ACLSHMEM_DATA_OP_UDMA, nullptr), ACLSHMEM_INVALID_VALUE);
+
+    aclshmemx_net_layer_t net_layer = ACLSHMEM_NET_LAYER_3;
+    EXPECT_EQ(aclshmemx_get_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 1, 0, &net_layer), ACLSHMEM_NOT_INITED);
+    EXPECT_EQ(net_layer, ACLSHMEM_NET_LAYER_3);
+    EXPECT_EQ(aclshmemx_get_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, 1, 0, nullptr), ACLSHMEM_INVALID_VALUE);
+    EXPECT_EQ(aclshmemx_get_qp_net_layer(ACLSHMEM_DATA_OP_SDMA, 1, 0, &net_layer), ACLSHMEM_NOT_SUPPORTED);
+
     EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 1), ACLSHMEM_SUCCESS);
 }
 

@@ -48,6 +48,11 @@ public:
     virtual int32_t Mmap() noexcept = 0;
     virtual bool SdmaReaches(uint32_t remoteRank) const noexcept = 0;
     virtual hybm_data_op_type CanReachDataOperators(uint32_t remoteRank) const noexcept = 0;
+    virtual int32_t GetQpNetLayer(
+        data_op_engine_type_t engine, uint32_t peer, uint32_t qpIdx, uint32_t& netLayer) const noexcept
+    {
+        return ACLSHMEM_NOT_SUPPORTED;
+    }
 
     virtual bool CheckAddressInEntity(const void* ptr, uint64_t length) const noexcept = 0;
 

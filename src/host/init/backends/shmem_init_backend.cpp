@@ -97,6 +97,8 @@ int aclshmemi_init_backend::bind_aclshmem_entity(
     elem->entity_boot_handle = handle;
     elem->user_buffer_heap_input = std::move(user_buffer_heap_input);
     elem->udma_qp_num = udma_qp_config.qpNum;
+    elem->udma_net_layer_policy = udma_qp_config.netLayerPolicy;
+    elem->udma_multi_link_enabled = udma_qp_config.multiLinkEnabled;
     elem->rdma_qp_num = rdma_qp_num;
     elem->sdma_qp_num = sdma_qp_num;
     if (elem->user_buffer_heap_input != nullptr) {
@@ -142,6 +144,17 @@ void* aclshmemi_init_backend::get_buffer_ptr(const void* local_ptr)
         return static_cast<uint8_t*>(entity->entity_host_state->heap_base) + entry.segment_offset + inner_offset;
     }
     return nullptr;
+}
+
+int aclshmemi_init_backend::get_qp_net_layer(
+    uint64_t instance_id, data_op_engine_type_t engine, uint32_t peer, uint32_t qp_idx, uint32_t& net_layer)
+{
+    std::lock_guard<std::mutex> lock(entity_map_mutex_);
+    const auto it = entity_map_.find(instance_id);
+    if (it == entity_map_.end() || it->second == nullptr || it->second->hbm_entity == nullptr) {
+        return ACLSHMEM_NOT_INITED;
+    }
+    return hybm_get_qp_net_layer(it->second->hbm_entity, engine, peer, qp_idx, net_layer);
 }
 
 int aclshmemi_init_backend::release_aclshmem_entity(uint64_t instance_id)
@@ -261,6 +274,8 @@ int aclshmemi_init_backend::create_entity(aclshmem_mem_type_t mem_type)
     transport_options.protocol = options.bmDataOpType;
     transport_options.role = hybm_role_type::HYBM_ROLE_PEER;
     transport_options.udmaQpConfig.qpNum = elem->udma_qp_num;
+    transport_options.udmaQpConfig.netLayerPolicy = elem->udma_net_layer_policy;
+    transport_options.udmaQpConfig.multiLinkEnabled = elem->udma_multi_link_enabled;
     transport_options.rdmaQpConfig.qpNum = elem->rdma_qp_num;
     transport_options.sdmaQpNum = elem->sdma_qp_num;
     if (mem_type == HOST_SIDE) {

@@ -268,5 +268,15 @@ TransportDeviceInfo CompositeTransportManager::GetDeviceInfo() const
     return info;
 }
 
+Result CompositeTransportManager::GetQpNetLayer(
+    data_op_engine_type_t engine, uint32_t peer, uint32_t qp_idx, uint32_t& net_layer) const
+{
+    if (engine != ACLSHMEM_DATA_OP_UDMA) {
+        return ACLSHMEM_NOT_SUPPORTED;
+    }
+    auto udma = GetManager(TT_UDMA);
+    return udma == nullptr ? ACLSHMEM_NOT_SUPPORTED : udma->GetQpNetLayer(engine, peer, qp_idx, net_layer);
+}
+
 } // namespace transport
 } // namespace shm

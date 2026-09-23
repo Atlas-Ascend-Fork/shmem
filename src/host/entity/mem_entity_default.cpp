@@ -944,6 +944,13 @@ hybm_data_op_type MemEntityDefault::CanReachDataOperators(uint32_t remoteRank) c
     return static_cast<hybm_data_op_type>(supportDataOp);
 }
 
+int32_t MemEntityDefault::GetQpNetLayer(
+    data_op_engine_type_t engine, uint32_t peer, uint32_t qp_idx, uint32_t& net_layer) const noexcept
+{
+    return transportManager_ == nullptr ? ACLSHMEM_NOT_SUPPORTED :
+                                          transportManager_->GetQpNetLayer(engine, peer, qp_idx, net_layer);
+}
+
 void* MemEntityDefault::GetReservedMemoryPtr(hybm_mem_type memType) noexcept
 {
     if (memType == hybm_mem_type::HYBM_MEM_TYPE_DEVICE) {

@@ -75,6 +75,8 @@ public:
     bool CheckAddressInEntity(const void* ptr, uint64_t length) const noexcept override;
     bool SdmaReaches(uint32_t remoteRank) const noexcept override;
     hybm_data_op_type CanReachDataOperators(uint32_t remoteRank) const noexcept override;
+    int32_t GetQpNetLayer(
+        data_op_engine_type_t engine, uint32_t peer, uint32_t qpIdx, uint32_t& netLayer) const noexcept override;
 
 private:
     static int CheckOptions(const hybm_options* options) noexcept;

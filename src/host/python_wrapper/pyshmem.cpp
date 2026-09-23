@@ -242,6 +242,13 @@ void DefineShmemAttr(py::module_& m)
         .value("ROCE", ACLSHMEM_DATA_OP_ROCE)
         .value("UDMA", ACLSHMEM_DATA_OP_UDMA);
 
+    py::enum_<aclshmemx_net_layer_t>(m, "NetLayer")
+        .value("LAYER_0", ACLSHMEM_NET_LAYER_0)
+        .value("LAYER_1", ACLSHMEM_NET_LAYER_1)
+        .value("LAYER_2", ACLSHMEM_NET_LAYER_2)
+        .value("LAYER_3", ACLSHMEM_NET_LAYER_3)
+        .value("DEFAULT", ACLSHMEM_NET_LAYER_DEFAULT);
+
     py::class_<aclshmem_init_optional_attr_t>(m, "OptionalAttr")
         .def(py::init([]() {
             auto optional_attr = new (std::nothrow) aclshmem_init_optional_attr_t;
@@ -475,6 +482,45 @@ Valid ranges and scopes differ per engine: SDMA accepts [1, min(device vector-co
 local device-only streams (not per peer); UDMA and ROCE accept [1, 32] QP groups per peer connection.
 This process-wide configuration must be set before ACLSHMEM initialization, must be identical on every PE,
 and is reset to 1 after the last instance is finalized.
+    )");
+
+    m.def(
+        "aclshmemx_set_qp_net_layer", &aclshmemx_set_qp_net_layer, py::call_guard<py::gil_scoped_release>(),
+        py::arg("engine"), py::arg("qp_idx"), py::arg("net_layer"), R"(
+Configure the effective network layer for one QP.
+
+The first UDMA release supports LAYER_0 and LAYER_1 when multi-link is enabled. Pass DEFAULT to clear an explicit
+entry. Configure the QP count first, and call this function before ACLSHMEM initialization.
+    )");
+
+    m.def(
+        "aclshmemx_get_qp_num",
+        [](data_op_engine_type_t engine) {
+            uint32_t qp_num = 0;
+            int status = ACLSHMEM_SUCCESS;
+            {
+                py::gil_scoped_release release;
+                status = aclshmemx_get_qp_num(engine, &qp_num);
+            }
+            return py::make_tuple(status, qp_num);
+        },
+        py::arg("engine"), R"(
+Return ``(status, qp_num)`` for a data operation engine.
+    )");
+
+    m.def(
+        "aclshmemx_get_qp_net_layer",
+        [](data_op_engine_type_t engine, int peer, uint32_t qp_idx) {
+            aclshmemx_net_layer_t net_layer = ACLSHMEM_NET_LAYER_DEFAULT;
+            int status = ACLSHMEM_SUCCESS;
+            {
+                py::gil_scoped_release release;
+                status = aclshmemx_get_qp_net_layer(engine, peer, qp_idx, &net_layer);
+            }
+            return py::make_tuple(status, net_layer);
+        },
+        py::arg("engine"), py::arg("peer"), py::arg("qp_idx"), R"(
+Return ``(status, net_layer)`` for the route selected for one peer/QP during initialization.
     )");
 
     m.def(

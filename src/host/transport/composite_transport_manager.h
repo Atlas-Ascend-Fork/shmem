@@ -42,6 +42,8 @@ public:
     const std::string& GetNic() const override;
     const void* GetQpInfo() const override;
     TransportDeviceInfo GetDeviceInfo() const override;
+    Result GetQpNetLayer(
+        data_op_engine_type_t engine, uint32_t peer, uint32_t qpIdx, uint32_t& netLayer) const override;
 
 private:
     TransManagerPtr GetManager(TransportType type) const;
