@@ -93,16 +93,13 @@ ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_FETCH_HOST);
     }
 ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_FETCH);
 
-#define TEST_MTE_ATOMIC_FETCH_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemMteAtomicFetch##NAME##Mem)                                                \
-    {                                                                                                   \
-        const int processCount = test_gnpu_num;                                                         \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                 \
-        if (is_hardware_atomic_supported()) {                                                           \
-            test_mutil_task(test_aclshmem_mte_atomic_fetch_##NAME##_mem, local_mem_size, processCount); \
-        } else {                                                                                        \
-            std::cout << "Skip atomic_fetch test because it is not supported" << std::endl;             \
-        }                                                                                               \
+#define TEST_MTE_ATOMIC_FETCH_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemMteAtomicFetch##NAME##Mem)                                            \
+    {                                                                                               \
+        const int processCount = test_gnpu_num;                                                     \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                             \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                               \
+        test_mutil_task(test_aclshmem_mte_atomic_fetch_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE(TEST_MTE_ATOMIC_FETCH_API);
 
@@ -162,16 +159,13 @@ ACLSHMEM_MTE_ATOMIC_SWAP_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_SET_HOST);
     }
 ACLSHMEM_MTE_ATOMIC_SWAP_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_SET);
 
-#define TEST_MTE_ATOMIC_SET_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemMteAtomicSet##NAME##Mem)                                                \
-    {                                                                                                 \
-        const int processCount = test_gnpu_num;                                                       \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                               \
-        if (is_hardware_atomic_supported()) {                                                         \
-            test_mutil_task(test_aclshmem_mte_atomic_set_##NAME##_mem, local_mem_size, processCount); \
-        } else {                                                                                      \
-            std::cout << "Skip atomic_set test because it is not supported" << std::endl;             \
-        }                                                                                             \
+#define TEST_MTE_ATOMIC_SET_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemMteAtomicSet##NAME##Mem)                                            \
+    {                                                                                             \
+        const int processCount = test_gnpu_num;                                                   \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                           \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                             \
+        test_mutil_task(test_aclshmem_mte_atomic_set_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_MTE_ATOMIC_SWAP_FUNC_TYPE(TEST_MTE_ATOMIC_SET_API);
 
@@ -246,16 +240,13 @@ ACLSHMEM_MTE_ATOMIC_SWAP_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_SWAP_HOST);
     }
 ACLSHMEM_MTE_ATOMIC_SWAP_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_SWAP);
 
-#define TEST_MTE_ATOMIC_SWAP_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemMteAtomicSwap##NAME##Mem)                                                \
-    {                                                                                                  \
-        const int processCount = test_gnpu_num;                                                        \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                \
-        if (is_hardware_atomic_supported()) {                                                          \
-            test_mutil_task(test_aclshmem_mte_atomic_swap_##NAME##_mem, local_mem_size, processCount); \
-        } else {                                                                                       \
-            std::cout << "Skip atomic_swap test because it is not supported" << std::endl;             \
-        }                                                                                              \
+#define TEST_MTE_ATOMIC_SWAP_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemMteAtomicSwap##NAME##Mem)                                            \
+    {                                                                                              \
+        const int processCount = test_gnpu_num;                                                    \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                            \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                              \
+        test_mutil_task(test_aclshmem_mte_atomic_swap_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_MTE_ATOMIC_SWAP_FUNC_TYPE(TEST_MTE_ATOMIC_SWAP_API);
 
@@ -331,15 +322,12 @@ ACLSHMEM_MTE_ATOMIC_SWAP_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_COMPARE_SWAP_HOST);
     }
 ACLSHMEM_MTE_ATOMIC_SWAP_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_COMPARE_SWAP);
 
-#define TEST_MTE_ATOMIC_COMPARE_SWAP_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemMteAtomicCompareSwap##NAME##Mem)                                                 \
-    {                                                                                                          \
-        const int processCount = test_gnpu_num;                                                                \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                        \
-        if (is_hardware_atomic_supported()) {                                                                  \
-            test_mutil_task(test_aclshmem_mte_atomic_compare_swap_##NAME##_mem, local_mem_size, processCount); \
-        } else {                                                                                               \
-            std::cout << "Skip atomic_compare_swap test because it is not supported" << std::endl;             \
-        }                                                                                                      \
+#define TEST_MTE_ATOMIC_COMPARE_SWAP_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemMteAtomicCompareSwap##NAME##Mem)                                             \
+    {                                                                                                      \
+        const int processCount = test_gnpu_num;                                                            \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                    \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                                      \
+        test_mutil_task(test_aclshmem_mte_atomic_compare_swap_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_MTE_ATOMIC_SWAP_FUNC_TYPE(TEST_MTE_ATOMIC_COMPARE_SWAP_API);

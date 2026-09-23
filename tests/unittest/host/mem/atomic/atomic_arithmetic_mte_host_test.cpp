@@ -85,16 +85,13 @@ ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_INC_HOST);
     }
 ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_INC);
 
-#define TEST_MTE_ATOMIC_INC_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemMteAtomicInc##NAME##Mem)                                                \
-    {                                                                                                 \
-        const int processCount = test_gnpu_num;                                                       \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                               \
-        if (is_hardware_atomic_supported()) {                                                         \
-            test_mutil_task(test_aclshmem_mte_atomic_inc_##NAME##_mem, local_mem_size, processCount); \
-        } else {                                                                                      \
-            std::cout << "Skip atomic_inc test because it is not supported" << std::endl;             \
-        }                                                                                             \
+#define TEST_MTE_ATOMIC_INC_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemMteAtomicInc##NAME##Mem)                                            \
+    {                                                                                             \
+        const int processCount = test_gnpu_num;                                                   \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                           \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                             \
+        test_mutil_task(test_aclshmem_mte_atomic_inc_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE(TEST_MTE_ATOMIC_INC_API);
 
@@ -154,22 +151,19 @@ ACLSHMEM_MTE_ATOMIC_ADD_FUNC_EXT_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_ADD_HOST);
 ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE_HOST(TEST_ACLSHMEM_MTE_ATOMIC_ADD);
 ACLSHMEM_MTE_ATOMIC_ADD_FUNC_EXT_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_ADD);
 
-#define TEST_MTE_ATOMIC_ADD_API(NAME, TYPE)                                                               \
-    TEST(TestMemApi, TestShmemMteAtomicAdd##NAME##Mem)                                                    \
-    {                                                                                                     \
-        const int processCount = test_gnpu_num;                                                           \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                   \
-        if constexpr (                                                                                    \
-            std::is_same<TYPE, uint32_t>::value || std::is_same<TYPE, uint64_t>::value ||                 \
-            std::is_same<TYPE, int64_t>::value) {                                                         \
-            if (is_hardware_atomic_supported()) {                                                         \
-                test_mutil_task(test_aclshmem_mte_atomic_add_##NAME##_mem, local_mem_size, processCount); \
-            } else {                                                                                      \
-                std::cout << "Skip atomic_add test because it is not supported" << std::endl;             \
-            }                                                                                             \
-        } else {                                                                                          \
-            test_mutil_task(test_aclshmem_mte_atomic_add_##NAME##_mem, local_mem_size, processCount);     \
-        }                                                                                                 \
+#define TEST_MTE_ATOMIC_ADD_API(NAME, TYPE)                                                           \
+    TEST(TestMemApi, TestShmemMteAtomicAdd##NAME##Mem)                                                \
+    {                                                                                                 \
+        const int processCount = test_gnpu_num;                                                       \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                               \
+        if constexpr (                                                                                \
+            std::is_same<TYPE, uint32_t>::value || std::is_same<TYPE, uint64_t>::value ||             \
+            std::is_same<TYPE, int64_t>::value) {                                                     \
+            SKIP_IF_UNSUPPORTED_ATOMIC();                                                             \
+            test_mutil_task(test_aclshmem_mte_atomic_add_##NAME##_mem, local_mem_size, processCount); \
+        } else {                                                                                      \
+            test_mutil_task(test_aclshmem_mte_atomic_add_##NAME##_mem, local_mem_size, processCount); \
+        }                                                                                             \
     }
 ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE_HOST(TEST_MTE_ATOMIC_ADD_API);
 ACLSHMEM_MTE_ATOMIC_ADD_FUNC_EXT_TYPE(TEST_MTE_ATOMIC_ADD_API);
@@ -245,16 +239,13 @@ ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_FETCH_INC_HOST);
     }
 ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_FETCH_INC);
 
-#define TEST_MTE_ATOMIC_FETCH_INC_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemMteAtomicFetchInc##NAME##Mem)                                                 \
-    {                                                                                                       \
-        const int processCount = test_gnpu_num;                                                             \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                     \
-        if (is_hardware_atomic_supported()) {                                                               \
-            test_mutil_task(test_aclshmem_mte_atomic_fetch_inc_##NAME##_mem, local_mem_size, processCount); \
-        } else {                                                                                            \
-            std::cout << "Skip atomic_fetch_inc test because it is not supported" << std::endl;             \
-        }                                                                                                   \
+#define TEST_MTE_ATOMIC_FETCH_INC_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemMteAtomicFetchInc##NAME##Mem)                                             \
+    {                                                                                                   \
+        const int processCount = test_gnpu_num;                                                         \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                 \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                                   \
+        test_mutil_task(test_aclshmem_mte_atomic_fetch_inc_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE(TEST_MTE_ATOMIC_FETCH_INC_API);
 
@@ -329,15 +320,12 @@ ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_FETCH_ADD_HOST);
     }
 ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE(TEST_ACLSHMEM_MTE_ATOMIC_FETCH_ADD);
 
-#define TEST_MTE_ATOMIC_FETCH_ADD_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemMteAtomicFetchAdd##NAME##Mem)                                                 \
-    {                                                                                                       \
-        const int processCount = test_gnpu_num;                                                             \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                     \
-        if (is_hardware_atomic_supported()) {                                                               \
-            test_mutil_task(test_aclshmem_mte_atomic_fetch_add_##NAME##_mem, local_mem_size, processCount); \
-        } else {                                                                                            \
-            std::cout << "Skip atomic_fetch_add test because it is not supported" << std::endl;             \
-        }                                                                                                   \
+#define TEST_MTE_ATOMIC_FETCH_ADD_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemMteAtomicFetchAdd##NAME##Mem)                                             \
+    {                                                                                                   \
+        const int processCount = test_gnpu_num;                                                         \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                 \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                                   \
+        test_mutil_task(test_aclshmem_mte_atomic_fetch_add_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_MTE_ATOMIC_ADD_FUNC_TYPE(TEST_MTE_ATOMIC_FETCH_ADD_API);

@@ -81,16 +81,13 @@ ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_AND_HOST);
     }
 ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_AND);
 
-#define TEST_ATOMIC_AND_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemAtomicAnd##NAME##Mem)                                               \
-    {                                                                                             \
-        const int processCount = test_gnpu_num;                                                   \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                           \
-        if (is_hardware_atomic_supported()) {                                                     \
-            test_mutil_task(test_aclshmem_atomic_and_##NAME##_mem, local_mem_size, processCount); \
-        } else {                                                                                  \
-            std::cout << "SKIP TestShmemAtomicAnd" << #NAME << "Mem" << std::endl;                \
-        }                                                                                         \
+#define TEST_ATOMIC_AND_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemAtomicAnd##NAME##Mem)                                           \
+    {                                                                                         \
+        const int processCount = test_gnpu_num;                                               \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                       \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                         \
+        test_mutil_task(test_aclshmem_atomic_and_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ATOMIC_AND_API);
 
@@ -173,16 +170,13 @@ ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_FETCH_AND_HOST);
     }
 ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_FETCH_AND);
 
-#define TEST_ATOMIC_FETCH_AND_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemAtomicFetchAnd##NAME##Mem)                                                \
-    {                                                                                                   \
-        const int processCount = test_gnpu_num;                                                         \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                 \
-        if (is_hardware_atomic_supported()) {                                                           \
-            test_mutil_task(test_aclshmem_atomic_fetch_and_##NAME##_mem, local_mem_size, processCount); \
-        } else {                                                                                        \
-            std::cout << "SKIP TestShmemAtomicFetchAnd" << #NAME << "Mem" << std::endl;                 \
-        }                                                                                               \
+#define TEST_ATOMIC_FETCH_AND_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemAtomicFetchAnd##NAME##Mem)                                            \
+    {                                                                                               \
+        const int processCount = test_gnpu_num;                                                     \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                             \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                               \
+        test_mutil_task(test_aclshmem_atomic_fetch_and_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ATOMIC_FETCH_AND_API);
 
@@ -248,16 +242,13 @@ ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_OR_HOST);
     }
 ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_OR);
 
-#define TEST_ATOMIC_OR_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemAtomicOr##NAME##Mem)                                               \
-    {                                                                                            \
-        const int processCount = test_gnpu_num;                                                  \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                          \
-        if (is_hardware_atomic_supported()) {                                                    \
-            test_mutil_task(test_aclshmem_atomic_or_##NAME##_mem, local_mem_size, processCount); \
-        } else {                                                                                 \
-            std::cout << "SKIP TestShmemAtomicOr" << #NAME << "Mem" << std::endl;                \
-        }                                                                                        \
+#define TEST_ATOMIC_OR_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemAtomicOr##NAME##Mem)                                           \
+    {                                                                                        \
+        const int processCount = test_gnpu_num;                                              \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                      \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                        \
+        test_mutil_task(test_aclshmem_atomic_or_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ATOMIC_OR_API);
 
@@ -340,16 +331,13 @@ ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_FETCH_OR_HOST);
     }
 ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_FETCH_OR);
 
-#define TEST_ATOMIC_FETCH_OR_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemAtomicFetchOr##NAME##Mem)                                                \
-    {                                                                                                  \
-        const int processCount = test_gnpu_num;                                                        \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                \
-        if (is_hardware_atomic_supported()) {                                                          \
-            test_mutil_task(test_aclshmem_atomic_fetch_or_##NAME##_mem, local_mem_size, processCount); \
-        } else {                                                                                       \
-            std::cout << "SKIP TestShmemAtomicFetchOr" << #NAME << "Mem" << std::endl;                 \
-        }                                                                                              \
+#define TEST_ATOMIC_FETCH_OR_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemAtomicFetchOr##NAME##Mem)                                            \
+    {                                                                                              \
+        const int processCount = test_gnpu_num;                                                    \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                            \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                              \
+        test_mutil_task(test_aclshmem_atomic_fetch_or_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ATOMIC_FETCH_OR_API);
 
@@ -413,16 +401,13 @@ ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_XOR_HOST);
     }
 ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_XOR);
 
-#define TEST_ATOMIC_XOR_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemAtomicXor##NAME##Mem)                                               \
-    {                                                                                             \
-        const int processCount = test_gnpu_num;                                                   \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                           \
-        if (is_hardware_atomic_supported()) {                                                     \
-            test_mutil_task(test_aclshmem_atomic_xor_##NAME##_mem, local_mem_size, processCount); \
-        } else {                                                                                  \
-            std::cout << "SKIP TestShmemAtomicXor" << #NAME << "Mem" << std::endl;                \
-        }                                                                                         \
+#define TEST_ATOMIC_XOR_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemAtomicXor##NAME##Mem)                                           \
+    {                                                                                         \
+        const int processCount = test_gnpu_num;                                               \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                       \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                         \
+        test_mutil_task(test_aclshmem_atomic_xor_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ATOMIC_XOR_API);
 
@@ -504,15 +489,12 @@ ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_FETCH_XOR_HOST);
     }
 ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_FETCH_XOR);
 
-#define TEST_ATOMIC_FETCH_XOR_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemAtomicFetchXor##NAME##Mem)                                                \
-    {                                                                                                   \
-        const int processCount = test_gnpu_num;                                                         \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                 \
-        if (is_hardware_atomic_supported()) {                                                           \
-            test_mutil_task(test_aclshmem_atomic_fetch_xor_##NAME##_mem, local_mem_size, processCount); \
-        } else {                                                                                        \
-            std::cout << "SKIP TestShmemAtomicFetchXor" << #NAME << "Mem" << std::endl;                 \
-        }                                                                                               \
+#define TEST_ATOMIC_FETCH_XOR_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemAtomicFetchXor##NAME##Mem)                                            \
+    {                                                                                               \
+        const int processCount = test_gnpu_num;                                                     \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                             \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                               \
+        test_mutil_task(test_aclshmem_atomic_fetch_xor_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_ATOMIC_LOGIC_FUNC_TYPE(TEST_ATOMIC_FETCH_XOR_API);

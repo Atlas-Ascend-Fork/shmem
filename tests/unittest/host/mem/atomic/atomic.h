@@ -13,4 +13,11 @@ inline bool is_hardware_atomic_supported()
     return false;
 }
 
+#define SKIP_IF_UNSUPPORTED_ATOMIC()                                   \
+    do {                                                               \
+        if (!is_hardware_atomic_supported()) {                         \
+            GTEST_SKIP() << "hardware atomic tests require Ascend950"; \
+        }                                                              \
+    } while (0)
+
 #endif // ATOMIC_H

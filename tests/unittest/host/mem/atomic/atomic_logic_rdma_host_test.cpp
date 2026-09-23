@@ -88,14 +88,13 @@ ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_RDMA_ATOMIC_AND_HOST);
     }
 ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_RDMA_ATOMIC_AND);
 
-#define TEST_RDMA_ATOMIC_AND_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemRdmaAtomicAnd##NAME##Mem)                                                \
-    {                                                                                                  \
-        const int processCount = test_gnpu_num;                                                        \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                \
-        if (is_hardware_atomic_supported()) {                                                          \
-            test_mutil_task(test_aclshmem_rdma_atomic_and_##NAME##_mem, local_mem_size, processCount); \
-        }                                                                                              \
+#define TEST_RDMA_ATOMIC_AND_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemRdmaAtomicAnd##NAME##Mem)                                            \
+    {                                                                                              \
+        const int processCount = test_gnpu_num;                                                    \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                            \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                              \
+        test_mutil_task(test_aclshmem_rdma_atomic_and_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_RDMA_ATOMIC_AND_API);
 
@@ -170,14 +169,13 @@ ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_RDMA_ATOMIC_FETCH_AND_HOST);
     }
 ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_RDMA_ATOMIC_FETCH_AND);
 
-#define TEST_RDMA_ATOMIC_FETCH_AND_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemRdmaAtomicFetchAnd##NAME##Mem)                                                 \
-    {                                                                                                        \
-        const int processCount = test_gnpu_num;                                                              \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                      \
-        if (is_hardware_atomic_supported()) {                                                                \
-            test_mutil_task(test_aclshmem_rdma_atomic_fetch_and_##NAME##_mem, local_mem_size, processCount); \
-        }                                                                                                    \
+#define TEST_RDMA_ATOMIC_FETCH_AND_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemRdmaAtomicFetchAnd##NAME##Mem)                                             \
+    {                                                                                                    \
+        const int processCount = test_gnpu_num;                                                          \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                  \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                                    \
+        test_mutil_task(test_aclshmem_rdma_atomic_fetch_and_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_RDMA_ATOMIC_FETCH_AND_API);
 
@@ -236,14 +234,13 @@ ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_RDMA_ATOMIC_OR_HOST);
     }
 ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_RDMA_ATOMIC_OR);
 
-#define TEST_RDMA_ATOMIC_OR_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemRdmaAtomicOr##NAME##Mem)                                                \
-    {                                                                                                 \
-        const int processCount = test_gnpu_num;                                                       \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                               \
-        if (is_hardware_atomic_supported()) {                                                         \
-            test_mutil_task(test_aclshmem_rdma_atomic_or_##NAME##_mem, local_mem_size, processCount); \
-        }                                                                                             \
+#define TEST_RDMA_ATOMIC_OR_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemRdmaAtomicOr##NAME##Mem)                                            \
+    {                                                                                             \
+        const int processCount = test_gnpu_num;                                                   \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                           \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                             \
+        test_mutil_task(test_aclshmem_rdma_atomic_or_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_RDMA_ATOMIC_OR_API);
 
@@ -318,14 +315,13 @@ ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_RDMA_ATOMIC_FETCH_OR_HOST);
     }
 ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_RDMA_ATOMIC_FETCH_OR);
 
-#define TEST_RDMA_ATOMIC_FETCH_OR_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemRdmaAtomicFetchOr##NAME##Mem)                                                 \
-    {                                                                                                       \
-        const int processCount = test_gnpu_num;                                                             \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                     \
-        if (is_hardware_atomic_supported()) {                                                               \
-            test_mutil_task(test_aclshmem_rdma_atomic_fetch_or_##NAME##_mem, local_mem_size, processCount); \
-        }                                                                                                   \
+#define TEST_RDMA_ATOMIC_FETCH_OR_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemRdmaAtomicFetchOr##NAME##Mem)                                             \
+    {                                                                                                   \
+        const int processCount = test_gnpu_num;                                                         \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                 \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                                   \
+        test_mutil_task(test_aclshmem_rdma_atomic_fetch_or_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_RDMA_ATOMIC_FETCH_OR_API);
 
@@ -384,14 +380,13 @@ ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_RDMA_ATOMIC_XOR_HOST);
     }
 ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_RDMA_ATOMIC_XOR);
 
-#define TEST_RDMA_ATOMIC_XOR_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemRdmaAtomicXor##NAME##Mem)                                                \
-    {                                                                                                  \
-        const int processCount = test_gnpu_num;                                                        \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                \
-        if (is_hardware_atomic_supported()) {                                                          \
-            test_mutil_task(test_aclshmem_rdma_atomic_xor_##NAME##_mem, local_mem_size, processCount); \
-        }                                                                                              \
+#define TEST_RDMA_ATOMIC_XOR_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemRdmaAtomicXor##NAME##Mem)                                            \
+    {                                                                                              \
+        const int processCount = test_gnpu_num;                                                    \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                            \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                              \
+        test_mutil_task(test_aclshmem_rdma_atomic_xor_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_RDMA_ATOMIC_XOR_API);
 
@@ -467,14 +462,13 @@ ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_RDMA_ATOMIC_FETCH_XOR_HOST);
     }
 ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_ACLSHMEM_RDMA_ATOMIC_FETCH_XOR);
 
-#define TEST_RDMA_ATOMIC_FETCH_XOR_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemRdmaAtomicFetchXor##NAME##Mem)                                                 \
-    {                                                                                                        \
-        const int processCount = test_gnpu_num;                                                              \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                      \
-        if (is_hardware_atomic_supported()) {                                                                \
-            test_mutil_task(test_aclshmem_rdma_atomic_fetch_xor_##NAME##_mem, local_mem_size, processCount); \
-        }                                                                                                    \
+#define TEST_RDMA_ATOMIC_FETCH_XOR_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemRdmaAtomicFetchXor##NAME##Mem)                                             \
+    {                                                                                                    \
+        const int processCount = test_gnpu_num;                                                          \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                  \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                                    \
+        test_mutil_task(test_aclshmem_rdma_atomic_fetch_xor_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_RDMA_ATOMIC_LOGIC_FUNC_TYPE(TEST_RDMA_ATOMIC_FETCH_XOR_API);
 #endif // ACLSHMEMI_RDMA_K_BACKEND_XSCALE || ACLSHMEMI_RDMA_K_BACKEND_HNS_1825

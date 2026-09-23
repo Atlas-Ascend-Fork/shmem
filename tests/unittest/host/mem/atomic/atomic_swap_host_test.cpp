@@ -90,14 +90,13 @@ ACLSHMEM_ATOMIC_ADD_950_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_FETCH_HOST);
     }
 ACLSHMEM_ATOMIC_ADD_950_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_FETCH);
 
-#define TEST_ATOMIC_FETCH_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemAtomicFetch##NAME##Mem)                                               \
-    {                                                                                               \
-        const int processCount = test_gnpu_num;                                                     \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                             \
-        if (is_hardware_atomic_supported()) {                                                       \
-            test_mutil_task(test_aclshmem_atomic_fetch_##NAME##_mem, local_mem_size, processCount); \
-        }                                                                                           \
+#define TEST_ATOMIC_FETCH_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemAtomicFetch##NAME##Mem)                                           \
+    {                                                                                           \
+        const int processCount = test_gnpu_num;                                                 \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                         \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                           \
+        test_mutil_task(test_aclshmem_atomic_fetch_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_ATOMIC_ADD_950_FUNC_TYPE(TEST_ATOMIC_FETCH_API);
 
@@ -159,14 +158,13 @@ ACLSHMEM_ATOMIC_SWAP_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_SET_HOST);
     }
 ACLSHMEM_ATOMIC_SWAP_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_SET);
 
-#define TEST_ATOMIC_SET_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemAtomicSet##NAME##Mem)                                               \
-    {                                                                                             \
-        const int processCount = test_gnpu_num;                                                   \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                           \
-        if (is_hardware_atomic_supported()) {                                                     \
-            test_mutil_task(test_aclshmem_atomic_set_##NAME##_mem, local_mem_size, processCount); \
-        }                                                                                         \
+#define TEST_ATOMIC_SET_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemAtomicSet##NAME##Mem)                                           \
+    {                                                                                         \
+        const int processCount = test_gnpu_num;                                               \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                       \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                         \
+        test_mutil_task(test_aclshmem_atomic_set_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_ATOMIC_SWAP_FUNC_TYPE(TEST_ATOMIC_SET_API);
 
@@ -246,14 +244,13 @@ ACLSHMEM_ATOMIC_SWAP_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_SWAP_HOST);
     }
 ACLSHMEM_ATOMIC_SWAP_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_SWAP);
 
-#define TEST_ATOMIC_SWAP_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemAtomicSwap##NAME##Mem)                                               \
-    {                                                                                              \
-        const int processCount = test_gnpu_num;                                                    \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                            \
-        if (is_hardware_atomic_supported()) {                                                      \
-            test_mutil_task(test_aclshmem_atomic_swap_##NAME##_mem, local_mem_size, processCount); \
-        }                                                                                          \
+#define TEST_ATOMIC_SWAP_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemAtomicSwap##NAME##Mem)                                           \
+    {                                                                                          \
+        const int processCount = test_gnpu_num;                                                \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                        \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                          \
+        test_mutil_task(test_aclshmem_atomic_swap_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_ATOMIC_SWAP_FUNC_TYPE(TEST_ATOMIC_SWAP_API);
 
@@ -333,13 +330,12 @@ ACLSHMEM_ATOMIC_CAS_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_COMPARE_SWAP_HOST);
     }
 ACLSHMEM_ATOMIC_CAS_FUNC_TYPE(TEST_ACLSHMEM_ATOMIC_COMPARE_SWAP);
 
-#define TEST_ATOMIC_COMPARE_SWAP_API(NAME, TYPE)                                                           \
-    TEST(TestMemApi, TestShmemAtomicCompareSwap##NAME##Mem)                                                \
-    {                                                                                                      \
-        const int processCount = test_gnpu_num;                                                            \
-        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                    \
-        if (is_hardware_atomic_supported()) {                                                              \
-            test_mutil_task(test_aclshmem_atomic_compare_swap_##NAME##_mem, local_mem_size, processCount); \
-        }                                                                                                  \
+#define TEST_ATOMIC_COMPARE_SWAP_API(NAME, TYPE)                                                       \
+    TEST(TestMemApi, TestShmemAtomicCompareSwap##NAME##Mem)                                            \
+    {                                                                                                  \
+        const int processCount = test_gnpu_num;                                                        \
+        uint64_t local_mem_size = 1024UL * 1024UL * 64;                                                \
+        SKIP_IF_UNSUPPORTED_ATOMIC();                                                                  \
+        test_mutil_task(test_aclshmem_atomic_compare_swap_##NAME##_mem, local_mem_size, processCount); \
     }
 ACLSHMEM_ATOMIC_CAS_FUNC_TYPE(TEST_ATOMIC_COMPARE_SWAP_API);
