@@ -16,7 +16,7 @@
 
 #### Q: 算子精度问题，无error日志，发现共享内存访问到的数据异常
 
-![算子精度报错](./images/trouble-shooting/shmem_alloc-asymmetric-alloc-no-error.png)
+![算子精度报错](./images/trouble-shooting/shmem_alloc_asymmetric_alloc_no_error.png)
 
 错误示例代码:
 
@@ -47,13 +47,13 @@ if (symmTest != nullptr) {
 
 此时执行代码获得如下报错，确认错误为使用`aclshmem_malloc`接口分配了非对称的共享内存
 
-![开启debug模式后错误日志](./images/trouble-shooting/shmem_alloc-asymmetric-alloc-log.png)
+![开启debug模式后错误日志](./images/trouble-shooting/shmem_alloc_asymmetric_alloc_log.png)
 
 错误原因分析示意图:
 
 修正方式: 确保每个rank分配相同大小的共享内存
 
-![共享内存非对称分配](./images/trouble-shooting/shmem_alloc-asymmetric-alloc.png)
+![共享内存非对称分配](./images/trouble-shooting/shmem_alloc_asymmetric_alloc.png)
 
 ### aclshmemx_set_attr_uniqueid_args对每个pe设置了不同的local_mem_size
 
@@ -96,15 +96,15 @@ status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_UNIQUEID, &attributes);
 
 1. 端口被占用错误日志:
 
-    ![端口被占用](./images/trouble-shooting/port-being-used.PNG)
+    ![端口被占用](./images/trouble-shooting/port_being_used.png)
 
 2. ip不可用错误日志1:
 
-    ![ip不可用1](./images/trouble-shooting/ip-unaccessible.PNG)
+    ![ip不可用1](./images/trouble-shooting/ip_unaccessible.png)
 
 3. ip不可用错误日志2:
 
-    ![ip不可用2](./images/trouble-shooting/ip-unaccessible2.PNG)
+    ![ip不可用2](./images/trouble-shooting/ip_unaccessible2.png)
 
 #### A: 逐步排查ip及端口可用情况
 
@@ -187,7 +187,7 @@ status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_UNIQUEID, &attributes);
      hiroce5 gids
      ```
 
-     ![](../images/net_dev-query.png)
+     ![](../images/net_dev_query.png)
 
    - 通过 `ifconfig <net_dev>` 或 `ip link show <net_dev>` 查看对应接口的 MAC 地址：
 
@@ -197,7 +197,7 @@ status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_UNIQUEID, &attributes);
      ip link show <net_dev>
      ```
 
-     ![](../images/mac-address-query.png)
+     ![](../images/mac_address_query.png)
 
    - 根据该 MAC 地址，在交换机上查询对应端口号：
 
@@ -205,7 +205,7 @@ status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_UNIQUEID, &attributes);
      display mac-address | include <mac-address>
      ```
 
-     ![](../images/port-number-query.png)
+     ![](../images/port_number_query.png)
 
    > 注：上述命令中的 `<net_dev>` 需替换为上一步查询到的实际网络设备名（如 `enp3s0`），`<mac-address>` 需替换为上一步查询到的实际 MAC 地址（格式如 `aabb-ccdd-eeff`）。
    >

@@ -90,7 +90,7 @@ SHMEM 是面向昇腾平台的多机多卡内存通信库，通过封装 Host �
 
 ## 二、核心功能
 
-![核心功能](docs/images/readme-features.png)
+![核心功能](docs/images/readme_features.png)
 
 **1. 双侧接口体系**
 

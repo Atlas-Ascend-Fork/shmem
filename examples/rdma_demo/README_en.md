@@ -32,7 +32,7 @@ XSCALE NIC:
 ibv_devinfo | grep xscale
 ```
 
-![](../../docs/images/nda-check.png)
+![](../../docs/images/nda_check.png)
 
 HNS 1825 NIC:
 
@@ -40,7 +40,7 @@ HNS 1825 NIC:
 ibv_devinfo | grep hrn
 ```
 
-![](../../docs/images/hns1825-check.png)
+![](../../docs/images/hns1825_check.png)
 
 > Note: When the HNS 1825 NIC communicates over the same port, if port bridge is not enabled on the switch, RDMA may fail to send and receive data. For the port bridge configuration, see [FAQs - Port Bridge Configuration](../../docs/debug/Troubleshooting_FAQs.md#同端口通信需开启端口桥).
 

@@ -173,7 +173,7 @@
       - 第一行中`2025`为您创建或修改该文件的年份，请根据实际时间修改。
 
   3. 代码下载与贡献流程
-  ![代码贡献流程](docs/images/contri-flow.png)
+  ![代码贡献流程](docs/images/contri_flow.png)
      (1) 进行代码开发前，请先将SHMEM仓库fork到个人仓，然后将个人仓下载到本地。并在本地分支进行代码修改。
      (2) 代码验证满足贡献要求后，提交Pull-Request，将代码贡献到SHMEM，在[Pull-Request列表](https://gitcode.com/cann/shmem/pulls)，可以找到提交的Pull-Request。
      (3) 在提交的Pull-Request的评论区，评论`compile`触发编译。

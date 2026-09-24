@@ -173,7 +173,7 @@ Developer contribution scenarios include:
       - The year `2025` in the first line is the year you created or modified the file. Modify it according to the actual year.
 
   3. Code download and contribution process
-  ![Code Contribution Process](docs/images/contri-flow_en.png)
+  ![Code Contribution Process](docs/images/contri_flow_en.png)
      (1) Before developing code, fork the SHMEM repository to your own repository and then download the repository to your local machine. Then, modify the code in the local branch.
      (2) After the code meets the contribution requirements, submit a pull request to contribute the code to the SHMEM. You can find the submitted pull request in the [PR List](https://gitcode.com/cann/shmem/pulls).
      (3) In the comment area of a submitted pull request, comment `compile` to trigger the build.

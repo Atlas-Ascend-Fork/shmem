@@ -32,7 +32,7 @@ for i in {0..7}; do hccn_tool -i $i -net_health -g; done
 ibv_devinfo | grep xscale
 ```
 
-![](../../docs/images/nda-check.png)
+![](../../docs/images/nda_check.png)
 
 1825网卡：
 
@@ -40,7 +40,7 @@ ibv_devinfo | grep xscale
 ibv_devinfo | grep hrn
 ```
 
-![](../../docs/images/hns1825-check.png)
+![](../../docs/images/hns1825_check.png)
 
 > 注：1825 网卡同端口通信时，若未开启交换机端口桥，RDMA 可能无法正常收发数据。端口桥配置详见[常见问题 - 端口桥配置](../../docs/debug/Troubleshooting_FAQs.md#同端口通信需开启端口桥)。
 

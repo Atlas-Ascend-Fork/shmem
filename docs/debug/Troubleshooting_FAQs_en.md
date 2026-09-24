@@ -12,7 +12,7 @@
 
 #### Q: What if the operator precision is incorrect, no error log is generated, and the data accessed by the shared memory is abnormal?
 
-! [Operator precision error](./images/trouble-shooting/shmem_alloc-asymmetric-alloc-no-error.png)
+! [Operator precision error](./images/trouble-shooting/shmem_alloc_asymmetric_alloc_no_error.png)
 
 Incorrect sample code:
 
@@ -40,13 +40,13 @@ To enable the `debug` mode, run the `bash scripts/build.sh -examples -debug` com
 
 The error message below is displayed when the code is executed. The error is caused by the use of the `aclshmem_malloc` API to allocate asymmetric shared memory.
 
-! [Error log after the debug mode is enabled](./images/trouble-shooting/shmem_alloc-asymmetric-alloc-log.png)
+! [Error log after the debug mode is enabled](./images/trouble-shooting/shmem_alloc_asymmetric_alloc_log.png)
 
 Rectification method: Ensure that the same size of shared memory is allocated to each rank.
 
 Error cause analysis diagram:
 
-![Asymmetric allocation of shared memory](./images/trouble-shooting/shmem_alloc-asymmetric-alloc_en.png)
+![Asymmetric allocation of shared memory](./images/trouble-shooting/shmem_alloc_asymmetric_alloc_en.png)
 
 ### `aclshmemx_set_attr_uniqueid_args` sets different `local_mem_size` values for each PE.
 #### Q: What does "local size diffs" mean?
@@ -85,16 +85,16 @@ Note:
 The following figures show the error logs.
 1. Error log indicating that the port is occupied
 
-![Port being used](./images/trouble-shooting/port-being-used.PNG)
+![Port being used](./images/trouble-shooting/port_being_used.png)
 
 2. Error log indicating that the IP address is unavailable (1)
 
 
-![IP address unavailable 1](./images/trouble-shooting/ip-unaccessible.PNG)
+![IP address unavailable 1](./images/trouble-shooting/ip_unaccessible.png)
 
 3. Error log indicating that the IP address is unavailable (2)
 
-![IP address unavailable 2](./images/trouble-shooting/ip-unaccessible2.PNG)
+![IP address unavailable 2](./images/trouble-shooting/ip_unaccessible2.png)
 
 
 #### A: Check the availability of the IP address and port.
