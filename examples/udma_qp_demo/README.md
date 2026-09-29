@@ -45,8 +45,12 @@
 
 环境配置请参考[快速上手](../../docs/quickstart.md)。完成环境配置后，在仓库根目录执行：
 
+### 默认链路模式
+
+不添加 `-multi_link` 时，多个 QP 使用默认链路策略。对于同时存在 MESH 和 CLOS 链路的对端，所有 QP 使用 MESH 链路；只有不存在 MESH 链路时，才在可用的 CLOS 链路中轮转。该模式可以通过 `-qp_count` 配置 QP 数量，但不能为某个 QP 指定链路，也不能传入 `-qp_net_layers`。
+
 ```bash
-# 执行编译
+# 默认构建：未启用 multi-link；有 MESH 时所有 QP 使用 MESH，否则在 CLOS 链路中轮转
 bash scripts/build.sh -examples -soc_type Ascend950
 
 # 运行默认用例，默认使用 2 个 PE、每个对端 PE 使用 2 个 QP，并执行 put 模式
@@ -59,9 +63,6 @@ bash examples/udma_qp_demo/run.sh
 # 使用 4 个 QP 验证 put
 bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 4 -op put -elems 1048576
 
-# 稀疏指定 QP0 使用 netLayer 0、QP2 使用 netLayer 1；未指定的 QP1 使用默认选路
-bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 3 -qp_net_layers 0:0,2:1
-
 # 使用 8 个 QP 验证 get
 bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 8 -op get -elems 1048576
 
@@ -73,6 +74,18 @@ bash examples/udma_qp_demo/run.sh -pes 4 -qp_count 4 -op put -first_npu 4
 
 # 使用非连续逻辑卡号；PE0/1/2/3 分别绑定 NPU1/3/2/4
 bash examples/udma_qp_demo/run.sh -pes 4 -qp_count 4 -op put -device_ids 1,3,2,4
+```
+
+### Multi-link 链路模式
+
+编译时添加 `-multi_link` 后，未传入 `-qp_net_layers` 时，QP 在可用的 MESH 和 CLOS 链路间按默认策略轮转。可以使用 `-qp_net_layers` 为指定 QP 配置链路，该配置会替换该 QP 的默认链路分配；未显式配置的 QP 保持默认链路分配，由默认轮转策略确定实际使用链路。
+
+```bash
+# 启用 multi-link 能力
+bash scripts/build.sh -examples -soc_type Ascend950 -multi_link
+
+# 指定 QP0 使用 netLayer 0、QP2 使用 netLayer 1；QP1 保持默认链路分配
+bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 3 -qp_net_layers 0:0,2:1
 
 # 相同 QP/层策略仍由所有 PE 执行；这里只改变 PE 到逻辑设备的映射
 bash examples/udma_qp_demo/run.sh -pes 4 -qp_count 3 -device_ids 1,3,2,4 \
@@ -105,7 +118,7 @@ PutSignal 还会输出 signal 校验结果：
 | --- | --- | --- |
 | `-pes` | `2` | PE 总数，必须至少为 2；脚本启动相同数量的进程。 |
 | `-qp_count` | `2` | 每个对端 PE 创建的 QP 数，范围为 `[1, 56]`，所有 PE 必须一致。 |
-| `-qp_net_layers` | 未配置 | 以 `qp_idx:netLayer` 形式稀疏指定 UDMA 链路，例如 `0:0,2:1`。每个 `qp_idx` 必须小于 `qp_count` 且不能重复；该参数要求构建时启用 `-multi_link`。当前 setter 支持 layer 0/1。未指定的 QP 使用默认选路。所有 PE 必须使用相同配置。 |
+| `-qp_net_layers` | 未配置 | 仅在使用 `-multi_link` 编译时可用。以 `qp_idx:netLayer` 形式为指定 QP 配置 UDMA 链路，例如 `0:0,2:1`。每个 `qp_idx` 必须小于 `qp_count` 且不能重复；当前支持 layer 0/1。指定配置会替换对应 QP 的默认链路分配；未指定的 QP 保持默认链路分配，由默认轮转策略在可用 MESH 和 CLOS 链路中确定实际使用链路，所有 PE 必须使用相同配置。默认构建不支持该参数：有 MESH 时所有 QP 使用 MESH；无 MESH 时在可用 CLOS 链路中轮转。 |
 | `-op` | `put` | 运行模式，支持 `put`、`get`、`put_signal`。 |
 | `-elems` | `1048576` | 每个 PE 搬运的字节数，至少为 QP 数；支持不均分。 |
 | `-heap_mb` | `1024` | 每个 PE 的 SHMEM 对称堆大小，单位为 MiB；PutSignal 模式必须同时容纳数据缓冲区和每 QP 一个 `uint64_t` signal word。 |
