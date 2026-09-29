@@ -1305,9 +1305,9 @@ bool UdmaTransportManager::GetEndpointExchangeSize(uint32_t rank_count, uint32_t
 
 uint32_t UdmaTransportManager::GetEndpointChunkCount(uint32_t rank_count)
 {
-    // Bound each collective's total receive bytes, including all ranks. 32 MiB
+    // Bound each collective's total receive bytes, including all ranks. 8 MiB
     // leaves room for config_store's rank prefixes within its 64 MiB value limit.
-    constexpr size_t chunk_bytes = 32U * 1024U * 1024U;
+    constexpr size_t chunk_bytes = 8U * 1024U * 1024U;
     return rank_count == 0 ? 0 : static_cast<uint32_t>(chunk_bytes / sizeof(ExchangedEndpointDesc) / rank_count);
 }
 

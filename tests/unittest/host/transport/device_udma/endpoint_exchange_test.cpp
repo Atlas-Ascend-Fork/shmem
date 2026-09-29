@@ -347,7 +347,7 @@ TEST_F(UdmaEndpointExchangeTest, SplitsLargeClusterMatricesWithoutAllocatingThem
         // Mirror config_store's int multiplication under UBSan.
         const int bytes = static_cast<int>(chunk * sizeof(Descriptor));
         const int receive_bytes = bytes * static_cast<int>(ranks);
-        EXPECT_LE(receive_bytes, 32 * 1024 * 1024);
+        EXPECT_LE(receive_bytes, 8 * 1024 * 1024);
     }
     EXPECT_EQ(ChunkCount(0), 0U);
 }
