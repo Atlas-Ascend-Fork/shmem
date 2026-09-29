@@ -24,16 +24,8 @@ jobs:
         identifier: process_checkout
         uses: checkout
         with:
-          ref: ${{ atomgit.event.pull_request.merge_commit_sha || atomgit.sha }}
-          allow-unsafe-pr-checkout: true
-      -
-        name: Checkout gitcode
-        identifier: process_checkout_gitcode
-        uses: checkout
-        with:
-          repository: "https://gitcode.com/cann/.gitcode.git"
-          ref: master
-          path: "./ci"
+          ref: ${{ atomgit.event.pull_request.merge_commit_sha }}
+          token: ${{secrets.GIT_TOKEN}}
       -
         name: download
         uses: obs-download
@@ -50,55 +42,20 @@ jobs:
             ${{ env.obs_path }}/ut.sh
           path: ${{ steps.process_checkout.outputs.path }}
       -
-        name: tar businesscode
-        run: |
-          cd ${{ steps.process_checkout.outputs.path }}
-          tar -zcf ../pre_smoke_data.tar.gz .
-          mv ../pre_smoke_data.tar.gz ./
-      -
-        name: upload
-        identifier: process_upload
-        uses: obs-upload
-        with:
-          endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
-          bucket: "ascend-ci"
-          access-key: ${{secrets.AK}}
-          secret-key: ${{secrets.SK}}
-          artifact-path: |
-            ${{ steps.process_checkout.outputs.path }}/pre_smoke_data.tar.gz
-          object-prefix: ${{ env.obs_ut_path }}/
-      -
         name: Test
         timeout-minutes: 30
-        uses: manifest-management-plugin
-        with:
-          action: DEPLOY
-          repo: ${{ steps.process_checkout.outputs.path }}
-          file_path: ${{ steps.process_checkout.outputs.path }}/ci/smoke-conf/smoke-A2.yaml
-          manifest_image: swr.cn-north-4.myhuaweicloud.com/hw-ascend/${{ inputs.image_version }}
-          custom_shell_script: |-
+        run: |
             set -ex
-            export obs_path=${{env.obs_path}}
             export repo_name=${{env.repo_name}}
             export pr_id=${{ env.MERGE_ID }}
             export task_name=${{ inputs.task_name }}
-            export AK=${{secrets.AK}}
-            export SK=${{secrets.SK}}
             export WORKSPACE=${{ steps.process_checkout.outputs.path }}
-            mkdir -p ~/taskspace && cd ~/taskspace
-            wget -nv ${{ steps.process_upload.outputs.primary-url }}
-            tar -zxf $(basename "${{ steps.process_upload.outputs.primary-url }}")
             if [ ${task_name} =  "UT_examples" ];then
-              bash -x ~/taskspace/build.sh
+              bash -x ${WORKSPACE}/build.sh
             else
-              bash -x ~/taskspace/ut.sh
+              bash -x ${WORKSPACE}/ut.sh
             fi
-      -
-        name: pre_smoke resource clean
-        uses: manifest-management-plugin
-        with:
-          action: CRUSH
-          repo: ${{ steps.process_checkout.outputs.path }}
-          file_path: ${{ steps.process_checkout.outputs.path }}/ci/smoke-conf/smoke-A2.yaml
     if: "${{ default() }}"
-    runs-on: ['self-hosted','arch=arm','smoke=204']
+    runs-on: ['self-hosted','npu=2','smoke=204']
+    container:
+      image: swr.cn-north-4.myhuaweicloud.com/hw-ascend/${{ inputs.image_version }}
