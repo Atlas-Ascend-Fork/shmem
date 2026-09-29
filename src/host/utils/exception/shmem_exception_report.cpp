@@ -208,10 +208,13 @@ void aclshmemi_exception_report_log_state()
 {
     const uint64_t udma_info_address = g_exception_report_state.udma_info_address.load(std::memory_order_acquire);
     const uint32_t enabled_engines = g_exception_report_state.enabled_engines.load(std::memory_order_acquire);
+    const uint32_t requested_engines = g_exception_report_state.requested_engines.load(std::memory_order_acquire);
     const bool rdma_enabled = (enabled_engines & static_cast<uint32_t>(ACLSHMEM_DATA_OP_ROCE)) != 0U;
     const bool udma_enabled = (enabled_engines & static_cast<uint32_t>(ACLSHMEM_DATA_OP_UDMA)) != 0U;
     std::ostringstream out;
     out << "[EXCEPTION][STATE]";
+    out << " requestedEngines=0x" << std::hex << requested_engines << " enabledEngines=0x" << enabled_engines
+        << std::dec;
     if (rdma_enabled) {
         out << " rdmaInfo=0x" << std::hex << g_state.qp_info;
         out << " rdmaConfig={ub=0x" << std::hex << g_state.rdma_config.aclshmem_ub << ", size=" << std::dec
@@ -228,11 +231,32 @@ void aclshmemi_exception_report_log_state()
     SHM_LOG_ERROR(out.str());
 }
 
+void aclshmemi_exception_report_log_transport_dump_missing(uint32_t enabled_engines)
+{
+    if ((enabled_engines & static_cast<uint32_t>(ACLSHMEM_DATA_OP_ROCE | ACLSHMEM_DATA_OP_UDMA)) != 0U) {
+        return; // UDMA or RDMA reporter dumped the transport state; skip reasons are logged by the reporter itself.
+    }
+    const uint32_t requested_engines = g_exception_report_state.requested_engines.load(std::memory_order_acquire);
+    const char* reason = nullptr;
+    if (g_state.npes <= 1) {
+        reason = "npes<=1, no transport engine reporter is selected for single PE";
+    } else {
+        reason = "data_op_engine_type selects no dump reporter, only UDMA/ROCE engines support exception dump; "
+                 "add ACLSHMEM_DATA_OP_UDMA, or request ACLSHMEM_DATA_OP_ROCE alone, in "
+                 "attributes.option_attr.data_op_engine_type to enable transport dump";
+    }
+    SHM_LOG_ERROR(
+        "[EXCEPTION][REPORTER] transport dump is missing: reason="
+        << reason << ", requestedEngines=0x" << std::hex << requested_engines << ", enabledEngines=0x"
+        << enabled_engines << std::dec << ", npes=" << g_state.npes);
+}
+
 int aclshmemi_exception_report_dump_enabled_engines()
 {
     int ret = ACLSHMEM_SUCCESS;
     const uint32_t engines = g_exception_report_state.enabled_engines.load(std::memory_order_acquire);
     const bool detail_enabled = aclshmemi_exception_report_detail_enabled();
+    aclshmemi_exception_report_log_transport_dump_missing(engines);
     for (const auto& reporter : ACLSHMEMI_EXCEPTION_ENGINE_REPORTERS) {
         if ((engines & reporter.engine) == 0) {
             continue;
