@@ -86,7 +86,7 @@ SHMEM is a multi-server, multi-device memory communication library designed for 
 - For more information, see [SHMEM](https://shmem-doc.pages.dev/).
 
 ## 2. Core Functions
-![Core Functions](docs/images/readme-features_en.png)
+![Core Functions](docs/images/readme_features_en.png)
 
 **1. Dual-side API system**
 
