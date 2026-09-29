@@ -84,6 +84,7 @@ jobs:
             export task_name=${{ inputs.task_name }}
             export AK=${{secrets.AK}}
             export SK=${{secrets.SK}}
+            export WORKSPACE=${{ steps.process_checkout.outputs.path }}
             mkdir -p ~/taskspace && cd ~/taskspace
             wget -nv ${{ steps.process_upload.outputs.primary-url }}
             tar -zxf $(basename "${{ steps.process_upload.outputs.primary-url }}")

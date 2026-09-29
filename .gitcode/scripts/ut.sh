@@ -2,9 +2,13 @@
 
 set -ex
 
-source ./common.sh
+if [ -f "${WORKSPACE}/.gitcode/scripts/common.sh" ];then
+    source ${WORKSPACE}/.gitcode/scripts/common.sh
+else
+    source ${WORKSPACE}/common.sh
+fi
 # 检查变更文件是否全部为文档（docs/ 开头 或 .md 结尾）
-check_docs_changes
+check_docs_changes ${WORKSPACE}/pr_filelist.txt
 
 # 加载cann 环境变量
 source /usr/local/Ascend/ascend-toolkit/set_env.sh

@@ -2,8 +2,12 @@
 
 set -ex
 
-source ./common.sh
-check_docs_changes
+if [ -f "${WORKSPACE}/.gitcode/scripts/common.sh" ];then
+    source ${WORKSPACE}/.gitcode/scripts/common.sh
+else
+    source ${WORKSPACE}/common.sh
+fi
+check_docs_changes ${WORKSPACE}/pr_filelist.txt
 
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
 export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver:$LD_LIBRARY_PATH
