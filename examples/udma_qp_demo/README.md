@@ -21,7 +21,7 @@
 
 ### 测试用例实现
 
-（1）初始化 ACL 和 SHMEM，将数据通路配置为 `ACLSHMEM_DATA_OP_UDMA`，并在 SHMEM 初始化前通过进程级接口 `aclshmemx_set_qp_num` 设置每个对端 PE 使用的 QP 数量。
+（1）初始化 ACL 和 SHMEM，将数据通路配置为 `ACLSHMEM_DATA_OP_UDMA`，并在 SHMEM 初始化前通过进程级接口 `aclshmemx_set_qp_num` 设置每个对端 PE 使用的 QP 数量。如需启用 shared jetty（解析到同一本地 eid_index 的多个对端 PE 共享一个底层 jetty），在初始化前再调用 `aclshmemx_set_shared_jetty(ACLSHMEM_DATA_OP_UDMA, true)`；该配置默认关闭，且所有 PE 必须一致。
 
 （2）每个 PE 对应一个进程和一张 NPU，并与环形拓扑中的下一个 PE 通信。Put 和 PutSignal 模式向下一个 PE 写数据，Get 模式从下一个 PE 读数据。
 
@@ -68,6 +68,9 @@ bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 8 -op get -elems 1048576
 
 # 使用 4 个 QP 验证 put_signal
 bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 4 -op put_signal -elems 1048576
+
+# 使用 4 个 QP 并启用 shared jetty 验证 put
+bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 4 -shared_jetty 1 -op put -elems 1048576
 
 # 从逻辑 NPU 4 开始绑定 4 个 PE
 bash examples/udma_qp_demo/run.sh -pes 4 -qp_count 4 -op put -first_npu 4
@@ -119,6 +122,7 @@ PutSignal 还会输出 signal 校验结果：
 | `-pes` | `2` | PE 总数，必须至少为 2；脚本启动相同数量的进程。 |
 | `-qp_count` | `2` | 每个对端 PE 创建的 QP 数，范围为 `[1, 56]`，所有 PE 必须一致。 |
 | `-qp_net_layers` | 未配置 | 仅在使用 `-multi_link` 编译时可用。以 `qp_idx:netLayer` 形式为指定 QP 配置 UDMA 链路，例如 `0:0,2:1`。每个 `qp_idx` 必须小于 `qp_count` 且不能重复；当前支持 layer 0/1。指定配置会替换对应 QP 的默认链路分配；未指定的 QP 保持默认链路分配，由默认轮转策略在可用 MESH 和 CLOS 链路中确定实际使用链路，所有 PE 必须使用相同配置。默认构建不支持该参数：有 MESH 时所有 QP 使用 MESH；无 MESH 时在可用 CLOS 链路中轮转。 |
+| `-shared_jetty` | `0` | 是否启用 shared jetty（`0` 关闭，`1` 开启）；开启时在初始化前调用 `aclshmemx_set_shared_jetty`，所有 PE 必须一致。 |
 | `-op` | `put` | 运行模式，支持 `put`、`get`、`put_signal`。 |
 | `-elems` | `1048576` | 每个 PE 搬运的字节数，至少为 QP 数；支持不均分。 |
 | `-heap_mb` | `1024` | 每个 PE 的 SHMEM 对称堆大小，单位为 MiB；PutSignal 模式必须同时容纳数据缓冲区和每 QP 一个 `uint64_t` signal word。 |

@@ -30,6 +30,25 @@ HcommMemUnregFunc DlHcommApi::gHcommMemUnreg = nullptr;
 HcommChannelCreateFunc DlHcommApi::gHcommChannelCreate = nullptr;
 HcommChannelDestroyFunc DlHcommApi::gHcommChannelDestroy = nullptr;
 HcommChannelGetStatusFunc DlHcommApi::gHcommChannelGetStatus = nullptr;
+HcommChannelConfigCreateFunc DlHcommApi::gHcommChannelConfigCreate = nullptr;
+HcommChannelConfigDestroyFunc DlHcommApi::gHcommChannelConfigDestroy = nullptr;
+HcommChannelConfigSetIntFunc DlHcommApi::gHcommChannelConfigSetInt = nullptr;
+HcommChannelCreateWithConfigFunc DlHcommApi::gHcommChannelCreateWithConfig = nullptr;
+
+namespace {
+// Soft symbol load: a missing symbol only means the running libhcomm.so predates the channel config
+// API. Leave the pointer null and warn; the caller falls back to the legacy HcommChannelCreate path.
+template <typename FuncType>
+void LoadOptionalSym(FuncType& target, void* handle, const char* symbolName)
+{
+    target = reinterpret_cast<FuncType>(dlsym(handle, symbolName));
+    if (target == nullptr) {
+        SHM_LOG_WARN(
+            "Optional symbol [" << symbolName << "] not found in libhcomm.so, shared jetty channel config "
+                                << "is unavailable and channel creation falls back to HcommChannelCreate");
+    }
+}
+} // namespace
 
 Result DlHcommApi::LoadLibrary()
 {
@@ -58,6 +77,13 @@ Result DlHcommApi::LoadLibrary()
     DL_LOAD_SYM(gHcommChannelDestroy, HcommChannelDestroyFunc, gHcommHandle, "HcommChannelDestroy");
     DL_LOAD_SYM(gHcommChannelGetStatus, HcommChannelGetStatusFunc, gHcommHandle, "HcommChannelGetStatus");
 
+    // HcommChannelConfigSetStr is intentionally not loaded: only IS_SHARED_QUEUE (an int) is needed.
+    LoadOptionalSym(gHcommChannelConfigCreate, gHcommHandle, "HcommChannelConfigCreate");
+    LoadOptionalSym(gHcommChannelConfigDestroy, gHcommHandle, "HcommChannelConfigDestroy");
+    LoadOptionalSym(gHcommChannelConfigSetInt, gHcommHandle, "HcommChannelConfigSetInt");
+    LoadOptionalSym(gHcommChannelCreateWithConfig, gHcommHandle, "HcommChannelCreateWithConfig");
+    SHM_LOG_INFO("Hcomm channel config apis available: " << (HasChannelConfigApis() ? "yes" : "no"));
+
     Dl_info hcomm_lib_info{};
     if (dladdr(reinterpret_cast<void*>(gHcommChannelCreate), &hcomm_lib_info) != 0 &&
         hcomm_lib_info.dli_fname != nullptr) {
@@ -66,6 +92,15 @@ Result DlHcommApi::LoadLibrary()
     SHM_LOG_INFO("LoadLibrary for DlHcommApi success");
     gLoaded = true;
     return ACLSHMEM_SUCCESS;
+}
+
+bool DlHcommApi::HasChannelConfigApis()
+{
+    // No lock: the pointers are written only while gMutex is held in LoadLibrary/CleanupLibrary, and
+    // readers follow the same lock-free convention as the other wrappers (also callable from
+    // LoadLibrary itself, where gMutex is already held).
+    return gHcommChannelConfigCreate != nullptr && gHcommChannelConfigDestroy != nullptr &&
+           gHcommChannelConfigSetInt != nullptr && gHcommChannelCreateWithConfig != nullptr;
 }
 
 void DlHcommApi::CleanupLibrary()
@@ -83,6 +118,10 @@ void DlHcommApi::CleanupLibrary()
     gHcommChannelCreate = nullptr;
     gHcommChannelDestroy = nullptr;
     gHcommChannelGetStatus = nullptr;
+    gHcommChannelConfigCreate = nullptr;
+    gHcommChannelConfigDestroy = nullptr;
+    gHcommChannelConfigSetInt = nullptr;
+    gHcommChannelCreateWithConfig = nullptr;
 
     if (gHcommHandle != nullptr) {
         dlclose(gHcommHandle);

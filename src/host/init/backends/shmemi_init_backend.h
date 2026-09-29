@@ -27,11 +27,7 @@
 
 #include "utils/mstx/mstx_mem_register.h"
 
-namespace shm {
-namespace transport {
-struct UdmaQpConfig;
-} // namespace transport
-} // namespace shm
+#include "transport/transport_def.h"
 
 typedef struct entity_member {
     void* hbm_gva = nullptr;
@@ -49,11 +45,9 @@ typedef struct entity_member {
     aclshmemi_bootstrap_handle_t* entity_boot_handle;
     aclshmem_device_host_state_t* entity_host_state;
     aclshmem_device_host_state_t* entity_device_state;
-    uint32_t udma_qp_num{1};
-    std::map<uint32_t, uint32_t> udma_net_layer_policy{};
-    bool udma_multi_link_enabled{false};
     uint32_t rdma_qp_num{1};
     uint32_t sdma_qp_num{1};
+    shm::transport::UdmaQpConfig udma_qp_config{};
 } entity_member;
 
 class aclshmemi_init_backend {

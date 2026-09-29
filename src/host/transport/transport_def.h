@@ -46,6 +46,7 @@ enum TransportType {
 
 struct UdmaQpConfig {
     uint32_t qpNum{1};
+    bool sharedJettyEnabled{false};
     std::map<uint32_t, uint32_t> netLayerPolicy{};
 #ifdef ACLSHMEM_MULTI_LINK_SUPPORT
     bool multiLinkEnabled{true};
@@ -77,6 +78,7 @@ struct TransportOptions {
                << ", protocol=" << options.protocol << ", rdmaQpNum=" << options.rdmaQpConfig.qpNum
                << ", sdmaQpNum=" << options.sdmaQpNum << ", role=" << static_cast<uint32_t>(options.role)
                << ", nid=" << options.nic << ", iptype=" << options.type << ", udmaQpNum=" << options.udmaQpConfig.qpNum
+               << ", udmaSharedJetty=" << options.udmaQpConfig.sharedJettyEnabled
                << ", udmaNetLayerPolicyCount=" << options.udmaQpConfig.netLayerPolicy.size()
                << ", udmaMultiLink=" << options.udmaQpConfig.multiLinkEnabled << ")";
         return output;

@@ -485,6 +485,14 @@ and is reset to 1 after the last instance is finalized.
     )");
 
     m.def(
+        "aclshmemx_set_shared_jetty", &aclshmemx_set_shared_jetty, py::call_guard<py::gil_scoped_release>(),
+        py::arg("engine"), py::arg("enable"), R"(
+Configure the shared-jetty mode of the UDMA engine.
+
+This process-wide configuration must be set before ACLSHMEM initialization and must be identical on every PE.
+    )");
+
+    m.def(
         "aclshmemx_set_qp_net_layer", &aclshmemx_set_qp_net_layer, py::call_guard<py::gil_scoped_release>(),
         py::arg("engine"), py::arg("qp_idx"), py::arg("net_layer"), R"(
 Configure the effective network layer for one QP.

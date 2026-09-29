@@ -75,11 +75,49 @@ public:
 private:
     friend class UdmaEndpointExchangeTest;
 
+    // qp_slot component of the endpoint key: split one endpoint per QP when shared jetty is
+    // enabled on the direct build, 0 otherwise.
+    uint32_t EndpointQpSlot(uint32_t qp_idx) const
+    {
+        return (shared_jetty_enabled_ && !ACLSHMEM_UDMA_RELAY_ENABLED && qp_num_ > 1U) ? qp_idx : 0U;
+    }
+    // peer_rank component of the endpoint key: relay builds address endpoints by the faced peer;
+    // direct builds address them per peer too, except when shared jetty is enabled, where the
+    // wildcard makes peers converging on one (eid_index, qp_slot) share one endpoint so
+    // IS_SHARED_QUEUE can merge their jetties across peers.
+    static constexpr uint32_t ENDPOINT_PEER_WILDCARD = 0xFFFFFFFFU;
+    uint32_t EndpointPeerRank(uint32_t peer_rank) const
+    {
+        if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+            return peer_rank;
+        }
+        return shared_jetty_enabled_ ? ENDPOINT_PEER_WILDCARD : peer_rank;
+    }
+    // Identity of a local HCOMM endpoint: relay keys by (eid_index, peer_rank, 0); direct keys by
+    // (eid_index, peer_rank, qp_slot) per peer and per QP, except that shared-jetty direct builds
+    // wildcard peer_rank so same-QP routes converging on one eid_index share one endpoint.
+    struct EndpointMapKey {
+        uint32_t eid_index{0};
+        uint32_t peer_rank{0};
+        uint32_t qp_slot{0};
+    };
+    friend inline bool operator<(const EndpointMapKey& l, const EndpointMapKey& r)
+    {
+        return l.eid_index != r.eid_index ?
+                   l.eid_index < r.eid_index :
+                   (l.peer_rank != r.peer_rank ? l.peer_rank < r.peer_rank : l.qp_slot < r.qp_slot);
+    }
+    friend inline bool operator==(const EndpointMapKey& l, const EndpointMapKey& r)
+    {
+        return l.eid_index == r.eid_index && l.peer_rank == r.peer_rank && l.qp_slot == r.qp_slot;
+    }
     // One rank's local HCOMM endpoint descriptor as exchanged via allgather. `valid` distinguishes
     // real entries from the zero padding used to make every rank contribute max_count slots.
+    // peer_rank/qp_slot mirror the endpoint key dimensions.
     struct ExchangedEndpointDesc {
         uint32_t eid_index{0};
         uint32_t peer_rank{0};
+        uint32_t qp_slot{0};
         uint32_t valid{0};
         uint16_t listen_port{0};
         uint16_t reserved{0};
@@ -121,18 +159,41 @@ private:
         QpRoute default_route{};
         std::vector<QpRoute> qp_routes{};
     };
-    bool CreateEndpoint(uint32_t eid_index, uint32_t peer_rank, const std::array<uint8_t, 16>& target_eid_raw);
+    // Per-fill bookkeeping: jetty-key dedup, per-state peer groups (for the summary log), and the
+    // per-QP split defense table.
+    struct JettyStateMaps {
+        std::map<std::tuple<uint32_t, uint64_t, uint64_t>, size_t> jetty_key_to_state_idx;
+        std::map<size_t, std::vector<uint32_t>> state_idx_to_dst_pes;
+        std::map<std::pair<uint32_t, uint32_t>, size_t> peer_qp_to_state_idx;
+    };
+    bool CreateEndpoint(const EndpointMapKey& endpoint_key, const std::array<uint8_t, 16>& target_eid_raw);
     Result PrepareOpenDevice(uint32_t device_id, uint32_t rank_count);
     // Allgather the local HCOMM endpoint descriptors into `exchange`.
     Result ExchangeEndpointDescriptors(EndpointExchange& exchange) const;
-    // Locate dst_pe's exchanged endpoint descriptor on remote_eid_index, or nullptr if absent.
+    // Locate dst_pe's exchanged endpoint descriptor matching remote_key, or nullptr if absent.
+    // Matching compares the whole key, mirroring the local-side map lookups.
     const ExchangedEndpointDesc* FindRemoteEndpointDesc(
-        const EndpointExchange& exchange, uint32_t dst_pe, uint32_t remote_eid_index) const;
+        const EndpointExchange& exchange, uint32_t dst_pe, const EndpointMapKey& remote_key) const;
     // Batch-create channels egressing on local_eid_index toward dst_pe's endpoint on
-    // remote_eid_index, and append them to `state` against udma info `slot`.
+    // remote_eid_index, and append them to `state` against udma info `slot`. The endpoint's qp
+    // dimension is derived from first_qp_idx. Uses HcommChannelCreateWithConfig to set
+    // IS_SHARED_QUEUE when config APIs are available, and falls back to batch HcommChannelCreate
+    // on older libhcomm.so.
     Result CreateChannelsForSlot(
         const EndpointExchange& exchange, uint32_t local_eid_index, uint32_t remote_eid_index, uint32_t dst_pe,
         uint32_t slot, uint32_t first_qp_idx, uint32_t channel_num, ChannelBuildState& state);
+    // config-or-fallback batch create; nonzero hcomm_ret is returned via out-param for verification.
+    Result CreateHcommChannelBatch(
+        EndpointHandle endpoint, uint32_t dst_pe, std::vector<HcommChannelDesc>& channel_descs,
+        std::vector<ChannelHandle>& channel_handles, HcommResult& hcomm_ret);
+    // Fail the build on nonzero hcomm_ret or zero handles, after destroying what was created.
+    Result VerifyHcommChannelBatch(
+        HcommResult hcomm_ret, uint32_t dst_pe, uint32_t slot, uint32_t first_qp_idx,
+        const std::vector<ChannelHandle>& channel_handles);
+    // Append one verified batch to the parallel arrays in `state` and log each channel.
+    void AppendChannelsToState(
+        uint32_t dst_pe, uint32_t slot, uint32_t first_qp_idx, const std::vector<ChannelHandle>& channel_handles,
+        const std::vector<const char*>& channel_names, ChannelBuildState& state);
     // Create all channels for this build: dispatches to the direct or relay variant based on
     // ACLSHMEM_UDMA_RELAY_ENABLED. On failure the caller cleans up state.handles.
     Result BuildChannels(const EndpointExchange& exchange, ChannelBuildState& state);
@@ -170,15 +231,34 @@ private:
         const std::vector<SqContext>& sq_contexts_by_qp, const std::vector<CqContext>& cq_contexts_by_qp,
         const std::vector<RegedBufferEntity>& remote_buffers_by_qp, const std::vector<bool>& qp_valid,
         std::vector<uint8_t>& eid_table_host, aclshmemi_aiv_udma_info_t& copy_info);
+    // Resolve (allocating on first sight) the queue-state buffer this slot/QP's jetty owns.
+    // Invariant: same jetty <=> same state; one state per (dst_pe, qp_idx) under the per-QP split.
+    Result ResolveQueueStateBinding(
+        const SqContext& sq_context, uint32_t dst_pe, uint32_t qp_idx, uint64_t slot, size_t& state_idx,
+        JettyStateMaps& jetty_maps);
+    // Bind the resolved state buffer onto one wq/cq pair and verify both point at the same
+    // nonzero state_addr.
+    Result BindQueueStateAddr(
+        size_t state_idx, uint64_t slot, uint32_t qp_idx, aclshmemi_udma_wq_ctx_t& wq, aclshmemi_udma_cq_ctx_t& cq);
+    // Cross-endpoint merge check; no-op unless shared jetty is enabled and qp_num_ > 1.
+    Result CheckPerQpEndpointSplit(const std::map<std::pair<uint32_t, uint32_t>, size_t>& peer_qp_to_state_idx);
     Result CopyEidTableToDevice(const std::vector<uint8_t>& eid_table_host);
     Result CopyUdmaInfoToDevice(std::vector<uint8_t>& udma_info_buffer, aclshmemi_aiv_udma_info_t& copy_info);
     Result ReserveScratchBuffers();
+    // Static queue attributes only; state_addr is left at 0 for the caller to backfill once the
+    // jetty this slot landed on is known.
     void FillWqCtx(const SqContext& sq_context, uint32_t dst_pe, aclshmemi_udma_wq_ctx_t& dst_wq) const;
     void FillCqCtx(const CqContext& cq_context, aclshmemi_udma_cq_ctx_t& dst_cq) const;
+    // Release all queue state buffers and clear the list. Also used by the mid-fill failure path.
+    void FreeQueueStateBuffers();
+    // Log the expected grouping (peers per local eid_index) next to the actual one (peers per queue
+    // state), so a mismatch between the two is visible without correlating the per-slot DEBUG lines.
+    void PrintSharedJettyGrouping(
+        const std::map<size_t, std::vector<uint32_t>>& state_idx_to_dst_pes, uint64_t valid_slot_count) const;
     void FillMemInfo(
         const SqContext& sq_context, const RegedBufferEntity& remote_buffer, aclshmemi_ubmem_info_t& dst_mem) const;
     void PrintHostUdmaInfo(const aclshmemi_aiv_udma_info_t& host_info) const;
-    std::vector<HcommMemHandle> CollectChannelMemHandles(uint32_t eid_index) const;
+    std::vector<HcommMemHandle> CollectChannelMemHandles(const EndpointMapKey& key) const;
 #if defined(ACLSHMEM_MSSANITIZER_BUILD)
     // mssanitizer: report/withdraw the URMA-allocated (non-rtMalloc) SQ/CQ rings and doorbells
     // for every active slot/QP context. Compiled out of normal builds.
@@ -199,6 +279,9 @@ private:
     uint32_t rank_id_{0};
     uint32_t rank_count_{1};
     uint32_t qp_num_{1};
+    // Runtime shared-jetty switch, read from TransportOptions::udmaQpConfig in OpenDevice
+    // (was the ACLSHMEM_UDMA_SHARED_JETTY_SUPPORT compile-time option).
+    bool shared_jetty_enabled_{false};
     std::map<uint32_t, uint32_t> net_layer_policy_{};
     bool multi_link_enabled_{false};
     uint32_t user_id_{0};
@@ -210,13 +293,12 @@ private:
     // N x N routing matrix: [rank * rank_count_ + peer] = local-port eid_index `rank` uses to reach
     // `peer`. Only read on the relay path to resolve each (actual_pe, relay_pe) slot's target EID.
     std::vector<int32_t> all_local_routes_;
-    // HCOMM endpoints and memory registrations are local-EID resources and are shared by all peers using that EID.
-    // endpoint_desc_map_ retains the logical (eid_index, peer_rank) bindings required by descriptor exchange.
-    std::map<std::pair<uint32_t, uint32_t>, EndpointDesc> endpoint_desc_map_;
-    std::map<uint32_t, EndpointDesc> endpoint_local_desc_map_;              // eid_index -> endpoint desc
-    std::map<uint32_t, EndpointHandle> endpoint_handle_map_;                // eid_index -> handle
-    std::map<uint32_t, uint16_t> endpoint_listen_port_map_;                 // eid_index -> port
-    std::map<uint64_t, std::map<uint32_t, HcommMemHandle>> mem_record_map_; // addr -> eid_index -> handle
+    // Endpoint maps keyed by EndpointMapKey (see EndpointPeerRank/EndpointQpSlot for how the
+    // peer/qp dimensions collapse per build and shared-jetty setting).
+    std::map<EndpointMapKey, EndpointDesc> endpoint_desc_map_;     // (eid, peer, qp_slot) -> local hcomm endpoint desc
+    std::map<EndpointMapKey, EndpointHandle> endpoint_handle_map_; // (eid, peer, qp_slot) -> hcomm endpoint handle
+    std::map<EndpointMapKey, uint16_t> endpoint_listen_port_map_;  // (eid, peer, qp_slot) -> actual listen port
+    std::map<uint64_t, std::map<EndpointMapKey, HcommMemHandle>> mem_record_map_; // addr -> endpoint key -> handle
     // Registration geometry is kept separately from the opaque HCOMM handles. The current UDMA
     // data-plane ABI carries one memory descriptor per channel slot, so Connect requires this map
     // to contain exactly one entry and validates that the peer descriptor covers the same heap.
@@ -235,6 +317,10 @@ private:
     // per-peer uint64_t AMO scratch device buffers, sized rank_count_ and indexed by the actual
     // destination pe in both builds (relay recovers dst_pe = slot / rank_count_).
     std::vector<void*> amo_dev_list_;
+    // aclshmemi_udma_queue_state_t device buffers, one per distinct jetty key (jfsID, sqVa, dbVa)
+    // read back from the channels, so the size is the jetty count rather than the slot count.
+    // Allocated lazily in FillHostUdmaInfo and released in FreeDeviceInfo, like amo_dev_list_.
+    std::vector<void*> queue_state_dev_list_;
 #if defined(ACLSHMEM_MSSANITIZER_BUILD)
     // Owns the mssanitizer registrar only in instrumented builds.
     std::unique_ptr<shm::mstx_mem_register_base> mstx_reg_ptr_;

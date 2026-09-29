@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <limits>
 
 // Test-only access override scoped strictly to dl_hcomm_api.h so this fixture can replace
@@ -40,6 +41,7 @@ protected:
         saved_endpoint_destroy_ = DlHcommApi::gHcommEndpointDestroy;
         saved_channel_create_ = DlHcommApi::gHcommChannelCreate;
         saved_channel_destroy_ = DlHcommApi::gHcommChannelDestroy;
+        saved_config_create_ = DlHcommApi::gHcommChannelConfigCreate;
         g_boot_handle.npes = 3;
         g_boot_handle.allgather = AllGather;
         lengths_.clear();
@@ -52,6 +54,8 @@ protected:
         DlHcommApi::gHcommEndpointDestroy = SucceedEndpointDestroy;
         DlHcommApi::gHcommChannelCreate = RecordChannelCreate;
         DlHcommApi::gHcommChannelDestroy = SucceedChannelDestroy;
+        // Force the recorded fallback even if an earlier test loaded libhcomm.
+        DlHcommApi::gHcommChannelConfigCreate = nullptr;
     }
 
     void TearDown() override
@@ -61,6 +65,7 @@ protected:
         DlHcommApi::gHcommEndpointDestroy = saved_endpoint_destroy_;
         DlHcommApi::gHcommChannelCreate = saved_channel_create_;
         DlHcommApi::gHcommChannelDestroy = saved_channel_destroy_;
+        DlHcommApi::gHcommChannelConfigCreate = saved_config_create_;
         g_boot_handle = saved_handle_;
     }
 
@@ -82,6 +87,14 @@ protected:
         return ACLSHMEM_SUCCESS;
     }
 
+    static int MirrorAllGather(const void* send, void* recv, int len, aclshmemi_bootstrap_handle_t* handle)
+    {
+        for (int rank = 0; rank < handle->npes; ++rank) {
+            std::memcpy(static_cast<uint8_t*>(recv) + static_cast<size_t>(rank) * len, send, len);
+        }
+        return ACLSHMEM_SUCCESS;
+    }
+
     static Result Gather(uint32_t chunk_count, Exchange& exchange)
     {
         exchange.max_count = 5;
@@ -95,6 +108,15 @@ protected:
     }
 
     static uint32_t ChunkCount(uint32_t ranks) { return UdmaTransportManager::GetEndpointChunkCount(ranks); }
+
+    static Result CheckQpOwners(
+        const std::map<std::pair<uint32_t, uint32_t>, size_t>& bindings, bool shared = true, uint32_t qp_num = 16)
+    {
+        UdmaTransportManager manager;
+        manager.shared_jetty_enabled_ = shared;
+        manager.qp_num_ = qp_num;
+        return manager.CheckPerQpEndpointSplit(bindings);
+    }
 
     static bool GetSize(uint32_t ranks, uint32_t endpoints, size_t& count)
     {
@@ -129,15 +151,18 @@ protected:
         return 0;
     }
 
-    static void AddEndpoint(UdmaTransportManager& manager, uint32_t eid, uint32_t peer, uintptr_t handle)
+    static void AddEndpoint(
+        UdmaTransportManager& manager, uint32_t eid, uint32_t peer, uintptr_t handle, uint32_t qp_idx = 0)
     {
-        const auto key = std::make_pair(eid, peer);
+        const UdmaTransportManager::EndpointMapKey key{
+            eid, manager.EndpointPeerRank(peer), manager.EndpointQpSlot(qp_idx)};
         EndpointDesc desc{};
-        manager.endpoint_handle_map_[eid] = Handle(handle);
-        manager.endpoint_local_desc_map_[eid] = desc;
+        manager.endpoint_handle_map_[key] = Handle(handle);
         manager.endpoint_desc_map_[key] = desc;
-        manager.endpoint_listen_port_map_[eid] = static_cast<uint16_t>(1000 + handle);
+        manager.endpoint_listen_port_map_[key] = static_cast<uint16_t>(1000 + handle);
     }
+
+    static void EnableSharedJetty(UdmaTransportManager& manager) { manager.shared_jetty_enabled_ = true; }
 
     static size_t RegisteredEndpointCount(const UdmaTransportManager& manager, uint64_t addr)
     {
@@ -165,12 +190,13 @@ protected:
     }
 
     static void AddRemoteDescriptor(
-        Exchange& exchange, uint32_t rank, uint32_t index, uint32_t local_rank, uint32_t eid)
+        Exchange& exchange, uint32_t rank, uint32_t index, uint32_t local_rank, uint32_t eid, uint32_t qp_slot = 0)
     {
         Descriptor& descriptor = exchange.descs[static_cast<size_t>(rank) * exchange.max_count + index];
         descriptor.valid = 1;
         descriptor.peer_rank = local_rank;
         descriptor.eid_index = eid;
+        descriptor.qp_slot = qp_slot;
         descriptor.listen_port = static_cast<uint16_t>(2000 + eid);
     }
 
@@ -179,11 +205,19 @@ protected:
         std::vector<uint32_t>& dst_pes, std::vector<uint32_t>& qp_indices)
     {
         UdmaTransportManager::ChannelBuildState state;
+        state.channel_names.reserve(static_cast<size_t>(manager.rank_count_ - 1) * manager.qp_num_);
         const Result result = manager.BuildDirectChannels(exchange, state);
         slots = state.slots;
         dst_pes = state.dst_pes;
         qp_indices = state.qp_indices;
         return result;
+    }
+
+    static bool BuildSyncEndpointsForTest(
+        UdmaTransportManager& manager, const RootInfo& root_info, const TopoInfo& topo_info, uint32_t rank_count,
+        std::vector<std::vector<SyncEndpoint>>& endpoints)
+    {
+        return manager.BuildSyncEndpoints(root_info, topo_info, rank_count, endpoints);
     }
 
     aclshmemi_bootstrap_handle_t saved_handle_{};
@@ -192,6 +226,7 @@ protected:
     HcommEndpointDestroyFunc saved_endpoint_destroy_{nullptr};
     HcommChannelCreateFunc saved_channel_create_{nullptr};
     HcommChannelDestroyFunc saved_channel_destroy_{nullptr};
+    HcommChannelConfigCreateFunc saved_config_create_{nullptr};
     inline static std::vector<int> lengths_;
     inline static size_t fail_call_{0};
     inline static std::vector<EndpointHandle> mem_reg_endpoints_;
@@ -208,6 +243,74 @@ TEST_F(UdmaEndpointExchangeTest, AcceptsBoundaryAndRejectsNextEndpoint)
     EXPECT_EQ(count, static_cast<size_t>(ranks) * endpoints);
     EXPECT_FALSE(GetSize(ranks, endpoints + 1, count));
     EXPECT_EQ(count, 0U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, AllowsSameQpAcrossPeersOnState112)
+{
+    EXPECT_EQ(CheckQpOwners({{{8, 0}, 112}, {{9, 0}, 112}, {{10, 0}, 112}}), ACLSHMEM_SUCCESS);
+}
+
+TEST_F(UdmaEndpointExchangeTest, AllowsSharedDualQpOwnersAndIndependentMeshQueues)
+{
+    std::map<std::pair<uint32_t, uint32_t>, size_t> bindings;
+    for (uint32_t qp = 0; qp < 16; ++qp) {
+        bindings[{1, qp}] = qp; // MESH route stays independent of the cross route.
+        for (uint32_t peer = 8; peer < 16; ++peer) {
+            bindings[{peer, qp}] = 112 + qp;
+        }
+    }
+    EXPECT_EQ(CheckQpOwners(bindings), ACLSHMEM_SUCCESS);
+}
+
+TEST_F(UdmaEndpointExchangeTest, RejectsDifferentQpsSharingWithinOnePeer)
+{
+    if (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        GTEST_SKIP() << "Multi-QP shared Jetty is direct-only";
+    }
+    EXPECT_EQ(CheckQpOwners({{{9, 0}, 112}, {{9, 1}, 112}}), ACLSHMEM_INNER_ERROR);
+}
+
+TEST_F(UdmaEndpointExchangeTest, RejectsDifferentQpsAfterValidCrossPeerSharing)
+{
+    if (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        GTEST_SKIP() << "Multi-QP shared Jetty is direct-only";
+    }
+    EXPECT_EQ(CheckQpOwners({{{8, 0}, 112}, {{9, 0}, 112}, {{10, 2}, 112}}), ACLSHMEM_INNER_ERROR);
+}
+
+TEST_F(UdmaEndpointExchangeTest, SharedOwnerCheckLeavesNonSharedModeUnchanged)
+{
+    EXPECT_EQ(CheckQpOwners({{{8, 0}, 112}, {{9, 1}, 112}}, false), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(CheckQpOwners({{{8, 0}, 112}, {{9, 0}, 112}}, true, 1), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(CheckQpOwners({}), ACLSHMEM_SUCCESS);
+}
+
+TEST_F(UdmaEndpointExchangeTest, KeepsExplicitClosFabricWhenPortsAlsoMatchMeshTopology)
+{
+    // PoD may expose an aggregated CLOS EID whose ports also occur in the
+    // Mesh topology. The rootinfo CLOS declaration must take precedence;
+    // only TOPO_FILE_DESC endpoints infer their fabric from topology ports.
+    g_boot_handle.npes = 1;
+    g_boot_handle.allgather = MirrorAllGather;
+
+    RootInfo root_info;
+    auto level = std::make_shared<LevelInfo>(LevelInfo{1, "clos-domain", NetType::Clos, ""});
+    auto rank_addr = std::make_shared<RankAddr>();
+    rank_addr->levelInfo = level;
+    rank_addr->ports = {"shared-port"};
+    root_info.eidIndexToRankAddr.emplace(7, rank_addr);
+
+    TopoInfo topo_info;
+    topo_info.meshTopoEdges.push_back({0, 1, {"shared-port"}, {"peer-mesh-port"}});
+    topo_info.closTopoEdges.push_back({1, 0, 0, {"shared-port"}});
+
+    UdmaTransportManager manager;
+    std::vector<std::vector<SyncEndpoint>> endpoints;
+    ASSERT_TRUE(BuildSyncEndpointsForTest(manager, root_info, topo_info, 1, endpoints));
+    ASSERT_EQ(endpoints.size(), 1U);
+    ASSERT_EQ(endpoints[0].size(), 1U);
+    EXPECT_EQ(endpoints[0][0].netType, NetType::Clos);
+    EXPECT_EQ(endpoints[0][0].fabric, TopoFabric::Clos);
 }
 
 TEST_F(UdmaEndpointExchangeTest, RejectsEmptyAndOverflowingDimensions)
@@ -309,7 +412,11 @@ TEST_F(UdmaEndpointExchangeTest, RegistersOneHeapOnEverySelectedUniqueEndpoint)
 
 TEST_F(UdmaEndpointExchangeTest, RegistersSharedLocalEidOnlyOnceAcrossPeers)
 {
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        GTEST_SKIP() << "Cross-peer endpoint sharing applies to direct builds";
+    }
     UdmaTransportManager manager;
+    EnableSharedJetty(manager);
     AddEndpoint(manager, 7, 1, 7);
     AddEndpoint(manager, 7, 2, 7);
     AddEndpoint(manager, 7, 3, 7);
@@ -322,7 +429,23 @@ TEST_F(UdmaEndpointExchangeTest, RegistersSharedLocalEidOnlyOnceAcrossPeers)
 
     EXPECT_EQ(mem_reg_endpoints_, (std::vector<EndpointHandle>{Handle(7)}));
     EXPECT_EQ(RegisteredEndpointCount(manager, region.addr), 1U);
-    EXPECT_EQ(LogicalEndpointCount(manager), 3U);
+    EXPECT_EQ(LogicalEndpointCount(manager), 1U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, KeepsLocalEidSeparateAcrossPeersWithoutSharedJetty)
+{
+    UdmaTransportManager manager;
+    AddEndpoint(manager, 7, 1, 1);
+    AddEndpoint(manager, 7, 2, 2);
+    AddEndpoint(manager, 7, 3, 3);
+
+    TransportMemoryRegion region{};
+    region.addr = 0x100000;
+    region.size = 0x2000;
+    region.flags = REG_MR_FLAG_HBM;
+    ASSERT_EQ(manager.RegisterMemoryRegion(region), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(mem_reg_endpoints_, (std::vector<EndpointHandle>{Handle(1), Handle(2), Handle(3)}));
+    EXPECT_EQ(RegisteredEndpointCount(manager, region.addr), 3U);
 }
 
 TEST_F(UdmaEndpointExchangeTest, BuildsOneChannelForEveryPeerQpFromFinalRoutes)
@@ -370,6 +493,52 @@ TEST_F(UdmaEndpointExchangeTest, BuildsOneChannelForEveryPeerQpFromFinalRoutes)
     EXPECT_EQ(slots, (std::vector<uint32_t>{1, 1, 1, 2, 2, 2}));
     EXPECT_EQ(dst_pes, (std::vector<uint32_t>{1, 1, 1, 2, 2, 2}));
     EXPECT_EQ(qp_indices, (std::vector<uint32_t>{0, 1, 2, 0, 1, 2}));
+}
+
+TEST_F(UdmaEndpointExchangeTest, SharedJettyKeepsQpEndpointsSeparateWithLayerRoutes)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        GTEST_SKIP() << "Per-QP endpoint splitting applies to direct builds";
+    }
+    UdmaTransportManager manager;
+    ConfigureManager(manager, 0, 3, 2);
+    EnableSharedJetty(manager);
+    // Both peers converge on the same EID, but each QP retains its own endpoint
+    // and its resolved network layer, even while sharing with the other peer.
+    for (uint32_t peer : {1U, 2U}) {
+        AddRoute(manager, peer, 10, 20, 0);
+        AddRoute(manager, peer, 10, 20, 1);
+        AddEndpoint(manager, 10, peer, 10, 0);
+        AddEndpoint(manager, 10, peer, 11, 1);
+    }
+    TransportMemoryRegion region{};
+    region.addr = 0x200000;
+    region.size = 0x4000;
+    region.flags = REG_MR_FLAG_HBM;
+    ASSERT_EQ(manager.RegisterMemoryRegion(region), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(RegisteredEndpointCount(manager, region.addr), 2U);
+    EXPECT_EQ(mem_reg_endpoints_, (std::vector<EndpointHandle>{Handle(10), Handle(11)}));
+
+    Exchange exchange;
+    exchange.max_count = 2;
+    exchange.counts = {0, 2, 2};
+    exchange.descs.resize(6);
+    for (uint32_t peer : {1U, 2U}) {
+        for (uint32_t qp = 0; qp < 2; ++qp) {
+            AddRemoteDescriptor(exchange, peer, qp, 0xFFFFFFFFU, 20, qp);
+            uint32_t layer = 99;
+            ASSERT_EQ(manager.GetQpNetLayer(ACLSHMEM_DATA_OP_UDMA, peer, qp, layer), ACLSHMEM_SUCCESS);
+            EXPECT_EQ(layer, qp);
+        }
+    }
+    std::vector<uint32_t> slots;
+    std::vector<uint32_t> dst_pes;
+    std::vector<uint32_t> qp_indices;
+    ASSERT_EQ(BuildDirect(manager, exchange, slots, dst_pes, qp_indices), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(channel_endpoints_, (std::vector<EndpointHandle>{Handle(10), Handle(11), Handle(10), Handle(11)}));
+    EXPECT_EQ(slots, (std::vector<uint32_t>{1, 1, 2, 2}));
+    EXPECT_EQ(dst_pes, (std::vector<uint32_t>{1, 1, 2, 2}));
+    EXPECT_EQ(qp_indices, (std::vector<uint32_t>{0, 1, 0, 1}));
 }
 
 } // namespace device

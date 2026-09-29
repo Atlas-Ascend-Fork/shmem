@@ -423,6 +423,9 @@ constexpr uint32_t UDMA_WRAP_TEST_RING_GUARD_BYTES = 256;
 constexpr uint32_t UDMA_WRAP_TEST_QP_OFFSET = 256;
 constexpr uint32_t UDMA_WRAP_TEST_REMOTE_MEM_OFFSET = 512;
 constexpr uint32_t UDMA_WRAP_TEST_EID_OFFSET = 768;
+// aclshmemi_udma_queue_state_t backing the test wq_ctx (state_addr points here). Layout constants
+// below must not overlap the header region (0..UDMA_WRAP_TEST_HEADER_BYTES).
+constexpr uint32_t UDMA_WRAP_TEST_STATE_OFFSET = 896;
 constexpr uint32_t UDMA_WRAP_TEST_NOTIFY_HEAD_QWORD = sizeof(aclshmemi_sqe_ctx_t) / sizeof(uint64_t);
 constexpr uint64_t UDMA_WRAP_TEST_GUARD_VALUE = 0xC0FFEE1234567890ULL;
 constexpr uint64_t UDMA_WRAP_TEST_PIPE_S_SIGNAL = 0x1122334455667788ULL;
@@ -456,6 +459,11 @@ __aicore__ inline __gm__ uint64_t* udma_wrap_test_result(GM_ADDR workspace)
 __aicore__ inline __gm__ aclshmemi_udma_wq_ctx_t* udma_wrap_test_qp(GM_ADDR workspace)
 {
     return reinterpret_cast<__gm__ aclshmemi_udma_wq_ctx_t*>(workspace + UDMA_WRAP_TEST_QP_OFFSET);
+}
+
+__aicore__ inline __gm__ aclshmemi_udma_queue_state_t* udma_wrap_test_state(GM_ADDR workspace)
+{
+    return reinterpret_cast<__gm__ aclshmemi_udma_queue_state_t*>(workspace + UDMA_WRAP_TEST_STATE_OFFSET);
 }
 
 __aicore__ inline __gm__ aclshmemi_ubmem_info_t* udma_wrap_test_remote_mem(GM_ADDR workspace)
@@ -521,12 +529,15 @@ __aicore__ inline void udma_wrap_test_prepare_fixture(GM_ADDR workspace, __gm__ 
     qp_ctx->buf_addr = reinterpret_cast<uint64_t>(ring);
     qp_ctx->wqe_size = UDMA_WRAP_TEST_WQE_SIZE;
     qp_ctx->depth = shm::UDMA_SQ_BASKBLK_CNT;
-    qp_ctx->head = shm::UDMA_SQ_BASKBLK_CNT - 1;
-    qp_ctx->tail = shm::UDMA_SQ_BASKBLK_CNT - 1;
+    // head / tail / cqe_cnt live in the shared queue state the data plane reads via state_addr.
+    __gm__ aclshmemi_udma_queue_state_t* state = udma_wrap_test_state(workspace);
+    qp_ctx->state_addr = reinterpret_cast<uint64_t>(state);
+    state->sq_head = shm::UDMA_SQ_BASKBLK_CNT - 1;
+    state->sq_tail = shm::UDMA_SQ_BASKBLK_CNT - 1;
+    state->cqe_cnt = 0;
     qp_ctx->db_mode = aclshmemi_udma_db_mode_t::SW_DB;
     qp_ctx->db_addr = 0;
     qp_ctx->sl = 0;
-    qp_ctx->cqe_cnt = 0;
     qp_ctx->amo_addr = reinterpret_cast<uint64_t>(udma_wrap_test_local_addr(workspace) + 2 * MESSAGE_SIZE);
     udma_wrap_test_clear_wqebbs(ring);
 }

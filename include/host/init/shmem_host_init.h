@@ -224,6 +224,24 @@ ACLSHMEM_HOST_API int aclshmemx_get_qp_net_layer(
 ACLSHMEM_HOST_API int aclshmemx_get_qp_num(data_op_engine_type_t engine, uint32_t* qp_num);
 
 /**
+ * @brief Configure the process-wide shared-jetty mode of the UDMA engine.
+ *
+ * @note This interface is supported on Ascend950 only and affects the UDMA engine. Call this interface
+ *       when no ACLSHMEM instance is initialized. The configuration remains frozen while any instance
+ *       is alive. After the last instance is finalized, the shared-jetty mode is reset to disabled and
+ *       can be configured again before the next initialization. The value must be identical on every
+ *       PE; shared jetty widens the quiet/completion semantics to the whole sharing group, so
+ *       inconsistent values across PEs produce incompatible behavior. This function is thread-safe
+ *       within a process and is serialized with ACLSHMEM initialization and finalization.
+ *
+ * @param engine              [in] Data operation engine; only UDMA is supported.
+ * @param enable              [in] Whether peers resolving to the same local EID share one underlying
+ *                                jetty (one SQ/CQ ring and one queue state).
+ * @return ACLSHMEM_SUCCESS on success, otherwise an ACLSHMEM error code.
+ */
+ACLSHMEM_HOST_API int aclshmemx_set_shared_jetty(data_op_engine_type_t engine, bool enable);
+
+/**
  * @brief Initialize the resources required for ACLSHMEM task based on attributes.
  *        Attributes can be created by users or obtained by calling <b>aclshmemx_set_attr_uniqueid_args()</b>.
  *        if the self-created attr structure is incorrect, the initialization will fail.

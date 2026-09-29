@@ -96,9 +96,7 @@ int aclshmemi_init_backend::bind_aclshmem_entity(
     }
     elem->entity_boot_handle = handle;
     elem->user_buffer_heap_input = std::move(user_buffer_heap_input);
-    elem->udma_qp_num = udma_qp_config.qpNum;
-    elem->udma_net_layer_policy = udma_qp_config.netLayerPolicy;
-    elem->udma_multi_link_enabled = udma_qp_config.multiLinkEnabled;
+    elem->udma_qp_config = udma_qp_config;
     elem->rdma_qp_num = rdma_qp_num;
     elem->sdma_qp_num = sdma_qp_num;
     if (elem->user_buffer_heap_input != nullptr) {
@@ -273,9 +271,7 @@ int aclshmemi_init_backend::create_entity(aclshmem_mem_type_t mem_type)
     transport_options.rankCount = attributes->n_pes;
     transport_options.protocol = options.bmDataOpType;
     transport_options.role = hybm_role_type::HYBM_ROLE_PEER;
-    transport_options.udmaQpConfig.qpNum = elem->udma_qp_num;
-    transport_options.udmaQpConfig.netLayerPolicy = elem->udma_net_layer_policy;
-    transport_options.udmaQpConfig.multiLinkEnabled = elem->udma_multi_link_enabled;
+    transport_options.udmaQpConfig = elem->udma_qp_config;
     transport_options.rdmaQpConfig.qpNum = elem->rdma_qp_num;
     transport_options.sdmaQpNum = elem->sdma_qp_num;
     if (mem_type == HOST_SIDE) {

@@ -747,6 +747,22 @@ int aclshmemx_set_qp_num(data_op_engine_type_t engine, uint32_t qp_num)
     return ACLSHMEM_SUCCESS;
 }
 
+int aclshmemx_set_shared_jetty(data_op_engine_type_t engine, bool enable)
+{
+    std::lock_guard<std::mutex> lock(g_aclshmem_ctx_mutex);
+    if (engine != ACLSHMEM_DATA_OP_UDMA) {
+        SHM_LOG_WARN("Shared-jetty configuration does not support engine = " << engine);
+        return ACLSHMEM_NOT_SUPPORTED;
+    }
+    if (g_qp_config_frozen) {
+        SHM_LOG_ERROR("Shared-jetty configuration cannot be changed while an ACLSHMEM instance is initialized.");
+        return ACLSHMEM_NOT_SUPPORTED;
+    }
+    g_udma_qp_config.sharedJettyEnabled = enable;
+    SHM_LOG_INFO("set shared jetty success, engine=" << engine << ", enable=" << enable);
+    return ACLSHMEM_SUCCESS;
+}
+
 int aclshmemx_get_qp_num(data_op_engine_type_t engine, uint32_t* qp_num)
 {
     if (qp_num == nullptr) {

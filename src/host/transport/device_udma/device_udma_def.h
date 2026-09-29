@@ -35,27 +35,37 @@ struct aclshmemi_ubmem_info_t {
 
 enum class aclshmemi_udma_db_mode_t : int32_t { INVALID_DB = -1, HW_DB = 0, SW_DB };
 
+// Mutable queue state, carried by a standalone device buffer (see queue_state_dev_list_ on the host
+// side). Slots that share the same underlying jetty point at the same instance through state_addr,
+// so the producer index stays unique and monotonic within a shared group.
+struct aclshmemi_udma_queue_state_t {
+    uint32_t sq_head; // send queue head (Producer Index)
+    uint32_t sq_tail; // send queue tail (Consumer Index)
+    uint32_t cqe_cnt; // CQE count (poll target; only advanced when the op generates a CQE)
+    uint32_t cq_head; // completion queue head (Producer Index)
+    uint32_t cq_tail; // completion queue tail (Consumer Index)
+};
+
 struct aclshmemi_udma_wq_ctx_t {
-    uint32_t wqn;      // work queue number
-    uint64_t buf_addr; // start address of ring buffer
-    uint32_t wqe_size; // size in bytes of each WQE
-    uint32_t depth;    // depth of ring buffer
-    uint32_t head;     // work queue head (Producer Index) address
-    uint32_t tail;     // work queue tail (Consumer Index) address
+    uint32_t wqn;        // work queue number
+    uint64_t buf_addr;   // start address of ring buffer
+    uint32_t wqe_size;   // size in bytes of each WQE
+    uint32_t depth;      // depth of ring buffer
+    uint64_t state_addr; // device address of the aclshmemi_udma_queue_state_t owning this queue
     aclshmemi_udma_db_mode_t db_mode;
     uint64_t db_addr;  // doorbell address
     uint32_t sl;       // service level
-    uint32_t cqe_cnt;  // CQE count
+    // cqe_cnt lives in the shared aclshmemi_udma_queue_state_t (state_addr): slots sharing a jetty
+    // share one physical queue, so the CQE counter must be group-wide to stay monotonic.
     uint64_t amo_addr; // amo address to store fetch data
 };
 
 struct aclshmemi_udma_cq_ctx_t {
-    uint32_t cqn;      // completion queue number
-    uint64_t buf_addr; // start address of ring buffer
-    uint32_t cqe_size; // size in bytes of each CQE
-    uint32_t depth;    // depth of ring buffer
-    uint32_t head;     // completion queue head (Producer Index)
-    uint32_t tail;     // completion queue tail (Consumer Index)
+    uint32_t cqn;        // completion queue number
+    uint64_t buf_addr;   // start address of ring buffer
+    uint32_t cqe_size;   // size in bytes of each CQE
+    uint32_t depth;      // depth of ring buffer
+    uint64_t state_addr; // device address of the aclshmemi_udma_queue_state_t owning this queue
     aclshmemi_udma_db_mode_t db_mode;
     uint64_t db_addr; // doorbell address
 };

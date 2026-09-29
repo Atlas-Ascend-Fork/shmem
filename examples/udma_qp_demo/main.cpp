@@ -55,6 +55,7 @@ struct Options {
     int pe{0};                      // 当前进程在 SHMEM 通信域中的 PE 编号。
     int pes{2};                     // SHMEM 通信域的 PE 总数，至少为 2，避免向本 PE 发送。
     uint32_t qp_count{2};           // 每个远端 PE 创建的 QP 数，同时也是 kernel block 数。
+    bool shared_jetty{false};       // 是否启用 shared jetty（初始化前通过 aclshmemx_set_shared_jetty 设置）。
     uint64_t elements{1024 * 1024}; // 本次传输的 uint8_t 元素数，即传输字节数。
     uint64_t heap_mb{1024};         // 每个 PE 的 SHMEM 对称堆大小，单位为 MiB。
     int first_npu{0};               // PE0 使用的逻辑 NPU 编号；PE i 使用 first_npu + i。
@@ -82,7 +83,7 @@ std::vector<QpSlice> BuildQpSlices(uint64_t elements, uint32_t qp_count)
 void PrintUsage(const char* program)
 {
     std::cerr << "Usage: " << program
-              << " -pe ID -pes N [-qp_count N] [-op put|get|put_signal] [-elems N] [-heap_mb N]"
+              << " -pe ID -pes N [-qp_count N] [-shared_jetty 0|1] [-op put|get|put_signal] [-elems N] [-heap_mb N]"
                  " [-first_npu ID] [-device_ids 1,3,2,4 (overrides -first_npu)]"
                  " [-ipport tcp://IP:PORT] [-qp_net_layers 0:0,2:1]"
                  " [-peer_stride N]\n";
@@ -218,6 +219,11 @@ bool ParseOptions(int argc, char** argv, Options& options)
                 return false;
             }
             options.qp_count = static_cast<uint32_t>(value);
+        } else if (key == "-shared_jetty") {
+            if (value > 1) {
+                return false;
+            }
+            options.shared_jetty = value != 0;
         } else if (key == "-peer_stride") {
             if (value == 0 || value > ACLSHMEM_MAX_PES) {
                 return false;
@@ -443,6 +449,14 @@ int main(int argc, char** argv)
     if (status != 0) {
         std::cerr << "aclshmemx_set_qp_num failed, status=" << status << std::endl;
         return CleanupResources(resources, status);
+    }
+    if (options.shared_jetty) {
+        // 所有 PE 必须由启动器保证相同的 shared jetty 配置。
+        status = aclshmemx_set_shared_jetty(ACLSHMEM_DATA_OP_UDMA, true);
+        if (status != 0) {
+            std::cerr << "aclshmemx_set_shared_jetty failed, status=" << status << std::endl;
+            return CleanupResources(resources, status);
+        }
     }
     if (!options.qp_net_layers.empty()) {
         if (options.qp_net_layers.rbegin()->first >= options.qp_count) {

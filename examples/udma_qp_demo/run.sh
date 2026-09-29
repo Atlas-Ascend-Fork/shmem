@@ -51,6 +51,7 @@ setup_shmem_runtime_env() {
 
 PES=2
 QP_COUNT=2
+SHARED_JETTY=0
 OP=put
 ELEMS=1048576
 HEAP_MB=1024
@@ -67,6 +68,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -pes) PES="$2"; shift 2 ;;
         -qp_count) QP_COUNT="$2"; shift 2 ;;
+        -shared_jetty) SHARED_JETTY="$2"; shift 2 ;;
         -op) OP="$2"; shift 2 ;;
         -elems) ELEMS="$2"; shift 2 ;;
         -heap_mb) HEAP_MB="$2"; shift 2 ;;
@@ -129,7 +131,7 @@ for ((pe = 0; pe < PES; ++pe)); do
         DEVICE_ARGS=(-first_npu "${FIRST_NPU}")
     fi
     echo "Launching PE ${pe}/${PES} on device ${DEVICE_ID}, bootstrap=${IPPORT}"
-    "${BIN}" -pe "${pe}" -pes "${PES}" -qp_count "${QP_COUNT}" -op "${OP}" -elems "${ELEMS}" \
+    "${BIN}" -pe "${pe}" -pes "${PES}" -qp_count "${QP_COUNT}" -shared_jetty "${SHARED_JETTY}" -op "${OP}" -elems "${ELEMS}" \
         -heap_mb "${HEAP_MB}" "${DEVICE_ARGS[@]}" -ipport "${IPPORT}" "${EXTRA_ARGS[@]}" &
     pids+=("$!")
 done
