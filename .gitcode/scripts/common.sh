@@ -33,13 +33,13 @@ function check_docs_changes() {
 
 function env_info() {
     echo "=======================================================/usr/local/Ascend/==============================="
-    ls -la /usr/local/Ascend/
+    ls -la /usr/local/Ascend/ || echo "no /usr/local/Ascend/"
 
     echo "=======================================================/dev/davinci====================================="
-    ls -la /dev/davinci*
+    ls -la /dev/davinci* 2>/dev/null || echo "no /dev/davinci* devices"
 
     echo "=======================================================driver info====================================="
-    cat /usr/local/Ascend/driver/version.info
+    cat /usr/local/Ascend/driver/version.info 2>/dev/null || echo "no /usr/local/Ascend/driver/version.info"
 
-    npu-smi info
+    npu-smi info 2>/dev/null || echo "npu-smi not available"
 }
