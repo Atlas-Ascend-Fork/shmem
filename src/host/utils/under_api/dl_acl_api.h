@@ -317,6 +317,9 @@ public:
     }
 
 private:
+#ifdef ACLSHMEM_UNIT_TEST
+    friend class HybmVmmReservationTest;
+#endif
     static std::mutex gMutex;
     static bool gLoaded;
     static void* rtHandle;

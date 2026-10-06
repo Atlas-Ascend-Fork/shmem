@@ -36,8 +36,13 @@ Result HybmVmmBasedSegment::ValidateOptions() noexcept
         return ACLSHMEM_INVALID_PARAM;
     }
 
-    if (UINT64_MAX / options_.size < options_.rankCnt) {
-        SHM_LOG_ERROR("Validate options error rankCnt(" << options_.rankCnt << ") size(" << options_.size);
+    if (options_.size > SIZE_MAX - (DEVMM_HEAP_SIZE - 1)) {
+        SHM_LOG_ERROR("Heap size overflows after alignment: " << options_.size);
+        return ACLSHMEM_INVALID_PARAM;
+    }
+    const size_t alignedSize = ALIGN_UP(options_.size, DEVMM_HEAP_SIZE);
+    if (options_.rankCnt == 0 || SIZE_MAX / alignedSize < options_.rankCnt) {
+        SHM_LOG_ERROR("Invalid rankCnt(" << options_.rankCnt << ") aligned heap size(" << alignedSize << ")");
         return ACLSHMEM_INVALID_PARAM;
     }
 
@@ -47,17 +52,10 @@ Result HybmVmmBasedSegment::ValidateOptions() noexcept
 Result HybmVmmBasedSegment::ReserveEachPeMemorySpace(
     size_t reserveAlignedSize, size_t totalReservedSize, uint64_t expectSt) noexcept
 {
-    if (expectSt + totalReservedSize > HYBM_DEVICE_META_ADDR) {
-        SHM_LOG_ERROR(
-            "total reserved size(" << totalReservedSize << ") exceeds available virtual address range, "
-                                   << "expectSt=0x" << std::hex << expectSt << ", HYBM_DEVICE_META_ADDR=0x"
-                                   << HYBM_DEVICE_META_ADDR << std::dec);
-        return ACLSHMEM_INVALID_PARAM;
-    }
-
     void* base = nullptr;
 
     // 950 and small heap: single nullptr reserve, then slice by rank offset
+    // The runtime chooses the base; the legacy fixed-address window does not apply.
     if (socType_ == AscendSocType::ASCEND_950 || totalReservedSize < HYBM_MAX_SINGLE_RESERVE_SIZE) {
         auto ret = DlAclApi::AclrtReserveMemAddress(&base, totalReservedSize, 0, nullptr, 1);
         if (ret != 0 || base == nullptr) {
@@ -66,19 +64,32 @@ Result HybmVmmBasedSegment::ReserveEachPeMemorySpace(
                                                                 << " ret=" << ret);
             return ACLSHMEM_MALLOC_FAILED;
         }
-        uint8_t* currentAddr = static_cast<uint8_t*>(base);
+        uint64_t currentAddr = reinterpret_cast<uint64_t>(base);
+        if (totalReservedSize > UINT64_MAX - currentAddr) {
+            SHM_LOG_ERROR("VMM reserved address range overflows, base=" << base << " size=" << totalReservedSize);
+            DlAclApi::AclrtReleaseMemAddress(base);
+            return ACLSHMEM_MALLOC_FAILED;
+        }
         for (uint32_t i = 0; i < options_.rankCnt; i++) {
-            reservedVirtualAddresses_.emplace_back(reinterpret_cast<uint64_t>(currentAddr));
+            reservedVirtualAddresses_.emplace_back(currentAddr);
             SHM_LOG_INFO(
                 "RankId: " << i << ", vaddr: " << (void*)currentAddr << " size: " << options_.size
                            << " align_size: " << reserveAlignedSize);
             currentAddr += reserveAlignedSize;
         }
         singleReservation_ = true;
+        totalVirtualSize_ = totalReservedSize;
         return ACLSHMEM_SUCCESS;
     }
 
     // large heap: per-PE specified address from expectSt, fail fast (no offset retry)
+    if (expectSt > HYBM_DEVICE_META_ADDR || totalReservedSize > HYBM_DEVICE_META_ADDR - expectSt) {
+        SHM_LOG_ERROR(
+            "total reserved size(" << totalReservedSize << ") exceeds available fixed virtual address range, "
+                                   << "expectSt=0x" << std::hex << expectSt << ", HYBM_DEVICE_META_ADDR=0x"
+                                   << HYBM_DEVICE_META_ADDR << std::dec);
+        return ACLSHMEM_INVALID_PARAM;
+    }
     uint8_t* curBase = reinterpret_cast<uint8_t*>(expectSt);
     for (uint32_t i = 0; i < options_.rankCnt; i++) {
         auto ret = DlAclApi::AclrtReserveMemAddress(&base, reserveAlignedSize, 0, curBase, 1);
@@ -102,7 +113,7 @@ Result HybmVmmBasedSegment::ReserveEachPeMemorySpace(
     SHM_LOG_INFO(
         "Success to reserve memory space for logic deviceid " << logicDeviceId_ << ", start addr: " << (void*)expectSt
                                                               << ", total size: " << totalReservedSize);
-    totalVirtualSize_ += totalReservedSize;
+    totalVirtualSize_ = totalReservedSize;
     return ACLSHMEM_SUCCESS;
 }
 
@@ -478,15 +489,14 @@ std::shared_ptr<MemSlice> HybmVmmBasedSegment::GetMemSlice(hybm_mem_slice_t slic
 
 bool HybmVmmBasedSegment::MemoryInRange(const void* begin, uint64_t size) const noexcept
 {
-    if (begin < globalVirtualAddress_) {
+    const uint64_t start = reinterpret_cast<uint64_t>(begin);
+    const uint64_t base = reinterpret_cast<uint64_t>(globalVirtualAddress_);
+    if (globalVirtualAddress_ == nullptr || start < base) {
         return false;
     }
 
-    if (reinterpret_cast<const uint8_t*>(begin) + size > globalVirtualAddress_ + totalVirtualSize_) {
-        return false;
-    }
-
-    return true;
+    const uint64_t offset = start - base;
+    return offset <= totalVirtualSize_ && size <= totalVirtualSize_ - offset;
 }
 
 bool HybmVmmBasedSegment::CanMapRemote(const MemExportInfo& rmi) noexcept
