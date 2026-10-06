@@ -40,6 +40,30 @@ TEST(UdmaTransportManagerTest, RejectsMultipleQpsInRelayModeBeforeOpeningDevice)
 }
 #endif
 
+TEST(UdmaTransportManagerTest, RejectsInvalidPeerMasksBeforeOpeningDevice)
+{
+    UdmaTransportManager manager;
+    TransportOptions options{};
+    options.rankCount = 3;
+    options.rankId = 0;
+    options.udmaQpConfig.qpNum = 1;
+    options.udmaQpConfig.peerQpMasks = {0, 1, 1};
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        EXPECT_EQ(manager.OpenDevice(options), ACLSHMEM_NOT_SUPPORTED);
+        return;
+    }
+    options.udmaQpConfig.qpNum = 4;
+    for (const auto& masks : std::vector<std::vector<uint64_t>>{{0, 1}, {1, 1, 1}, {0, 2, 1}, {0, 17, 1}, {0, 0, 1}}) {
+        options.udmaQpConfig.peerQpMasks = masks;
+        EXPECT_EQ(manager.OpenDevice(options), ACLSHMEM_INVALID_VALUE);
+    }
+    options.udmaQpConfig.peerQpMasks = {0, 1, 1};
+    options.rankId = 3;
+    EXPECT_EQ(manager.OpenDevice(options), ACLSHMEM_INVALID_VALUE);
+    options.rankCount = 0;
+    EXPECT_EQ(manager.OpenDevice(options), ACLSHMEM_INVALID_VALUE);
+}
+
 } // namespace device
 } // namespace transport
 } // namespace shm

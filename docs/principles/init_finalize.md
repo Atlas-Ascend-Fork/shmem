@@ -424,3 +424,19 @@ rank 0 `CreateStore(..., isServer=true)` 监听；各 PE client 的 `connMaxRetr
 | 仅 rank 0 调 init | 每个 PE 均须 `aclshmemx_init_attr` |
 | 多 instance 端口冲突 | `SHMEM_INSTANCE_PORT_RANGE`，模板端口写 **0** |
 | A2/A3 barrier 异常 | 算子入口 `util_set_ffts_config(util_get_ffts_config())` |
+
+
+## 七、按 peer 选择 UDMA QP 通道
+
+直接 UDMA 模式支持在初始化前调用 `aclshmemx_set_udma_peer_qp_masks(masks, count)`，选择需要建立的通道。先设置 QP 数量，再传入长度为 `n_pes` 的 `uint64_t` 数组。`masks[peer]` 的第 q 位表示保留到该 peer 的逻辑 QP q。SHMEM 拷贝数组，调用方随后可以释放它。
+
+- self 的 mask 必须为 0；其他 peer 必须保留 QP0，供默认 QP 操作和集合通信使用。
+- 所有 PE 必须一致启用 mask，且 `masks[a][b] == masks[b][a]`。初始化时交换 QP 数量与启用状态，再通过一次 allgather 校验对称性，发现不一致时不创建通道。EP256/512 的 mask 矩阵分别为 512 KiB / 2 MiB。
+- 不设置该接口或传入 `(nullptr, 0)` 时保持全量建链。relay 模式不支持 mask。
+- shared jetty 开关与 mask 独立。仅跳过未选择的 HCOMM 通道，保留原始 QP 编号、peer 索引、路由、端点 key、`peer * qp_num + qp` 设备表步长及共享 SQ 状态归属。未选择项保持零初始化，端点创建和内存注册沿用已有布局。
+- 应用只能访问 mask 中选中的 `(peer, qp)`。QP-specific quiet-all 要求该 QP 在所有非 self peer 上均被选中。没有新增算子阶段通信、UB 分配或设备热路径分支。
+- 实例存活期间配置冻结，最后一个实例 finalize 时恢复默认。不支持同一作业混用不同 SHMEM 协议版本。
+
+例如两个 PE 各配置 32 个逻辑 QP，只保留 QP0、QP7 时，rank 0 传入 `{0, 0x81}`，rank 1 传入 `{0x81, 0}`。每个 PE 建立两个通道；QP7 的路由和设备表索引仍为 7，不会压缩成 1。业务流量配比仍由调用方调度决定。
+
+端点的显式 Mesh/CLOS 类型以 rootinfo 为准。`TOPO_FILE_DESC` 回退判断同时匹配 rootinfo 的 `local_id` 与该设备的端口名，不能只在整张拓扑中搜索端口名。例如设备 0 的 `1/0` 可以属于 CLOS，而设备 4 的 `1/0` 属于 Mesh；它们是不同端口，不应把有效 CLOS 端点误判为 Unknown。确实在同一设备上同时匹配两种 fabric 的回退端点继续保留 Unknown，由现有的具体拓扑边解析。

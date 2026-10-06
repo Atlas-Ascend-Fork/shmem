@@ -67,34 +67,36 @@ bool CheckedAdd(T lhs, T rhs, T& result)
     return true;
 }
 
-bool PortInMeshTopo(const TopoInfo& topoInfo, const EidPort& port)
+bool PortInMeshTopo(const TopoInfo& topoInfo, uint32_t localId, const EidPort& port)
 {
     for (const auto& edge : topoInfo.meshTopoEdges) {
-        if (std::find(edge.localAPorts.begin(), edge.localAPorts.end(), port) != edge.localAPorts.end() ||
-            std::find(edge.localBPorts.begin(), edge.localBPorts.end(), port) != edge.localBPorts.end()) {
+        if ((edge.localA == localId &&
+             std::find(edge.localAPorts.begin(), edge.localAPorts.end(), port) != edge.localAPorts.end()) ||
+            (edge.localB == localId &&
+             std::find(edge.localBPorts.begin(), edge.localBPorts.end(), port) != edge.localBPorts.end())) {
             return true;
         }
     }
     return false;
 }
 
-bool PortInClosTopo(const TopoInfo& topoInfo, const EidPort& port)
+bool PortInClosTopo(const TopoInfo& topoInfo, uint32_t localId, const EidPort& port)
 {
     for (const auto& edge : topoInfo.closTopoEdges) {
-        if (std::find(edge.ports.begin(), edge.ports.end(), port) != edge.ports.end()) {
+        if (edge.localA == localId && std::find(edge.ports.begin(), edge.ports.end(), port) != edge.ports.end()) {
             return true;
         }
     }
     return false;
 }
 
-TopoFabric ClassifyEndpointFabric(const TopoInfo& topoInfo, const std::vector<EidPort>& ports)
+TopoFabric ClassifyEndpointFabric(const TopoInfo& topoInfo, uint32_t localId, const std::vector<EidPort>& ports)
 {
     bool meshMatched = false;
     bool closMatched = false;
     for (const auto& port : ports) {
-        meshMatched = meshMatched || PortInMeshTopo(topoInfo, port);
-        closMatched = closMatched || PortInClosTopo(topoInfo, port);
+        meshMatched = meshMatched || PortInMeshTopo(topoInfo, localId, port);
+        closMatched = closMatched || PortInClosTopo(topoInfo, localId, port);
         if (meshMatched && closMatched) {
             return TopoFabric::Unknown;
         }
@@ -108,7 +110,8 @@ TopoFabric ClassifyEndpointFabric(const TopoInfo& topoInfo, const std::vector<Ei
     return TopoFabric::Unknown;
 }
 
-TopoFabric ResolveEndpointFabric(NetType netType, const TopoInfo& topoInfo, const std::vector<EidPort>& ports)
+TopoFabric ResolveEndpointFabric(
+    NetType netType, const TopoInfo& topoInfo, uint32_t localId, const std::vector<EidPort>& ports)
 {
     // An explicit rootinfo network type is authoritative. In particular, an
     // aggregated PoD CLOS address can contain ports which also appear in a
@@ -122,7 +125,9 @@ TopoFabric ResolveEndpointFabric(NetType netType, const TopoInfo& topoInfo, cons
     }
     // TOPO_FILE_DESC intentionally relies on the driver topology to identify
     // the fabric because its rootinfo level describes a merged topology.
-    return ClassifyEndpointFabric(topoInfo, ports);
+    // Port labels are device-local, so a label on another device cannot identify
+    // this endpoint's fabric. Keep genuinely ambiguous local endpoints Unknown.
+    return ClassifyEndpointFabric(topoInfo, localId, ports);
 }
 
 std::string MakeUdmaChannelName(uint32_t local_rank, uint32_t peer, uint32_t qp_idx)
@@ -359,6 +364,26 @@ Result UdmaTransportManager::OpenDevice(const TransportOptions& options)
         }
     }
 
+    const auto& masks = options.udmaQpConfig.peerQpMasks;
+    if (!masks.empty()) {
+        if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+            SHM_LOG_ERROR("Per-peer UDMA QP masks are not supported in relay mode");
+            return ACLSHMEM_NOT_SUPPORTED;
+        }
+        if (qp_num > 64 || options.rankCount == 0 || options.rankCount > ACLSHMEM_MAX_PES ||
+            options.rankId >= options.rankCount || masks.size() != options.rankCount) {
+            SHM_LOG_ERROR("Invalid per-peer UDMA QP mask dimensions");
+            return ACLSHMEM_INVALID_VALUE;
+        }
+        const uint64_t valid = qp_num == 64 ? ~uint64_t{0} : (uint64_t{1} << qp_num) - 1;
+        for (uint32_t peer = 0; peer < options.rankCount; ++peer) {
+            if ((masks[peer] & ~valid) || (peer == options.rankId ? masks[peer] != 0 : !(masks[peer] & 1))) {
+                SHM_LOG_ERROR("Invalid UDMA QP mask for peer " << peer << "; non-self peers must retain QP0");
+                return ACLSHMEM_INVALID_VALUE;
+            }
+        }
+    }
+
     int32_t user_id = -1;
     int32_t logic_id = -1;
 
@@ -378,6 +403,7 @@ Result UdmaTransportManager::OpenDevice(const TransportOptions& options)
     rank_count_ = options.rankCount;
     role_ = options.role;
     qp_num_ = qp_num;
+    peer_qp_masks_ = options.udmaQpConfig.peerQpMasks;
     shared_jetty_enabled_ = options.udmaQpConfig.sharedJettyEnabled;
     net_layer_policy_ = options.udmaQpConfig.netLayerPolicy;
     multi_link_enabled_ = options.udmaQpConfig.multiLinkEnabled;
@@ -951,8 +977,8 @@ Result UdmaTransportManager::CheckPerQpEndpointSplit(
             continue;
         }
         SHM_LOG_ERROR(
-            "Shared Jetty QP ownership conflict: state_idx=" << state_idx
-            << ", first=(dst_pe=" << first_dst_pe << ", qp=" << owner_qp_idx
+            "Shared Jetty QP ownership conflict: state_idx="
+            << state_idx << ", first=(dst_pe=" << first_dst_pe << ", qp=" << owner_qp_idx
             << "), conflicting=(dst_pe=" << dst_pe << ", qp=" << qp_idx
             << "). Same-QP sharing across peers is allowed; different QP indices must not share a queue state. "
                "Concurrent submits by distinct QP owners would race.");
@@ -961,7 +987,8 @@ Result UdmaTransportManager::CheckPerQpEndpointSplit(
     }
     SHM_LOG_INFO(
         "Shared Jetty QP ownership check passed: peer/QP bindings=" << peer_qp_to_state_idx.size()
-        << ", queue states=" << state_idx_to_peer_qp.size() << "; same-QP cross-peer sharing allowed");
+                                                                    << ", queue states=" << state_idx_to_peer_qp.size()
+                                                                    << "; same-QP cross-peer sharing allowed");
     return ACLSHMEM_SUCCESS;
 }
 
@@ -1359,10 +1386,49 @@ Result UdmaTransportManager::ExchangeEndpointDescriptors(EndpointExchange& excha
     const uint32_t local_endpoint_count = static_cast<uint32_t>(
         std::min(endpoint_desc_map_.size(), static_cast<size_t>(std::numeric_limits<uint32_t>::max())));
     exchange.counts.assign(rank_count_, 0);
-    auto ret = g_boot_handle.allgather(&local_endpoint_count, exchange.counts.data(), sizeof(uint32_t), &g_boot_handle);
-    if (ret != ACLSHMEM_SUCCESS) {
-        SHM_LOG_ERROR("Failed to exchange Hcomm endpoint counts, ret = " << ret);
+    struct CountConfig {
+        uint32_t count;
+        uint32_t qps;
+        uint32_t sparse;
+    };
+    const CountConfig local{local_endpoint_count, qp_num_, peer_qp_masks_.empty() ? 0U : 1U};
+    std::vector<CountConfig> configs(rank_count_);
+    auto ret = g_boot_handle.allgather(&local, configs.data(), sizeof(CountConfig), &g_boot_handle);
+    if (ret != ACLSHMEM_SUCCESS)
         return ret;
+    for (uint32_t peer = 0; peer < rank_count_; ++peer) {
+        if (configs[peer].qps != local.qps || configs[peer].sparse != local.sparse) {
+            SHM_LOG_ERROR("Ranks disagree on UDMA channel configuration");
+            return ACLSHMEM_INVALID_VALUE;
+        }
+        exchange.counts[peer] = configs[peer].count;
+    }
+    if (local.sparse) {
+        // Initialization-only validation; no operator/Notify communication.
+        // EP512 requires 2 MiB. Check both the allocation and bootstrap byte counts.
+        size_t matrix_count = 0;
+        size_t matrix_bytes = 0;
+        if (!CheckedMultiply(static_cast<size_t>(rank_count_), static_cast<size_t>(rank_count_), matrix_count) ||
+            !CheckedMultiply(matrix_count, sizeof(uint64_t), matrix_bytes) ||
+            matrix_bytes > static_cast<size_t>(std::numeric_limits<int>::max())) {
+            SHM_LOG_ERROR("UDMA QP mask exchange is too large, rankCount = " << rank_count_);
+            return ACLSHMEM_NOT_SUPPORTED;
+        }
+        std::vector<uint64_t> masks(matrix_count);
+        ret = g_boot_handle.allgather(
+            peer_qp_masks_.data(), masks.data(), rank_count_ * sizeof(uint64_t), &g_boot_handle);
+        if (ret != ACLSHMEM_SUCCESS)
+            return ret;
+        // Every rank rejects the same mismatch, before creating any channels.
+        for (uint32_t a = 0; a < rank_count_; ++a) {
+            for (uint32_t b = a + 1; b < rank_count_; ++b) {
+                if (masks[static_cast<size_t>(a) * rank_count_ + b] !=
+                    masks[static_cast<size_t>(b) * rank_count_ + a]) {
+                    SHM_LOG_ERROR("Asymmetric UDMA channel masks: peers " << a << ", " << b);
+                    return ACLSHMEM_INVALID_VALUE;
+                }
+            }
+        }
     }
 
     const auto max_it = std::max_element(exchange.counts.begin(), exchange.counts.end());
@@ -1726,6 +1792,8 @@ Result UdmaTransportManager::BuildDirectChannels(const EndpointExchange& exchang
             return ACLSHMEM_INNER_ERROR;
         }
         for (uint32_t qp_idx = 0; qp_idx < qp_num_; ++qp_idx) {
+            if (!peer_qp_masks_.empty() && !(peer_qp_masks_[peer] & (uint64_t{1} << qp_idx)))
+                continue;
             const auto& route = route_it->second.qp_routes[qp_idx];
             const auto policy_it = net_layer_policy_.find(qp_idx);
             SHM_LOG_DEBUG(
@@ -1814,8 +1882,8 @@ Result UdmaTransportManager::AsyncConnect()
     }
 
     SHM_LOG_INFO(
-        "Create hcomm channels success, totalChannelNum = " << channel_handles_.size()
-                                                            << ", qpNumPerPeer = " << qp_num_);
+        "Create hcomm channels success, totalChannelNum = " << channel_handles_.size() << ", qpNumPerPeer = " << qp_num_
+                                                            << ", peerQpMasksEnabled = " << !peer_qp_masks_.empty());
     connected_ = true;
     return ACLSHMEM_SUCCESS;
 }
@@ -1834,7 +1902,7 @@ bool UdmaTransportManager::BuildSyncEndpoints(
         endpoint.netLayer = rank_addr->levelInfo->netLayer;
         endpoint.netInstanceId = rank_addr->levelInfo->netInstanceId;
         endpoint.netType = rank_addr->levelInfo->netType;
-        endpoint.fabric = ResolveEndpointFabric(endpoint.netType, topo_info, rank_addr->ports);
+        endpoint.fabric = ResolveEndpointFabric(endpoint.netType, topo_info, root_info.localId, rank_addr->ports);
         endpoint.addrType = rank_addr->addrType;
         endpoint.planeId = rank_addr->planeId;
         endpoint.ports = rank_addr->ports;

@@ -47,6 +47,7 @@ enum TransportType {
 struct UdmaQpConfig {
     uint32_t qpNum{1};
     bool sharedJettyEnabled{false};
+    std::vector<uint64_t> peerQpMasks{};
     std::map<uint32_t, uint32_t> netLayerPolicy{};
 #ifdef ACLSHMEM_MULTI_LINK_SUPPORT
     bool multiLinkEnabled{true};

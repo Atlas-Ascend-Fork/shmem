@@ -242,6 +242,32 @@ ACLSHMEM_HOST_API int aclshmemx_get_qp_num(data_op_engine_type_t engine, uint32_
 ACLSHMEM_HOST_API int aclshmemx_set_shared_jetty(data_op_engine_type_t engine, bool enable);
 
 /**
+ * @brief Select direct UDMA channels before initialization using one QP mask per PE.
+ *
+ * Bit q in masks[peer] selects logical QP q for that peer. The array is copied;
+ * (nullptr, 0) restores the default of creating every configured QP for every peer.
+ * Set the QP count first. Mask bits must be below the configured QP count, which
+ * must fit in 64 bits and obey aclshmemx_set_qp_num's supported range.
+ *
+ * During initialization, count must equal n_pes, the self mask must be zero,
+ * and every non-self mask must retain QP0 for default-QP and collective traffic.
+ * All PEs must enable masks consistently and masks[a][b] must equal masks[b][a];
+ * bootstrap validates this before creating channels. Relay mode is unsupported.
+ *
+ * Shared-jetty mode is independent of this selection. QP indices, route choice,
+ * endpoint identity, and device table strides remain unchanged. Applications must
+ * never issue operations on an unselected QP (including QP-specific quiet-all,
+ * which requires that QP on every non-self peer). Finalizing the last instance resets
+ * the selection; reconfiguration while initialization is active is unsupported.
+ *
+ * @param masks [in] Per-peer masks, or nullptr to reset with count == 0.
+ * @param count [in] Number of masks, at most ACLSHMEM_MAX_PES.
+ * @return ACLSHMEM_SUCCESS on success, ACLSHMEM_INVALID_VALUE for invalid input,
+ *         or ACLSHMEM_NOT_SUPPORTED when configuration is frozen or unsupported.
+ */
+ACLSHMEM_HOST_API int aclshmemx_set_udma_peer_qp_masks(const uint64_t* masks, uint32_t count);
+
+/**
  * @brief Initialize the resources required for ACLSHMEM task based on attributes.
  *        Attributes can be created by users or obtained by calling <b>aclshmemx_set_attr_uniqueid_args()</b>.
  *        if the self-created attr structure is incorrect, the initialization will fail.

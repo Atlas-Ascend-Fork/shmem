@@ -48,6 +48,9 @@ protected:
         fail_call_ = 0;
         mem_reg_endpoints_.clear();
         channel_endpoints_.clear();
+        channel_names_.clear();
+        config_mismatch_ = 0;
+        mask_matrix_.clear();
         next_handle_ = 1000;
         DlHcommApi::gHcommMemReg = RecordMemReg;
         DlHcommApi::gHcommMemUnreg = SucceedMemUnreg;
@@ -142,10 +145,11 @@ protected:
     static HcommResult SucceedChannelDestroy(const ChannelHandle*, uint32_t) { return 0; }
 
     static HcommResult RecordChannelCreate(
-        EndpointHandle endpoint, CommEngine, HcommChannelDesc*, uint32_t count, ChannelHandle* channels)
+        EndpointHandle endpoint, CommEngine, HcommChannelDesc* descs, uint32_t count, ChannelHandle* channels)
     {
         for (uint32_t idx = 0; idx < count; ++idx) {
             channel_endpoints_.push_back(endpoint);
+            channel_names_.emplace_back(descs[idx].channelName == nullptr ? "" : descs[idx].channelName);
             channels[idx] = next_handle_++;
         }
         return 0;
@@ -163,6 +167,10 @@ protected:
     }
 
     static void EnableSharedJetty(UdmaTransportManager& manager) { manager.shared_jetty_enabled_ = true; }
+    static void SelectQps(UdmaTransportManager& manager, const std::vector<uint64_t>& masks)
+    {
+        manager.peer_qp_masks_ = masks;
+    }
 
     static size_t RegisteredEndpointCount(const UdmaTransportManager& manager, uint64_t addr)
     {
@@ -220,6 +228,38 @@ protected:
         return manager.BuildSyncEndpoints(root_info, topo_info, rank_count, endpoints);
     }
 
+    static int ConfigAllGather(const void* send, void* recv, int len, aclshmemi_bootstrap_handle_t* handle)
+    {
+        lengths_.push_back(len);
+        if (lengths_.size() == fail_call_)
+            return ACLSHMEM_BOOTSTRAP_ERROR;
+        if (lengths_.size() == 1) {
+            // Count, QP count, and sparse-mode flag form the first collective.
+            EXPECT_EQ(len, 3 * sizeof(uint32_t));
+            MirrorAllGather(send, recv, len, handle);
+            if (config_mismatch_ != 0)
+                static_cast<uint32_t*>(recv)[3 + config_mismatch_] ^= 1;
+        } else if (lengths_.size() == 2 && !mask_matrix_.empty()) {
+            EXPECT_EQ(mask_matrix_.size() * sizeof(uint64_t), static_cast<size_t>(len) * handle->npes);
+            std::memcpy(recv, mask_matrix_.data(), mask_matrix_.size() * sizeof(uint64_t));
+        } else {
+            MirrorAllGather(send, recv, len, handle);
+        }
+        return ACLSHMEM_SUCCESS;
+    }
+
+    static Result ExchangeDescriptors(UdmaTransportManager& manager, Exchange& exchange)
+    {
+        g_boot_handle.npes = manager.rank_count_;
+        g_boot_handle.allgather = ConfigAllGather;
+        return manager.ExchangeEndpointDescriptors(exchange);
+    }
+
+    static uint64_t TestMask(uint32_t a, uint32_t b)
+    {
+        return a == b ? 0 : (uint64_t{1} | (uint64_t{1} << (1 + (a + b) % 31)));
+    }
+
     aclshmemi_bootstrap_handle_t saved_handle_{};
     HcommMemRegFunc saved_mem_reg_{nullptr};
     HcommMemUnregFunc saved_mem_unreg_{nullptr};
@@ -231,6 +271,9 @@ protected:
     inline static size_t fail_call_{0};
     inline static std::vector<EndpointHandle> mem_reg_endpoints_;
     inline static std::vector<EndpointHandle> channel_endpoints_;
+    inline static std::vector<std::string> channel_names_;
+    inline static std::vector<uint64_t> mask_matrix_;
+    inline static uint32_t config_mismatch_{0};
     inline static uintptr_t next_handle_{1000};
 };
 
@@ -311,6 +354,120 @@ TEST_F(UdmaEndpointExchangeTest, KeepsExplicitClosFabricWhenPortsAlsoMatchMeshTo
     ASSERT_EQ(endpoints[0].size(), 1U);
     EXPECT_EQ(endpoints[0][0].netType, NetType::Clos);
     EXPECT_EQ(endpoints[0][0].fabric, TopoFabric::Clos);
+}
+
+TEST_F(UdmaEndpointExchangeTest, PortNamesAreScopedToLocalDeviceForBothTopologyEdgeEnds)
+{
+    g_boot_handle.npes = 1;
+    g_boot_handle.allgather = MirrorAllGather;
+    // Same label is CLOS on device 0, Mesh on device 4, and absent on device 9.
+    TopoInfo topo;
+    topo.meshTopoEdges.push_back({2, 4, {"0/6"}, {"1/0"}});
+    topo.closTopoEdges.push_back({1, 0, 0, {"1/0"}});
+    for (auto net : {NetType::TopoFileDesc, NetType::Clos, NetType::Mesh}) {
+        for (uint32_t local : {0U, 4U, 2U, 9U}) {
+            RootInfo root;
+            root.localId = local;
+            auto addr = std::make_shared<RankAddr>();
+            addr->levelInfo = std::make_shared<LevelInfo>(LevelInfo{0, "domain", net, ""});
+            addr->ports = {local == 2 ? "0/6" : "1/0"};
+            root.eidIndexToRankAddr.emplace(7, addr);
+            UdmaTransportManager manager;
+            std::vector<std::vector<SyncEndpoint>> endpoints;
+            ASSERT_TRUE(BuildSyncEndpointsForTest(manager, root, topo, 1, endpoints));
+            const auto inferred = local == 0 ? TopoFabric::Clos : local == 9 ? TopoFabric::Unknown : TopoFabric::Mesh;
+            EXPECT_EQ(
+                endpoints[0][0].fabric, net == NetType::Clos ? TopoFabric::Clos :
+                                        net == NetType::Mesh ? TopoFabric::Mesh :
+                                                               inferred);
+        }
+    }
+}
+
+TEST_F(UdmaEndpointExchangeTest, KeepsGenuinelyAmbiguousLocalTopologyUnclassified)
+{
+    g_boot_handle.npes = 1;
+    g_boot_handle.allgather = MirrorAllGather;
+    RootInfo root;
+    auto addr = std::make_shared<RankAddr>();
+    addr->levelInfo = std::make_shared<LevelInfo>(LevelInfo{0, "domain", NetType::TopoFileDesc, ""});
+    addr->ports = {"shared"};
+    root.eidIndexToRankAddr.emplace(7, addr);
+    TopoInfo topo;
+    topo.meshTopoEdges.push_back({0, 1, {"shared"}, {"peer"}});
+    topo.closTopoEdges.push_back({1, 0, 0, {"shared"}});
+    UdmaTransportManager manager;
+    std::vector<std::vector<SyncEndpoint>> endpoints;
+    ASSERT_TRUE(BuildSyncEndpointsForTest(manager, root, topo, 1, endpoints));
+    EXPECT_EQ(endpoints[0][0].fabric, TopoFabric::Unknown);
+}
+
+TEST_F(UdmaEndpointExchangeTest, ValidatesSymmetricMasksAtEp256And512)
+{
+    for (uint32_t ranks : {256U, 512U}) {
+        lengths_.clear();
+        mask_matrix_.resize(static_cast<size_t>(ranks) * ranks);
+        for (uint32_t a = 0; a < ranks; ++a)
+            for (uint32_t b = 0; b < ranks; ++b)
+                mask_matrix_[static_cast<size_t>(a) * ranks + b] = TestMask(a, b);
+        UdmaTransportManager manager;
+        ConfigureManager(manager, 0, ranks, 32);
+        SelectQps(manager, std::vector<uint64_t>(mask_matrix_.begin(), mask_matrix_.begin() + ranks));
+        AddEndpoint(manager, 7, 1, 7);
+        Exchange exchange;
+        ASSERT_EQ(ExchangeDescriptors(manager, exchange), ACLSHMEM_SUCCESS);
+        ASSERT_EQ(lengths_.size(), 3U);
+        EXPECT_EQ(lengths_[1], ranks * sizeof(uint64_t));
+        EXPECT_EQ(exchange.counts.size(), ranks);
+    }
+}
+
+TEST_F(UdmaEndpointExchangeTest, RejectsAsymmetricMasksOnEveryRankBeforeChannelCreation)
+{
+    mask_matrix_ = {0, 3, 5, 3, 0, 3, 5, 1, 0}; // Only pair 1/2 disagrees.
+    for (uint32_t rank = 0; rank < 3; ++rank) {
+        lengths_.clear();
+        UdmaTransportManager manager;
+        ConfigureManager(manager, rank, 3, 4);
+        SelectQps(
+            manager, std::vector<uint64_t>(mask_matrix_.begin() + rank * 3, mask_matrix_.begin() + (rank + 1) * 3));
+        AddEndpoint(manager, 7, (rank + 1) % 3, 7);
+        Exchange exchange;
+        EXPECT_EQ(ExchangeDescriptors(manager, exchange), ACLSHMEM_INVALID_VALUE);
+        EXPECT_EQ(lengths_.size(), 2U);
+        EXPECT_TRUE(channel_endpoints_.empty());
+    }
+}
+
+TEST_F(UdmaEndpointExchangeTest, RejectsMixedDenseSparseOrQpCountsCollectively)
+{
+    for (uint32_t mismatch : {1U, 2U}) {
+        lengths_.clear();
+        config_mismatch_ = mismatch;
+        UdmaTransportManager manager;
+        ConfigureManager(manager, 0, 3, 4);
+        AddEndpoint(manager, 7, 1, 7);
+        Exchange exchange;
+        EXPECT_EQ(ExchangeDescriptors(manager, exchange), ACLSHMEM_INVALID_VALUE);
+        EXPECT_EQ(lengths_.size(), 1U);
+    }
+}
+
+TEST_F(UdmaEndpointExchangeTest, PropagatesMaskExchangeFailureAndSkipsMaskExchangeWhenDense)
+{
+    UdmaTransportManager manager;
+    ConfigureManager(manager, 0, 3, 4);
+    AddEndpoint(manager, 7, 1, 7);
+    Exchange exchange;
+    ASSERT_EQ(ExchangeDescriptors(manager, exchange), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(lengths_.size(), 2U); // Config + descriptors; no mask collective.
+    SelectQps(manager, {0, 3, 5});
+    for (size_t failure : {1U, 2U}) {
+        lengths_.clear();
+        fail_call_ = failure;
+        EXPECT_EQ(ExchangeDescriptors(manager, exchange), ACLSHMEM_BOOTSTRAP_ERROR);
+        EXPECT_EQ(lengths_.size(), failure);
+    }
 }
 
 TEST_F(UdmaEndpointExchangeTest, RejectsEmptyAndOverflowingDimensions)
@@ -493,6 +650,89 @@ TEST_F(UdmaEndpointExchangeTest, BuildsOneChannelForEveryPeerQpFromFinalRoutes)
     EXPECT_EQ(slots, (std::vector<uint32_t>{1, 1, 1, 2, 2, 2}));
     EXPECT_EQ(dst_pes, (std::vector<uint32_t>{1, 1, 1, 2, 2, 2}));
     EXPECT_EQ(qp_indices, (std::vector<uint32_t>{0, 1, 2, 0, 1, 2}));
+}
+
+TEST_F(UdmaEndpointExchangeTest, SparseChannelsKeepOriginalPeerAndQpIndices)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED)
+        GTEST_SKIP() << "Sparse channels are direct-only";
+    UdmaTransportManager manager;
+    ConfigureManager(manager, 0, 3, 4);
+    SelectQps(manager, {0, 9, 5}); // Peer1: QP0/3; peer2: QP0/2.
+    for (uint32_t peer = 1; peer < 3; ++peer) {
+        for (uint32_t qp = 0; qp < 4; ++qp)
+            AddRoute(manager, peer, 10 + peer, 20 + peer, 0);
+        AddEndpoint(manager, 10 + peer, peer, 10 + peer);
+    }
+    TransportMemoryRegion region{};
+    region.addr = 0x200000;
+    region.size = 0x4000;
+    region.flags = REG_MR_FLAG_HBM;
+    ASSERT_EQ(manager.RegisterMemoryRegion(region), ACLSHMEM_SUCCESS);
+    Exchange exchange;
+    exchange.max_count = 1;
+    exchange.counts = {0, 1, 1};
+    exchange.descs.resize(3);
+    AddRemoteDescriptor(exchange, 1, 0, 0, 21);
+    AddRemoteDescriptor(exchange, 2, 0, 0, 22);
+    std::vector<uint32_t> slots, dst_pes, qp_indices;
+    ASSERT_EQ(BuildDirect(manager, exchange, slots, dst_pes, qp_indices), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(slots, (std::vector<uint32_t>{1, 1, 2, 2}));
+    EXPECT_EQ(dst_pes, slots);
+    EXPECT_EQ(qp_indices, (std::vector<uint32_t>{0, 3, 0, 2}));
+    EXPECT_EQ(channel_endpoints_.size(), 4U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, SparseSharedChannelsPreserveRoutesNamesAndHighQpIdsAtEp256And512)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED)
+        GTEST_SKIP() << "Sparse channels are direct-only";
+    for (uint32_t ranks : {256U, 512U}) {
+        channel_endpoints_.clear();
+        channel_names_.clear();
+        UdmaTransportManager manager;
+        ConfigureManager(manager, 0, ranks, 32);
+        EnableSharedJetty(manager);
+        std::vector<uint64_t> masks(ranks);
+        Exchange exchange;
+        exchange.max_count = 32;
+        exchange.counts.assign(ranks, 32);
+        exchange.descs.resize(static_cast<size_t>(ranks) * 32);
+        for (uint32_t peer = 1; peer < ranks; ++peer) {
+            masks[peer] = TestMask(0, peer);
+            for (uint32_t qp = 0; qp < 32; ++qp) {
+                // Original parity remains the resolved plane; holes must not compact it.
+                AddRoute(manager, peer, 10 + qp % 2, 20 + qp % 2, qp % 2);
+                AddEndpoint(manager, 10 + qp % 2, peer, 10 + qp, qp);
+                AddRemoteDescriptor(exchange, peer, qp, 0xFFFFFFFFU, 20 + qp % 2, qp);
+            }
+        }
+        SelectQps(manager, masks);
+        TransportMemoryRegion region{};
+        region.addr = 0x200000;
+        region.size = 0x4000;
+        region.flags = REG_MR_FLAG_HBM;
+        ASSERT_EQ(manager.RegisterMemoryRegion(region), ACLSHMEM_SUCCESS);
+        EXPECT_EQ(RegisteredEndpointCount(manager, region.addr), 32U);
+        std::vector<uint32_t> slots, peers, qps;
+        ASSERT_EQ(BuildDirect(manager, exchange, slots, peers, qps), ACLSHMEM_SUCCESS);
+        ASSERT_EQ(qps.size(), (ranks - 1) * 2);
+        size_t index = 0;
+        for (uint32_t peer = 1; peer < ranks; ++peer) {
+            for (uint32_t qp : {0U, 1 + peer % 31}) {
+                EXPECT_EQ(slots[index], peer);
+                EXPECT_EQ(peers[index], peer);
+                EXPECT_EQ(qps[index], qp);
+                EXPECT_EQ(channel_endpoints_[index], Handle(10 + qp));
+                EXPECT_EQ(
+                    channel_names_[index], "aclshmem_udma_0_" + std::to_string(peer) + "_qp_" + std::to_string(qp));
+                uint32_t layer = 99;
+                ASSERT_EQ(manager.GetQpNetLayer(ACLSHMEM_DATA_OP_UDMA, peer, qp, layer), ACLSHMEM_SUCCESS);
+                EXPECT_EQ(layer, qp % 2);
+                ++index;
+            }
+        }
+    }
 }
 
 TEST_F(UdmaEndpointExchangeTest, SharedJettyKeepsQpEndpointsSeparateWithLayerRoutes)

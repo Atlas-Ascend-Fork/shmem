@@ -279,6 +279,7 @@ private:
     uint32_t rank_id_{0};
     uint32_t rank_count_{1};
     uint32_t qp_num_{1};
+    std::vector<uint64_t> peer_qp_masks_{};
     // Runtime shared-jetty switch, read from TransportOptions::udmaQpConfig in OpenDevice
     // (was the ACLSHMEM_UDMA_SHARED_JETTY_SUPPORT compile-time option).
     bool shared_jetty_enabled_{false};

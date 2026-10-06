@@ -737,6 +737,17 @@ int aclshmemx_set_qp_num(data_op_engine_type_t engine, uint32_t qp_num)
                                    << g_udma_qp_config.netLayerPolicy.rbegin()->first);
                 return ACLSHMEM_INVALID_VALUE;
             }
+            if (!g_udma_qp_config.peerQpMasks.empty()) {
+                if (qp_num > 64)
+                    return ACLSHMEM_INVALID_VALUE;
+                const uint64_t valid = qp_num == 64 ? ~uint64_t{0} : (uint64_t{1} << qp_num) - 1;
+                for (const auto mask : g_udma_qp_config.peerQpMasks) {
+                    if (mask & ~valid) {
+                        SHM_LOG_ERROR("UDMA QP count would invalidate configured peer QP masks");
+                        return ACLSHMEM_INVALID_VALUE;
+                    }
+                }
+            }
             g_udma_qp_config.qpNum = qp_num;
             break;
         default:
@@ -744,6 +755,35 @@ int aclshmemx_set_qp_num(data_op_engine_type_t engine, uint32_t qp_num)
             return ACLSHMEM_NOT_SUPPORTED;
     }
     SHM_LOG_INFO("set qp num success, engine=" << engine << ", qp_num=" << qp_num);
+    return ACLSHMEM_SUCCESS;
+}
+
+int aclshmemx_set_udma_peer_qp_masks(const uint64_t* masks, uint32_t count)
+{
+    std::lock_guard<std::mutex> lock(g_aclshmem_ctx_mutex);
+    if (g_qp_config_frozen) {
+        SHM_LOG_ERROR("UDMA peer QP masks cannot be changed while an ACLSHMEM instance is initialized");
+        return ACLSHMEM_NOT_SUPPORTED;
+    }
+    if ((masks == nullptr) != (count == 0) || count > ACLSHMEM_MAX_PES) {
+        SHM_LOG_ERROR("Invalid UDMA peer QP mask pointer/count, count = " << count);
+        return ACLSHMEM_INVALID_VALUE;
+    }
+    if (count == 0) {
+        g_udma_qp_config.peerQpMasks.clear();
+        return ACLSHMEM_SUCCESS;
+    }
+    const uint32_t qps = g_udma_qp_config.qpNum;
+    if (qps > 64)
+        return ACLSHMEM_NOT_SUPPORTED;
+    const uint64_t valid = qps == 64 ? ~uint64_t{0} : (uint64_t{1} << qps) - 1;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (masks[i] & ~valid) {
+            SHM_LOG_ERROR("UDMA peer QP mask exceeds configured QP count, peer = " << i << ", qpNum = " << qps);
+            return ACLSHMEM_INVALID_VALUE;
+        }
+    }
+    g_udma_qp_config.peerQpMasks.assign(masks, masks + count);
     return ACLSHMEM_SUCCESS;
 }
 
