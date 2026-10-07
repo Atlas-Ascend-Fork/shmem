@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -31,6 +32,7 @@
 #include "shmemi_host_common.h"
 #include "../host_device/shmemi_host_device_constant.h"
 #include "device_udma_transport_manager.h"
+#include "udma_connect_timeout.h"
 
 namespace shm {
 namespace transport {
@@ -43,7 +45,6 @@ constexpr const char ACLSHMEM_HCOMM_MEM_TAG[] = "aclshmem_udma";
 constexpr uint32_t ACLSHMEM_HCOMM_SINGLE_CHANNEL_NUM = 1;
 constexpr uint32_t ACLSHMEM_HCOMM_DEFAULT_QOS = 4;
 constexpr uint32_t CHANNEL_STATUS_POLL_INTERVAL_MS = 10;
-constexpr uint32_t CHANNEL_STATUS_POLL_TIMEOUT_MS = 120000;
 
 template <typename T>
 bool CheckedMultiply(T lhs, T rhs, T& result)
@@ -144,10 +145,17 @@ Result WaitHcommChannelReady(const std::vector<ChannelHandle>& channels)
         return ACLSHMEM_SUCCESS;
     }
 
+    uint32_t poll_timeout_ms = 0;
+    if (!ParseUdmaConnectTimeout(std::getenv("SHMEM_UDMA_CONNECT_TIMEOUT_MS"), poll_timeout_ms)) {
+        SHM_LOG_ERROR("SHMEM_UDMA_CONNECT_TIMEOUT_MS must be decimal milliseconds in [1000, 3600000]");
+        return ACLSHMEM_INVALID_VALUE;
+    }
     const uint32_t channel_num = static_cast<uint32_t>(channels.size());
     std::vector<int32_t> statuses(channel_num, HCOMM_CHANNEL_STATUS_CONNECTING);
-    uint32_t elapsed_ms = 0;
-    while (elapsed_ms <= CHANNEL_STATUS_POLL_TIMEOUT_MS) {
+    const auto start = std::chrono::steady_clock::now();
+    uint64_t elapsed_ms = 0;
+    SHM_LOG_INFO("Wait hcomm UDMA channels, channelNum = " << channel_num << ", pollTimeoutMs = " << poll_timeout_ms);
+    while (elapsed_ms <= poll_timeout_ms) {
         auto hcomm_ret = DlHcommApi::HcommChannelGetStatus(channels.data(), channel_num, statuses.data());
         if (hcomm_ret != 0) {
             SHM_LOG_ERROR("HcommChannelGetStatus failed, ret = " << hcomm_ret << ", channelNum = " << channel_num);
@@ -182,13 +190,14 @@ Result WaitHcommChannelReady(const std::vector<ChannelHandle>& channels)
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(CHANNEL_STATUS_POLL_INTERVAL_MS));
-        elapsed_ms += CHANNEL_STATUS_POLL_INTERVAL_MS;
+        elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
     }
 
     SHM_LOG_ERROR(
         "Wait hcomm UDMA channel ready timeout, channelNum = "
         << channel_num << ", pollIntervalMs = " << CHANNEL_STATUS_POLL_INTERVAL_MS
-        << ", pollTimeoutMs = " << CHANNEL_STATUS_POLL_TIMEOUT_MS << ", elapsedMs = " << elapsed_ms);
+        << ", pollTimeoutMs = " << poll_timeout_ms << ", elapsedMs = " << elapsed_ms);
     return ACLSHMEM_TIMEOUT_ERROR;
 }
 

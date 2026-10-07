@@ -27,3 +27,16 @@ For details about log-related environment variables, see [SHMEM Logs](../debug/l
 ## Profiling Related
 SHMEM provides a profile data tracing tool. By collecting the number of system clock cycles and converting it into actual time, the tool accurately quantifies the MTE movement performance in different blocks (compute cores) and frames (trace point IDs). For details, see [Using the Profiler to Collect Profile Data in a Sample Project](../debug/profiling_en.md).
 * `SHMEM_CYCLE_PROF_PE`: Sets PEs on which profiling is to be performed. The value range of `pe_id` is [0, PEs-1]. To cancel profiling, run the `unset SHMEM_CYCLE_PROF_PE` command.
+
+## SHMEM_UDMA_CONNECT_TIMEOUT_MS
+
+Sets the host-side wait for Ascend950 Hcomm UDMA channels that remain in
+CONNECTING state. The value is decimal milliseconds in [1000, 3600000].
+When unset, the historical 120000 ms limit is preserved. For large jobs, for
+example, `export SHMEM_UDMA_CONNECT_TIMEOUT_MS=600000` permits ten minutes.
+Invalid values fail initialization with ACLSHMEM_INVALID_VALUE.
+
+This is separate from SHMEM bootstrap/control timeouts and launcher deadlines;
+those must also allow enough time. A terminal Hcomm FAILED/TIMEOUT status or
+status-query error still fails immediately. Increasing this wait does not
+repair broken links or change device-side data-operation timeouts.

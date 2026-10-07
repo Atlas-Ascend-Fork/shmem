@@ -11,11 +11,33 @@
 #include <gtest/gtest.h>
 
 #include "device_udma_transport_manager.h"
+#include "udma_connect_timeout.h"
 #include "host/shmem_host_def.h"
 
 namespace shm {
 namespace transport {
 namespace device {
+
+TEST(UdmaConnectTimeoutTest, PreservesDefaultAndAcceptsExtendedTimeout)
+{
+    uint32_t timeout = 0;
+    ASSERT_TRUE(ParseUdmaConnectTimeout(nullptr, timeout));
+    EXPECT_EQ(timeout, 120000U);
+    for (const auto& test : std::vector<std::pair<const char*, uint32_t>>{
+             {"1000", 1000U}, {"600000", 600000U}, {"3600000", 3600000U}}) {
+        ASSERT_TRUE(ParseUdmaConnectTimeout(test.first, timeout));
+        EXPECT_EQ(timeout, test.second);
+    }
+}
+
+TEST(UdmaConnectTimeoutTest, RejectsInvalidValuesWithoutIntegerOverflow)
+{
+    uint32_t timeout = 0;
+    for (const char* value : {"", "0", "999", "3600001", "4294967296", "999999999999999999999",
+                              "-1", "+600000", " 600000", "600000 ", "600000ms"}) {
+        EXPECT_FALSE(ParseUdmaConnectTimeout(value, timeout)) << value;
+    }
+}
 
 TEST(UdmaTransportManagerTest, RejectsInvalidQpCountBeforeOpeningDevice)
 {
