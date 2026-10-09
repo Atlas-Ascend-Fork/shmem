@@ -108,36 +108,41 @@ def process_csv(csv_file, output_dir, ubsize_filter, coresize_filter, no_plot=Fa
 
     # 定义表头
     headers = ['DataSize/B', 'Npus', 'Blocks', 'UBsize/KB', 'Bandwidth/GB/s', 'CoreMaxTime/us']
-    
+
     try:
-        # 手动读取CSV文件，只保留前6列
+        # 保留前5列参数和带宽，按表头定位最大核时间。
         data_rows = []
         with open(csv_file, 'r', encoding='utf-8') as f:
             reader = csv.reader(f)
-            # 跳过第一行表头
-            next(reader, None)
-            # 读取数据行，只取前6列
+            csv_headers = [name.strip() for name in next(reader, [])]
+            if 'CoreMaxTime/us' not in csv_headers:
+                print(f"Error: CSV file {csv_file} missing required column: CoreMaxTime/us")
+                return generated_images, df
+            time_column = csv_headers.index('CoreMaxTime/us')
+            metric_column = csv_headers.index('Metric') if 'Metric' in csv_headers else None
+            if metric_column is not None:
+                headers.append('Metric')
             for row in reader:
-                if len(row) >= 6:
-                    data_rows.append(row[:6])
-                else:
-                    # 如果行数据不足6列，填充空值
-                    padded = row + [''] * (6 - len(row))
-                    data_rows.append(padded)
+                parameters_and_bandwidth = row[:5] + [''] * max(0, 5 - len(row))
+                core_time = row[time_column] if time_column < len(row) else ''
+                values = parameters_and_bandwidth + [core_time]
+                if metric_column is not None:
+                    values.append(row[metric_column] if metric_column < len(row) else '')
+                data_rows.append(values)
     except Exception as e:
         print(f"Error reading CSV file {csv_file}: {e}")
         return generated_images, df
-        
+
         # 创建DataFrame
     df = pd.DataFrame(data_rows, columns=headers)
-    
+
     # 转换列类型
-    for col in headers:
+    for col in headers[:6]:
         try:
             df[col] = pd.to_numeric(df[col], errors='coerce')
         except Exception as e:
             print(f"Failed to convert column '{col}' to numeric type: {e}")
-    
+
     required_cols = ['DataSize/B', 'Blocks', 'UBsize/KB', 'Bandwidth/GB/s']
     for col in required_cols:
         if col not in df.columns:
@@ -148,6 +153,22 @@ def process_csv(csv_file, output_dir, ubsize_filter, coresize_filter, no_plot=Fa
     if no_plot:
         return generated_images, df
 
+    metric_groups = df.groupby('Metric', sort=False, dropna=False) if 'Metric' in df.columns else None
+    if metric_groups is not None and len(metric_groups) > 1:
+        for index, (metric, metric_df) in enumerate(metric_groups):
+            metric_dir = os.path.join(output_dir, f'metric_{index}')
+            images, _ = plot_dataframe(csv_file, metric_dir, metric_df.copy(), ubsize_filter, coresize_filter, metric)
+            for image in images:
+                image['name'] = f"{metric}: {image['name']}"
+            generated_images.extend(images)
+        return generated_images, df
+    metric = df['Metric'].iloc[0] if 'Metric' in df.columns and not df.empty else None
+    return plot_dataframe(csv_file, output_dir, df, ubsize_filter, coresize_filter, metric)
+
+
+def plot_dataframe(csv_file, output_dir, df, ubsize_filter, coresize_filter, metric=None):
+    """Plot one measurement scope without combining distinct MoE metrics."""
+    generated_images = []
     os.makedirs(output_dir, exist_ok=True)
 
     df['y'] = df['Bandwidth/GB/s']
@@ -166,6 +187,8 @@ def process_csv(csv_file, output_dir, ubsize_filter, coresize_filter, no_plot=Fa
     if blocks_values:
         core_rows, core_cols = get_subplot_layout(len(blocks_values), default_cols=5)
         fig, axs = plt.subplots(core_rows, core_cols, figsize=(core_cols*4, core_rows*4))
+        if metric is not None:
+            fig.suptitle(f'Metric: {metric}')
         fig.subplots_adjust(right=0.8, hspace=0.5, wspace=0.3)
 
         if core_rows == 1 and core_cols == 1:
@@ -229,6 +252,8 @@ def process_csv(csv_file, output_dir, ubsize_filter, coresize_filter, no_plot=Fa
     if ubsize_values:
         ub_rows, ub_cols = get_subplot_layout(len(ubsize_values), default_cols=2)
         fig, axs = plt.subplots(ub_rows, ub_cols, figsize=(ub_cols*8, ub_rows*8))
+        if metric is not None:
+            fig.suptitle(f'Metric: {metric}')
         fig.subplots_adjust(right=0.8, hspace=0.5, wspace=0.3)
 
         if ub_rows == 1 and ub_cols == 1:
@@ -303,15 +328,17 @@ def process_csv(csv_file, output_dir, ubsize_filter, coresize_filter, no_plot=Fa
     heatmap1_path = None
     if not max_values.empty:
         max_values_pivot = max_values.pivot(index='UBsize/KB', columns='Blocks', values='y')
-        
+
         # 动态计算图的大小和字体大小
         num_rows = len(max_values_pivot)
         num_cols = len(max_values_pivot.columns)
         fig_width = max(12, num_cols * 1.5)
         fig_height = max(8, num_rows * 1.2)
         annot_kws = {"size": 8} if num_cols * num_rows > 30 else {"size": 10}
-        
+
         plt.figure(figsize=(fig_width, fig_height))
+        if metric is not None:
+            plt.suptitle(f'Metric: {metric}')
         ax = sns.heatmap(max_values_pivot, annot=True, cmap='coolwarm', fmt='.2f',
                         annot_kws=annot_kws, cbar_kws={"shrink": 0.8})
         ax.invert_yaxis()
@@ -340,15 +367,17 @@ def process_csv(csv_file, output_dir, ubsize_filter, coresize_filter, no_plot=Fa
     heatmap2_path = None
     if not filtered_data.empty:
         filtered_data_pivot = filtered_data.pivot(index='UBsize/KB', columns='Blocks', values='y')
-        
+
         # 动态计算图的大小和字体大小
         num_rows = len(filtered_data_pivot)
         num_cols = len(filtered_data_pivot.columns)
         fig_width = max(12, num_cols * 1.5)
         fig_height = max(8, num_rows * 1.2)
         annot_kws = {"size": 8} if num_cols * num_rows > 30 else {"size": 10}
-        
+
         plt.figure(figsize=(fig_width, fig_height))
+        if metric is not None:
+            plt.suptitle(f'Metric: {metric}')
         ax = sns.heatmap(filtered_data_pivot, annot=True, cmap='coolwarm', fmt='.2f',
                         annot_kws=annot_kws, cbar_kws={"shrink": 0.8})
         ax.invert_yaxis()
@@ -385,20 +414,20 @@ def generate_markdown(root_dir, csv_data_dict):
     for subdir in sorted(csv_data_dict.keys()):
         if subdir:
             md_content.append(f"\n## {subdir}\n")
-        
+
         csv_files = csv_data_dict[subdir]
         for csv_name in sorted(csv_files.keys()):
             csv_info = csv_files[csv_name]
             csv_basename = os.path.basename(csv_name)
             md_content.append(f"\n### {csv_basename}\n")
-            
+
             # 添加表格数据
             df = csv_info['dataframe']
             display_cols = []
-            for col in ['DataSize/B', 'Npus', 'Blocks', 'UBsize/KB', 'Bandwidth/GB/s', 'CoreMaxTime/us']:
+            for col in ['DataSize/B', 'Npus', 'Blocks', 'UBsize/KB', 'Bandwidth/GB/s', 'CoreMaxTime/us', 'Metric']:
                 if col in df.columns:
                     display_cols.append(col)
-            
+
             if display_cols:
                 md_content.append("\n#### 性能数据\n")
                 # 创建一个副本用于显示，格式化DataSize/B列避免科学计数法
@@ -407,7 +436,7 @@ def generate_markdown(root_dir, csv_data_dict):
                     display_df['DataSize/B'] = display_df['DataSize/B'].apply(lambda x: f"{int(x)}" if pd.notna(x) and float(x).is_integer() else f"{x}")
                 md_content.append(display_df.to_markdown(index=False))
                 md_content.append("\n")
-            
+
             # 添加图片链接和注解
             images = csv_info['images']
             if images:
@@ -423,7 +452,7 @@ def generate_markdown(root_dir, csv_data_dict):
                     if img['lines']:
                         md_content.append(f"- **折线**: {', '.join(img['lines'])}\n")
                     md_content.append(f"\n![{img['name']}]({rel_img_path})\n")
-    
+
     # 写入Markdown文件
     md_path = os.path.join(root_dir, 'performance_report.md')
     with open(md_path, 'w', encoding='utf-8') as f:
@@ -447,18 +476,18 @@ def main():
         if not os.path.isdir(dir_path):
             print(f"Error: Directory {dir_path} does not exist")
             return
-        
+
         # 查找所有CSV文件（包括子目录）
         all_csv_files = []
         for root, _, files in os.walk(dir_path):
             for file in files:
                 if file.endswith('.csv'):
                     all_csv_files.append(os.path.join(root, file))
-        
+
         if not all_csv_files:
             print(f"Warning: No CSV files found in directory {dir_path}")
             return
-        
+
         base_output_dir = os.path.join(dir_path, 'picture')
         for csv_file in all_csv_files:
             print(f"\nProcessing CSV file: {csv_file}")
