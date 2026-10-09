@@ -4,7 +4,7 @@
 
 The following environment variables are related to SHMEM logs:
 
-* `SHMEM_LOG_LEVEL`: Sets the SHMEM log level. Severity levels from lowest to highest: DEBUG, WARN, INFO, ERROR (default), FATAL. For debugging, DEBUG or INFO is recommended.
+* `SHMEM_LOG_LEVEL`: Sets the SHMEM log level. Severity levels from lowest to highest: DEBUG, INFO, WARN, ERROR (default), FATAL. For debugging, DEBUG or INFO is recommended.
 * `SHMEM_LOG_TO_STDOUT`: Specifies whether to output SHMEM logs to the console. `0`: no; `1`: yes. By default, this function is disabled and logs are not output to the console. Instead, they are stored in the default path or a specified path. If this function is enabled, logs are printed on the console and will not be flushed to files.
 * `SHMEM_LOG_PATH`: Specifies the path for storing SHMEM logs, which must be a valid path. If this parameter is not set, the default path is `${HOME}/shmem/log`.
 
