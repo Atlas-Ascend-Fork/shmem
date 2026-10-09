@@ -123,7 +123,7 @@ def get_force_max_zoneorder():
     kernel_ver = subprocess.check_output(['uname', '-r'], text=True).strip()
 
     # 内核配置文件路径
-    config_paths = f"/boot/config-{kernel_ver}"
+    config_paths = [f"/boot/config-{kernel_ver}"]
     for path in config_paths:
         try:
             with open(path, 'r', errors='ignore') as f:
@@ -182,7 +182,7 @@ def run_for_node(node, min_mb, target_ranges, zone_page):
             size_mb = this_size >> 20
             total_intersect_mb += size_mb
 
-            print(f"FREE∩RANGE: {fmt(pfn_to_addr(s))} - {fmt(pfn_to_addr(e))}  size={size_mb:.2f} MB")
+            print(f"FREE∩RANGE: {fmt(s)} - {fmt(e)}  size={size_mb:.2f} MB")
 
     print(f"Total intersect FREE: {total_intersect_mb:.2f} MB")
     return total_intersect_mb
