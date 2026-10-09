@@ -18,31 +18,36 @@ enum {
 
 ### Attributes Required for Initialization
 ```c++
-// Initialization attributes
 typedef struct {
-    int version;                            // Version
-    int my_rank;                             // Current rank
-    int n_ranks;                             // Total number of ranks
-    char ip_port[ACLSHMEM_MAX_IP_PORT_LEN];      // IP address and port
-    uint64_t local_mem_size;                  // Size of the locally allocated memory
-    aclshmem_init_optional_attr_t option_attr; // Optional parameters
-} aclshmemx_init_attr_t;
-
-// Optional attributes
-typedef struct {
-    data_op_engine_type_t data_op_engine_type; // Data engine
-    // timeout
+    int version;
+    data_op_engine_type_t data_op_engine_type;
     uint32_t shm_init_timeout;
     uint32_t shm_create_timeout;
     uint32_t control_operation_timeout;
-    // apply available port in advance
     int32_t sockFd;
 } aclshmem_init_optional_attr_t;
+
+typedef struct aclshmemx_init_attr_t {
+    int my_pe;
+    int n_pes;
+    char ip_port[ACLSHMEM_MAX_IP_PORT_LEN] = {};
+    uint64_t local_mem_size;
+    aclshmem_init_optional_attr_t option_attr = {
+        (1 << 16) + sizeof(aclshmem_init_optional_attr_t),
+        ACLSHMEM_DATA_OP_MTE,
+        DEFAULT_TIMEOUT,
+        DEFAULT_TIMEOUT,
+        DEFAULT_TIMEOUT,
+        0};
+    void* comm_args = nullptr;
+    uint64_t instance_id = 0;
+} aclshmemx_init_attr_t;
 ```
 
 ### Initialization Example
 ```c++
 #include <iostream>
+#include <cstdio>
 #include <unistd.h>
 #include <acl/acl.h>
 #include "shmem.h"
@@ -55,10 +60,12 @@ uint64_t local_mem_size = 1024UL * 1024UL * 1024;
 const char* test_global_ipport = "tcp://127.0.0.1:8666";
 status = aclrtSetDevice(device_id);
 
-aclshmemx_init_attr_t* attributes = new aclshmemx_init_attr_t{rank_id, n_ranks, test_global_ipport, local_mem_size, {0, ACLSHMEM_DATA_OP_MTE, 120, 120, 120}}; // Custom attributes
-aclshmemx_init_attr(attributes);
-delete attributes;
-attributes = nullptr;
+aclshmemx_init_attr_t attributes{};
+attributes.my_pe = rank_id;
+attributes.n_pes = n_ranks;
+std::snprintf(attributes.ip_port, sizeof(attributes.ip_port), "%s", test_global_ipport);
+attributes.local_mem_size = local_mem_size;
+status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes);
 
 status = aclshmemx_init_status();
 if (status == ACLSHMEM_STATUS_IS_INITIALIZED) {
