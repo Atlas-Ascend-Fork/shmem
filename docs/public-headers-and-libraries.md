@@ -69,5 +69,6 @@
 |------------------|----------------|----------|--------------|
 | `device_simt/shmem_simt_common_types.h` | 无 | SIMT 公共状态/类型定义 | 需编译定义 `USE_SIMT`（`ACLSHMEM_SIMT_SUPPORT`） |
 | `device_simt/gm2gm/shmem_device_simt_rma.h` | 无 | SIMT 作用域下的 GM↔GM RMA | 需 `USE_SIMT`；依赖 CANN |
+| `device_simt/gm2gm/shmem_device_simt_amo.h` | 无 | SIMT 作用域下的 GM↔GM 原子操作（compare swap） | 需 `USE_SIMT`；依赖 CANN |
 | `device_simt/gm2gm/engine/shmem_device_simt_mte.h` | 无 | SIMT MTE：thread/block/warp 作用域异步拷贝 | 需 `USE_SIMT`；依赖 CANN |
 | `device_simt/team/shmem_device_simt_team.h` | 无 | SIMT 侧 Team 相关接口 | 需 `USE_SIMT`；依赖 CANN |

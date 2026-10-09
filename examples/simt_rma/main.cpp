@@ -24,6 +24,19 @@ aclshmemx_uniqueid_t default_flag_uid;
 // 定义传输大小(传输COPY_SIZE个int32_t的数据)
 constexpr int32_t COPY_SIZE = 4096;
 
+// CAS 演示参数：32 个线程并发执行，槽位初值/替换值与计数器自增轮数
+constexpr uint32_t AMO_THREADS = 32;
+constexpr uint32_t AMO_ITERS = 1000;
+constexpr uint32_t AMO_SLOT_INIT = 0xA5A5A5A5u;
+constexpr uint32_t AMO_SLOT_NEW = 0x5A5A5A5Au;
+
+// CAS 演示对称堆布局（uint32_t 字为单位）：槽位、结果、计数器各占独立 64B cacheline，
+// 避免同一行上多个原子目标互相干扰
+constexpr uint32_t AMO_SLOT_OFF = 0;
+constexpr uint32_t AMO_RESULT_OFF = AMO_SLOT_OFF + AMO_THREADS;
+constexpr uint32_t AMO_COUNTER_OFF = (AMO_RESULT_OFF + 2 * AMO_THREADS + 15U) & ~15U;
+constexpr uint32_t AMO_HEAP_WORDS = AMO_COUNTER_OFF + 16;
+
 // 每个函数都做两件事：
 //   get: 把上一个 PE 的 origin 拉取到自身 res_prev
 //   put: 把自身 origin 推送到上一个 PE 的 res_next
@@ -72,6 +85,46 @@ __global__ __vector__ void demo_call(
 void run_demo_mem(void* stream, int32_t* origin, int32_t* res_prev, int32_t* res_next, uint64_t* dbg)
 {
     demo_call<<<1, 0, stream>>>(origin, res_prev, res_next, dbg);
+}
+
+// CAS 演示内核：每个线程对自身槽位先后执行命中/未命中两次 CAS（校验返回值与改写语义），
+// 再通过 CAS 重试循环（读旧值 → CAS 自增 → 失败重试）并发自增计数器：
+// selfCounter（本 PE）覆盖同卡多线程竞争，globalCounter（PE0）覆盖跨 PE 竞争
+__simt_vf__ __launch_bounds__(1024) inline void demo_atomic_cas_simt(
+    __gm__ uint32_t* slots, __gm__ uint32_t* results, __gm__ uint32_t* counters)
+{
+    const int32_t mype = simt::aclshmem_my_pe();
+    const uint32_t tid = threadIdx.x;
+
+    const uint32_t oldMatch = simt::aclshmem_uint32_atomic_compare_swap(slots + tid, AMO_SLOT_INIT, AMO_SLOT_NEW, mype);
+    const uint32_t oldMiss = simt::aclshmem_uint32_atomic_compare_swap(slots + tid, AMO_SLOT_INIT, ~AMO_SLOT_NEW, mype);
+    results[2 * tid] = oldMatch;
+    results[2 * tid + 1] = oldMiss;
+
+    __gm__ uint32_t* selfCounter = counters + 1;
+    __gm__ uint32_t* globalCounter = counters;
+    for (uint32_t i = 0; i < AMO_ITERS; ++i) {
+        uint32_t old = *reinterpret_cast<__gm__ uint32_t*>(simt::aclshmem_ptr(selfCounter, mype));
+        uint32_t assumed;
+        do {
+            assumed = old;
+            old = simt::aclshmem_uint32_atomic_compare_swap(selfCounter, assumed, assumed + 1, mype);
+        } while (old != assumed);
+    }
+    for (uint32_t i = 0; i < AMO_ITERS; ++i) {
+        uint32_t old = *reinterpret_cast<__gm__ uint32_t*>(simt::aclshmem_ptr(globalCounter, 0));
+        uint32_t assumed;
+        do {
+            assumed = old;
+            old = simt::aclshmem_uint32_atomic_compare_swap(globalCounter, assumed, assumed + 1, 0);
+        } while (old != assumed);
+    }
+}
+
+__global__ __vector__ void demo_atomic_cas_call(
+    __gm__ uint32_t* slots, __gm__ uint32_t* results, __gm__ uint32_t* counters)
+{
+    asc_vf_call<demo_atomic_cas_simt>(dim3(AMO_THREADS), slots, results, counters);
 }
 
 /**
@@ -215,6 +268,76 @@ int test_aclshmem_rma_mem(int my_pe, int n_pes)
     } else {
         printf("[FAILURE] PE %d: Verification failed for RMA transfers.\n", my_pe);
     }
+
+    // ===== SIMT 原子 CAS 演示 =====
+    uint32_t* amo_device = (uint32_t*)aclshmemx_malloc(AMO_HEAP_WORDS * sizeof(uint32_t));
+
+    uint32_t amoInit[AMO_HEAP_WORDS] = {};
+    for (uint32_t t = 0; t < AMO_THREADS; ++t) {
+        amoInit[AMO_SLOT_OFF + t] = AMO_SLOT_INIT;
+    }
+    ACL_CHECK_WITH_RET(
+        aclrtMemcpy(
+            amo_device, AMO_HEAP_WORDS * sizeof(uint32_t), amoInit, AMO_HEAP_WORDS * sizeof(uint32_t),
+            ACL_MEMCPY_HOST_TO_DEVICE),
+        ERROR_LOG("memcpy amo init to device failed"), return -1);
+
+    aclshmem_barrier_all();
+    demo_atomic_cas_call<<<1, 0, stream>>>(
+        amo_device + AMO_SLOT_OFF, amo_device + AMO_RESULT_OFF, amo_device + AMO_COUNTER_OFF);
+    ACL_CHECK_WITH_RET(aclrtSynchronizeStream(stream), ERROR_LOG("stream sync failed"), return -1);
+    // 全局计数器在 PE0 堆上被所有 PE 写，读回前需确保全部 PE 的 kernel 结束
+    aclshmem_barrier_all();
+
+    uint32_t amoOut[AMO_HEAP_WORDS] = {};
+    ACL_CHECK_WITH_RET(
+        aclrtMemcpy(
+            amoOut, AMO_HEAP_WORDS * sizeof(uint32_t), amo_device, AMO_HEAP_WORDS * sizeof(uint32_t),
+            ACL_MEMCPY_DEVICE_TO_HOST),
+        ERROR_LOG("memcpy amo result back failed"), return -1);
+
+    const uint64_t amoTotal = static_cast<uint64_t>(AMO_THREADS) * AMO_ITERS;
+    bool amoOk = true;
+    for (uint32_t t = 0; t < AMO_THREADS; ++t) {
+        if (amoOut[AMO_SLOT_OFF + t] != AMO_SLOT_NEW) {
+            printf(
+                "[ERROR] PE %d: amo slot %u expected 0x%x, got 0x%x\n", my_pe, t, AMO_SLOT_NEW,
+                amoOut[AMO_SLOT_OFF + t]);
+            amoOk = false;
+        }
+        if (amoOut[AMO_RESULT_OFF + 2 * t] != AMO_SLOT_INIT) {
+            printf(
+                "[ERROR] PE %d: amo result match %u expected 0x%x, got 0x%x\n", my_pe, t, AMO_SLOT_INIT,
+                amoOut[AMO_RESULT_OFF + 2 * t]);
+            amoOk = false;
+        }
+        if (amoOut[AMO_RESULT_OFF + 2 * t + 1] != AMO_SLOT_NEW) {
+            printf(
+                "[ERROR] PE %d: amo result miss %u expected 0x%x, got 0x%x\n", my_pe, t, AMO_SLOT_NEW,
+                amoOut[AMO_RESULT_OFF + 2 * t + 1]);
+            amoOk = false;
+        }
+    }
+    if (amoOut[AMO_COUNTER_OFF + 1] != amoTotal) {
+        printf(
+            "[ERROR] PE %d: amo self counter expected %llu, got %u\n", my_pe, static_cast<unsigned long long>(amoTotal),
+            amoOut[AMO_COUNTER_OFF + 1]);
+        amoOk = false;
+    }
+    if (my_pe == 0 && amoOut[AMO_COUNTER_OFF] != static_cast<uint64_t>(n_pes) * amoTotal) {
+        printf(
+            "[ERROR] PE %d: amo global counter expected %llu, got %u\n", my_pe,
+            static_cast<unsigned long long>(static_cast<uint64_t>(n_pes) * amoTotal), amoOut[AMO_COUNTER_OFF]);
+        amoOk = false;
+    }
+
+    if (amoOk) {
+        printf("[SUCCESS] PE %d: Verification passed for atomic compare swap.\n", my_pe);
+    } else {
+        printf("[FAILURE] PE %d: Verification failed for atomic compare swap.\n", my_pe);
+    }
+
+    aclshmemx_free(amo_device);
 
     aclshmemx_free(origin_device);
     aclshmemx_free(res_prev_device);

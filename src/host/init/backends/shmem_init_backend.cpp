@@ -758,7 +758,7 @@ int aclshmemi_init_backend::setup_heap(aclshmem_mem_type_t mem_type)
     if (mem_type == HOST_SIDE) {
         auto aligned = ALIGN_UP(host_state->heap_size, ACLSHMEM_HEAP_ALIGNMENT_SIZE);
         host_state->host_heap_base =
-            (void*)((uintptr_t)elem->dram_gva + aligned * static_cast<uint32_t>(attributes->my_pe));
+            (void*)((uintptr_t)elem->dram_gva + aligned * static_cast<uint32_t>(host_state->mype));
         ACLSHMEM_CHECK_RET(aclrtMallocHost((void**)&host_state->p2p_host_heap_base, host_state->npes * sizeof(void*)));
         ACLSHMEM_CHECK_RET(aclrtMallocHost((void**)&host_state->rdma_host_heap_base, host_state->npes * sizeof(void*)));
         ACLSHMEM_CHECK_RET(aclrtMallocHost((void**)&host_state->sdma_host_heap_base, host_state->npes * sizeof(void*)));
@@ -779,7 +779,7 @@ int aclshmemi_init_backend::setup_heap(aclshmem_mem_type_t mem_type)
     }
     // device side heap info save
     auto aligned = ALIGN_UP(host_state->heap_size, ACLSHMEM_HEAP_ALIGNMENT_SIZE);
-    host_state->heap_base = (void*)((uintptr_t)elem->hbm_gva + aligned * static_cast<uint32_t>(attributes->my_pe));
+    host_state->heap_base = (void*)((uintptr_t)elem->hbm_gva + aligned * static_cast<uint32_t>(host_state->mype));
     ACLSHMEM_CHECK_RET(aclrtMallocHost((void**)&host_state->p2p_device_heap_base, host_state->npes * sizeof(void*)));
     ACLSHMEM_CHECK_RET(aclrtMallocHost((void**)&host_state->rdma_device_heap_base, host_state->npes * sizeof(void*)));
     ACLSHMEM_CHECK_RET(aclrtMallocHost((void**)&host_state->sdma_device_heap_base, host_state->npes * sizeof(void*)));

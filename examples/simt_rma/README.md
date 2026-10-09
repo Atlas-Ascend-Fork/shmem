@@ -1,6 +1,6 @@
 # 样例介绍
 
-本样例旨在展示 SIMD 与 SIMT 混合编译模式下，SIMT 远程内存访问（RMA）接口的典型使用方法。该类接口主要包含以下三种形式：
+本样例旨在展示 SIMD 与 SIMT 混合编译模式下，SIMT 远程内存访问（RMA）接口的典型使用方法，并演示 SIMT 原子 compare-and-swap（CAS）接口的用法。RMA 接口主要包含以下三种形式：
 
 1. `__simt_callee__ inline void aclshmem_{NAME}_{op}(__gm__ TYPE *dst, __gm__ TYPE *src, size_t elem_size, int32_t pe)`
 2. `__simt_callee__ inline void aclshmem_{op}{BITS}(__gm__ void *dst, __gm__ void *src, size_t nelems, int32_t pe)`
@@ -53,6 +53,27 @@ simt::aclshmemx_putmem_warp(__gm__ void *dst, __gm__ void *src, size_t elem_size
 
 > 样例代码中分别提供了 `test_put_get_type`、`test_put_get_bits`、`test_put_get_mem` 三个函数，对应上述三种接口形式；默认调用的是 `test_put_get_bits`，可按需切换。
 
+## 原子 CAS 演示
+
+RMA 用例之后，样例追加一段原子 CAS 演示，展示以下接口：
+
+```cpp
+__simt_callee__ inline TYPE simt::aclshmem_NAME_atomic_compare_swap(
+    __gm__ TYPE* dest, TYPE cond, TYPE value, int32_t pe);
+```
+
+`{NAME}` 可选 `int32`、`int64`、`uint32`、`uint64`。同步接口：原子比较 `dest` 与 `cond`，相等则将 `dest` 更新为 `value`，否则保持不变；返回 `dest` 的旧值。`dest` 可指向 device 对称内存或 HOST_SIDE 对称内存。
+
+CAS 演示（以 uint32 为例）包含三组校验：
+
+| 用例 | 校验点 |
+| --- | --- |
+| 槽位语义 | 命中的 CAS 返回旧值并完成替换；未命中的 CAS 返回当前值且不改写 |
+| 本 PE 共享计数器 | 全部线程经 CAS 重试循环并发自增同一地址，终值 = 线程数 × 轮数（同卡原子性）|
+| PE0 全局计数器 | 所有 PE 的全部线程自增 PE0 堆上同一地址，终值 = PE 数 × 线程数 × 轮数（跨 PE 原子性）|
+
+演示目标为 device 对称内存（`aclshmemx_malloc` 默认分配）；HOST_SIDE 对称内存接口同样支持，但不在本样例覆盖范围内。单 PE 运行（`-pes 1`）时全局计数器退化为同卡竞争，双卡及以上覆盖跨 PE 场景。
+
 ## 支持的设备
 
 - Ascend950
@@ -81,3 +102,5 @@ simt::aclshmemx_putmem_warp(__gm__ void *dst, __gm__ void *src, size_t elem_size
    ```
 
    使用多卡运行时，请确保执行环境中实际可用的 NPU 卡数不少于指定的 PE 数量。
+
+运行成功时每个 PE 会输出 RMA 与 atomic compare swap 两行 `[SUCCESS]` 校验日志；任一校验失败将输出对应的 `[ERROR]` 明细与 `[FAILURE]`。

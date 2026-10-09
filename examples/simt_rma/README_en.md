@@ -1,6 +1,6 @@
 ## Overview
 
-This example demonstrates how to use the SIMT remote memory access (RMA) APIs in SIMD and SIMT hybrid compilation mode. These APIs mainly come in the following three forms:
+This example demonstrates how to use the SIMT remote memory access (RMA) APIs in SIMD and SIMT hybrid compilation mode, and also demonstrates the SIMT atomic compare-and-swap (CAS) API. The RMA APIs mainly come in the following three forms:
 
 1. `__simt_callee__ inline void aclshmem_{NAME}_{op}(__gm__ TYPE *dst, __gm__ TYPE *src, size_t elem_size, int32_t pe)`
 2. `__simt_callee__ inline void aclshmem_{op}{BITS}(__gm__ void *dst, __gm__ void *src, size_t nelems, int32_t pe)`
@@ -53,6 +53,27 @@ This example demonstrates how the RMA APIs work through the following process:
 
 > The sample code provides three functions — `test_put_get_type`, `test_put_get_bits`, and `test_put_get_mem` — corresponding to the three API forms above. `test_put_get_bits` is called by default; switch to another as needed.
 
+## Atomic CAS Demonstration
+
+After the RMA case, the sample appends an atomic CAS demonstration showing the following API:
+
+```cpp
+__simt_callee__ inline TYPE simt::aclshmem_NAME_atomic_compare_swap(
+    __gm__ TYPE* dest, TYPE cond, TYPE value, int32_t pe);
+```
+
+`{NAME}` can be `int32`, `int64`, `uint32`, or `uint64`. Synchronous API: it atomically compares the value at `dest` with `cond`; if equal, `dest` is updated to `value`, otherwise it is left unchanged; the old value at `dest` is returned. `dest` may point to either the device symmetric memory or the HOST_SIDE symmetric memory.
+
+The demonstration (using uint32) covers three checks:
+
+| Case | Check |
+| --- | --- |
+| Slot semantics | A matching CAS returns the old value and replaces it; a mismatching CAS returns the current value without writing |
+| Per-PE shared counter | All threads increment the same address through a CAS retry loop; final = threads × iterations (same-card atomicity) |
+| PE0 global counter | All threads of all PEs increment the same address on PE0's heap; final = PEs × threads × iterations (cross-PE atomicity) |
+
+The demonstration targets the device symmetric memory (the default of `aclshmemx_malloc`); the HOST_SIDE symmetric memory is equally supported by the API but is not covered by this sample. With `-pes 1` the global counter degrades to same-card contention; use `-pes 2` or more to cover the cross-PE case.
+
 ## Supported Devices
 
 - Ascend 950
@@ -81,3 +102,5 @@ This example demonstrates how the RMA APIs work through the following process:
    ```
 
    When running with multiple devices, make sure the number of NPU devices actually available in the environment is not less than the specified number of PEs.
+
+On success each PE prints two `[SUCCESS]` verification lines, one for the RMA transfers and one for the atomic compare swap; any failed check prints the corresponding `[ERROR]` details followed by `[FAILURE]`.
