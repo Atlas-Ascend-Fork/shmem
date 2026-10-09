@@ -67,18 +67,9 @@ ACLSHMEM_DEVICE uint64_t DispatchThresholdDen(int64_t pe_size, int64_t local_exp
     return static_cast<uint64_t>(remote_rank_num) * static_cast<uint64_t>(local_expert_num);
 }
 
-ACLSHMEM_DEVICE void DispatchFillReadyStatus(__ubuf__ int32_t* status_ub)
-{
-    for (int64_t status_idx = 0; status_idx < DISPATCH_SLOT_INT32; ++status_idx) {
-        status_ub[status_idx] = DISPATCH_READY_VALUE;
-    }
-    SetFlag<HardEvent::S_MTE3>(EVENT_ID1);
-    WaitFlag<HardEvent::S_MTE3>(EVENT_ID1);
-}
-
 ACLSHMEM_DEVICE void DispatchFillCountStatus(__ubuf__ int32_t* status_ub, int32_t count)
 {
-    status_ub[0] = DISPATCH_COUNT_READY;
+    status_ub[0] = DISPATCH_COUNT_INIT;
     status_ub[1] = count;
     for (int64_t status_idx = 2; status_idx < DISPATCH_SLOT_INT32; ++status_idx) {
         status_ub[status_idx] = 0;
@@ -268,7 +259,6 @@ ACLSHMEM_DEVICE void dispatch_classic(
             for (int64_t dst_local_expert = 0; dst_local_expert < local_expert_num; ++dst_local_expert) {
                 slot_offsets[dst_local_expert] = 0;
             }
-            DispatchFillReadyStatus(status_ub);
             bool wrote_direct_ready = false;
             for (int64_t flat = 0; flat < bs * k; ++flat) {
                 const int64_t expert_id = expert_ids[flat];
@@ -285,9 +275,10 @@ ACLSHMEM_DEVICE void dispatch_classic(
                 const int64_t data_block = my_rank * local_expert_num + dst_local_expert;
                 const int64_t global_slot = data_block * max_tokens_per_segment + slot;
 
-                aclshmemx_mte_put_nbi(
-                    ready_base + global_slot * DISPATCH_SLOT_INT32, status_ub,
-                    static_cast<uint32_t>(DISPATCH_SLOT_INT32), dst_rank, DIRECT_EVENT_ID);
+                // The receiver waits on the first word of each 32-byte slot.
+                aclshmemx_signal_op(
+                    ready_base + global_slot * DISPATCH_SLOT_INT32, DISPATCH_READY_VALUE, ACLSHMEM_SIGNAL_SET,
+                    dst_rank);
                 wrote_direct_ready = true;
             }
             if (wrote_direct_ready) {
@@ -304,7 +295,10 @@ ACLSHMEM_DEVICE void dispatch_classic(
             aclshmemx_mte_put_nbi(
                 count_base + status_segment * DISPATCH_SLOT_INT32, status_ub,
                 static_cast<uint32_t>(DISPATCH_SLOT_INT32), dst_rank, DIRECT_EVENT_ID);
-            aclshmem_quiet();
+            aclshmemx_mte_quiet();
+            // Publish READY only after the count is visible on the destination PE.
+            aclshmemx_signal_op(
+                count_base + status_segment * DISPATCH_SLOT_INT32, DISPATCH_COUNT_READY, ACLSHMEM_SIGNAL_SET, dst_rank);
         }
 
         for (int64_t dst_local_expert = 0; dst_local_expert < local_expert_num; ++dst_local_expert) {
@@ -339,7 +333,6 @@ ACLSHMEM_DEVICE void dispatch_classic(
             for (int64_t dst_local_expert = 0; dst_local_expert < local_expert_num; ++dst_local_expert) {
                 slot_offsets[dst_local_expert] = 0;
             }
-            DispatchFillReadyStatus(status_ub);
             bool wrote_sdma_ready = false;
             for (int64_t flat = 0; flat < bs * k; ++flat) {
                 const int64_t expert_id = expert_ids[flat];
@@ -356,9 +349,9 @@ ACLSHMEM_DEVICE void dispatch_classic(
                 const int64_t data_block = my_rank * local_expert_num + dst_local_expert;
                 const int64_t global_slot = data_block * max_tokens_per_segment + slot;
 
-                aclshmemx_mte_put_nbi(
-                    ready_base + global_slot * DISPATCH_SLOT_INT32, status_ub,
-                    static_cast<uint32_t>(DISPATCH_SLOT_INT32), dst_rank, DIRECT_EVENT_ID);
+                aclshmemx_signal_op(
+                    ready_base + global_slot * DISPATCH_SLOT_INT32, DISPATCH_READY_VALUE, ACLSHMEM_SIGNAL_SET,
+                    dst_rank);
                 wrote_sdma_ready = true;
             }
             if (wrote_sdma_ready) {
@@ -375,7 +368,9 @@ ACLSHMEM_DEVICE void dispatch_classic(
             aclshmemx_mte_put_nbi(
                 count_base + status_segment * DISPATCH_SLOT_INT32, status_ub,
                 static_cast<uint32_t>(DISPATCH_SLOT_INT32), dst_rank, DIRECT_EVENT_ID);
-            aclshmem_quiet();
+            aclshmemx_mte_quiet();
+            aclshmemx_signal_op(
+                count_base + status_segment * DISPATCH_SLOT_INT32, DISPATCH_COUNT_READY, ACLSHMEM_SIGNAL_SET, dst_rank);
         }
 
         (void)threshold_num;
@@ -419,11 +414,8 @@ ACLSHMEM_DEVICE void dispatch_classic(
                 const int64_t data_block = src_rank * local_expert_num + local_expert;
                 for (int64_t i = 0; i < count; ++i) {
                     const int64_t global_slot = data_block * max_tokens_per_segment + i;
-                    for (int64_t ready_idx = 0; ready_idx < DISPATCH_SLOT_INT32; ++ready_idx) {
-                        aclshmem_signal_wait_until(
-                            ready_base + global_slot * DISPATCH_SLOT_INT32 + ready_idx, ACLSHMEM_CMP_EQ,
-                            DISPATCH_READY_VALUE);
-                    }
+                    aclshmem_signal_wait_until(
+                        ready_base + global_slot * DISPATCH_SLOT_INT32, ACLSHMEM_CMP_EQ, DISPATCH_READY_VALUE);
                     for (int64_t j = 0; j < h; ++j) {
                         expand_x[(begin + i) * h + j] = payload_base[global_slot * payload_stride + j];
                     }
@@ -431,13 +423,9 @@ ACLSHMEM_DEVICE void dispatch_classic(
                         assist_info_for_combine[(begin + i) * DISPATCH_ASSIST_FIELDS + j] =
                             assist_base[global_slot * DISPATCH_SLOT_INT32 + j];
                     }
-                    for (int64_t ready_idx = 0; ready_idx < DISPATCH_SLOT_INT32; ++ready_idx) {
-                        ready_base[global_slot * DISPATCH_SLOT_INT32 + ready_idx] = 0;
-                    }
+                    ready_base[global_slot * DISPATCH_SLOT_INT32] = 0;
                 }
-                for (int64_t count_idx = 0; count_idx < DISPATCH_SLOT_INT32; ++count_idx) {
-                    count_base[segment * DISPATCH_SLOT_INT32 + count_idx] = DISPATCH_COUNT_INIT;
-                }
+                count_base[segment * DISPATCH_SLOT_INT32] = DISPATCH_COUNT_INIT;
             }
         }
     }

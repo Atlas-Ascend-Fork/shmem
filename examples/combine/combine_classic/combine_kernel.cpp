@@ -11,6 +11,7 @@
 #include "kernel_operator.h"
 #include "acl/acl.h"
 #include "shmem.h"
+#include "mstx_example_report.h"
 #include "utils/prof/shmemi_prof.h"
 
 #include <type_traits>
@@ -27,7 +28,6 @@ constexpr int64_t UB_DMA_MAX_SIZE = 190 * 1024;
 constexpr int64_t COMBINE_ASSIST_FIELDS = 3;
 constexpr int64_t COMBINE_ALIGN_BYTES = 32;
 constexpr int64_t COMBINE_SLOT_INT32 = COMBINE_ALIGN_BYTES / static_cast<int64_t>(sizeof(int32_t));
-constexpr uint32_t COMBINE_STATUS_UB_OFFSET = 32;
 constexpr int32_t COMBINE_STATUS_READY = 1;
 
 ACLSHMEM_DEVICE int64_t CombineAlignUp(int64_t value, int64_t alignment)
@@ -49,9 +49,10 @@ template <typename T>
 ACLSHMEM_DEVICE void combine_classic_once(
     __gm__ T* expand_x, __gm__ int32_t* assist_info_for_combine, __gm__ int32_t* ep_recv_count,
     __gm__ int32_t* expert_ids, __gm__ float* expert_scales, __gm__ T* x_out, __gm__ uint8_t* shmem_window, int bs,
-    int h, int k, int moe_expert_num, int comm_frame_id, bool enable_prof)
+    int h, int k, int moe_expert_num, int magic, int comm_frame_id, bool enable_prof)
 {
     const int64_t aiv_index = GetBlockIdx();
+    const int64_t my_rank = aclshmem_my_pe();
     const int64_t pe_size = aclshmem_n_pes();
     const bool active_core = aiv_index < pe_size;
     const int64_t local_expert_num = moe_expert_num / pe_size;
@@ -63,12 +64,6 @@ ACLSHMEM_DEVICE void combine_classic_once(
     __gm__ T* data_base = (__gm__ T*)shmem_window;
     __gm__ int32_t* status_base = (__gm__ int32_t*)(shmem_window + data_bytes);
     __ubuf__ T* tmp_buff = (__ubuf__ T*)(64);
-    __ubuf__ int32_t* status_ub = (__ubuf__ int32_t*)(static_cast<uint64_t>(COMBINE_STATUS_UB_OFFSET));
-    for (int64_t status_idx = 0; status_idx < COMBINE_SLOT_INT32; ++status_idx) {
-        status_ub[status_idx] = COMBINE_STATUS_READY;
-    }
-    SetFlag<HardEvent::S_MTE3>(EVENT_ID1);
-    WaitFlag<HardEvent::S_MTE3>(EVENT_ID1);
 
     // Stage 1: send expert outputs back to the original token owner using dispatch assist metadata.
     if (enable_prof) {
@@ -89,16 +84,20 @@ ACLSHMEM_DEVICE void combine_classic_once(
                 aclshmemx_mte_put_nbi(
                     data_base + slot * data_stride, expand_x + i * h, tmp_buff, UB_DMA_MAX_SIZE, h, src_rank,
                     EVENT_ID0);
-                aclshmem_quiet();
-                aclshmemx_mte_put_nbi(
-                    status_base + slot * COMBINE_SLOT_INT32, status_ub, static_cast<uint32_t>(COMBINE_SLOT_INT32),
-                    src_rank, EVENT_ID0);
-                aclshmem_quiet();
+                aclshmemx_mte_quiet();
+                // Publish READY through the signal API so sanitizer can pair this SET with the receiver WAIT.
+                aclshmemx_signal_op(
+                    status_base + slot * COMBINE_SLOT_INT32, COMBINE_STATUS_READY, ACLSHMEM_SIGNAL_SET, src_rank);
+                const int32_t expert_id = expert_ids[slot];
+                if (src_rank == my_rank && expert_id >= 0 && expert_id < moe_expert_num &&
+                    expert_id / local_expert_num == my_rank) {
+                    EXAMPLE_MSTX_CROSS_CORE_SET_FLAG_REPORT(static_cast<int32_t>(magic + slot), -1, true);
+                }
             }
         }
     }
 
-    aclshmem_quiet();
+    aclshmemx_mte_quiet();
     if (enable_prof) {
         SHMEMI_PROF_END(comm_frame_id);
     }
@@ -107,9 +106,10 @@ ACLSHMEM_DEVICE void combine_classic_once(
     for (int64_t token_id = aiv_index; token_id < bs; token_id += GetBlockNum()) {
         for (int64_t topk_id = 0; topk_id < k; ++topk_id) {
             const int64_t slot = token_id * k + topk_id;
-            for (int64_t status_idx = 0; status_idx < COMBINE_SLOT_INT32; ++status_idx) {
-                aclshmem_signal_wait_until(
-                    status_base + slot * COMBINE_SLOT_INT32 + status_idx, ACLSHMEM_CMP_EQ, COMBINE_STATUS_READY);
+            aclshmem_signal_wait_until(status_base + slot * COMBINE_SLOT_INT32, ACLSHMEM_CMP_EQ, COMBINE_STATUS_READY);
+            const int32_t expert_id = expert_ids[slot];
+            if (expert_id >= 0 && expert_id < moe_expert_num && expert_id / local_expert_num == my_rank) {
+                EXAMPLE_MSTX_CROSS_CORE_WAIT_FLAG_REPORT(static_cast<int32_t>(magic + slot), -1, true);
             }
         }
 
@@ -127,9 +127,7 @@ ACLSHMEM_DEVICE void combine_classic_once(
 
         for (int64_t topk_id = 0; topk_id < k; ++topk_id) {
             const int64_t slot = token_id * k + topk_id;
-            for (int64_t status_idx = 0; status_idx < COMBINE_SLOT_INT32; ++status_idx) {
-                status_base[slot * COMBINE_SLOT_INT32 + status_idx] = 0;
-            }
+            status_base[slot * COMBINE_SLOT_INT32] = 0;
         }
     }
 
@@ -143,7 +141,6 @@ ACLSHMEM_DEVICE void combine_classic(
     int h, int k, int moe_expert_num, int magic, int perf_mode, int full_frame_id, int comm_frame_id, int warmup_count,
     int loop_count)
 {
-    (void)magic;
     (void)warmup_count;
     (void)loop_count;
     util_set_ffts_config(fftsAddr);
@@ -155,7 +152,7 @@ ACLSHMEM_DEVICE void combine_classic(
 
     combine_classic_once<T>(
         expand_x, assist_info_for_combine, ep_recv_count, expert_ids, expert_scales, x_out, shmem_window, bs, h, k,
-        moe_expert_num, comm_frame_id, enable_prof);
+        moe_expert_num, magic, comm_frame_id, enable_prof);
 
     if (enable_prof) {
         SHMEMI_PROF_END(full_frame_id);
