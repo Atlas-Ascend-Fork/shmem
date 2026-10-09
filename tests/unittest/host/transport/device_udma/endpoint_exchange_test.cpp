@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <limits>
 
 // Test-only access override scoped strictly to dl_hcomm_api.h so this fixture can replace
@@ -78,6 +79,14 @@ protected:
                 output[rank * count + idx] = input[idx];
                 output[rank * count + idx].peer_rank = static_cast<uint32_t>(rank);
             }
+        }
+        return ACLSHMEM_SUCCESS;
+    }
+
+    static int MirrorAllGather(const void* send, void* recv, int len, aclshmemi_bootstrap_handle_t* handle)
+    {
+        for (int rank = 0; rank < handle->npes; ++rank) {
+            std::memcpy(static_cast<uint8_t*>(recv) + static_cast<size_t>(rank) * len, send, len);
         }
         return ACLSHMEM_SUCCESS;
     }
@@ -186,6 +195,13 @@ protected:
         return result;
     }
 
+    static bool BuildSyncEndpointsForTest(
+        UdmaTransportManager& manager, const RootInfo& root_info, const TopoInfo& topo_info, uint32_t rank_count,
+        std::vector<std::vector<SyncEndpoint>>& endpoints)
+    {
+        return manager.BuildSyncEndpoints(root_info, topo_info, rank_count, endpoints);
+    }
+
     aclshmemi_bootstrap_handle_t saved_handle_{};
     HcommMemRegFunc saved_mem_reg_{nullptr};
     HcommMemUnregFunc saved_mem_unreg_{nullptr};
@@ -208,6 +224,34 @@ TEST_F(UdmaEndpointExchangeTest, AcceptsBoundaryAndRejectsNextEndpoint)
     EXPECT_EQ(count, static_cast<size_t>(ranks) * endpoints);
     EXPECT_FALSE(GetSize(ranks, endpoints + 1, count));
     EXPECT_EQ(count, 0U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, KeepsExplicitClosFabricWhenPortsAlsoMatchMeshTopology)
+{
+    // PoD may expose an aggregated CLOS EID whose ports also occur in the
+    // Mesh topology. The rootinfo CLOS declaration must take precedence;
+    // only TOPO_FILE_DESC endpoints infer their fabric from topology ports.
+    g_boot_handle.npes = 1;
+    g_boot_handle.allgather = MirrorAllGather;
+
+    RootInfo root_info;
+    auto level = std::make_shared<LevelInfo>(LevelInfo{1, "clos-domain", NetType::Clos, ""});
+    auto rank_addr = std::make_shared<RankAddr>();
+    rank_addr->levelInfo = level;
+    rank_addr->ports = {"shared-port"};
+    root_info.eidIndexToRankAddr.emplace(7, rank_addr);
+
+    TopoInfo topo_info;
+    topo_info.meshTopoEdges.push_back({0, 1, {"shared-port"}, {"peer-mesh-port"}});
+    topo_info.closTopoEdges.push_back({1, 0, 0, {"shared-port"}});
+
+    UdmaTransportManager manager;
+    std::vector<std::vector<SyncEndpoint>> endpoints;
+    ASSERT_TRUE(BuildSyncEndpointsForTest(manager, root_info, topo_info, 1, endpoints));
+    ASSERT_EQ(endpoints.size(), 1U);
+    ASSERT_EQ(endpoints[0].size(), 1U);
+    EXPECT_EQ(endpoints[0][0].netType, NetType::Clos);
+    EXPECT_EQ(endpoints[0][0].fabric, TopoFabric::Clos);
 }
 
 TEST_F(UdmaEndpointExchangeTest, RejectsEmptyAndOverflowingDimensions)
