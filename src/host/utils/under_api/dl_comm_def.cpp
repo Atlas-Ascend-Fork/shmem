@@ -241,7 +241,7 @@ int32_t GetValueFromVersion(const std::string& ver, std::string key)
     }
 
     std::string tmp;
-    found += 1;
+    found += key.size();
     while (found < ver.length() && std::isdigit(ver[found])) {
         tmp += ver[found];
         ++found;
@@ -255,7 +255,7 @@ int32_t GetValueFromVersion(const std::string& ver, std::string key)
     return val;
 }
 
-static bool DriverVersionCheck(const std::string& ver, const std::string& readVer)
+bool DriverVersionCheck(const std::string& ver, const std::string& readVer)
 {
     if (readVer.empty()) {
         SHM_LOG_WARN("Read version is empty; inner package skipped, defaulting to the latest version.");
