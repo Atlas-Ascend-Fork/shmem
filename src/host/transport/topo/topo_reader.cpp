@@ -650,12 +650,20 @@ bool EidConverter::FromPlainEid(RankAddrType addrType, const nlohmann::json& add
     }
 
     const std::string& jsonString = addr.get_ref<const std::string&>();
+    if (jsonString.empty()) {
+        SHM_LOG_ERROR("Rootinfo addr hex string is empty.");
+        return false;
+    }
+
     std::string normalized;
     normalized.reserve(jsonString.size());
     for (const char ch : jsonString) {
-        if (std::isxdigit(static_cast<unsigned char>(ch))) {
-            normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+        const auto uchar = static_cast<unsigned char>(ch);
+        if (!std::isxdigit(uchar)) {
+            SHM_LOG_ERROR("Rootinfo addr contains a non-hex character.");
+            return false;
         }
+        normalized.push_back(static_cast<char>(std::tolower(uchar)));
     }
 
     // Tolerate odd-length hex by left-padding to the full EID width.

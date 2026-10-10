@@ -117,6 +117,26 @@ std::vector<std::pair<std::string, std::string>> ExtractCanonicalPairs(
     return out;
 }
 
+TEST(EidConverterTest, RejectsEmptyAndNonHexStrings)
+{
+    for (const std::string input : {"", "zz", "not-an-eid"}) {
+        EidData raw;
+        raw.fill(0xff);
+        EXPECT_FALSE(EidConverter::Convert(RankAddrType::EID, input, raw)) << input;
+        EXPECT_EQ(raw, EidData{});
+    }
+}
+
+TEST(EidConverterTest, AcceptsHexStrings)
+{
+    EidData raw;
+    ASSERT_TRUE(EidConverter::Convert(RankAddrType::EID, "000000000000006000100000dfdf008B", raw));
+    EXPECT_EQ(raw[7], 0x60);
+    EXPECT_EQ(raw[8], 0x00);
+    EXPECT_EQ(raw[9], 0x10);
+    EXPECT_EQ(raw[15], 0x8b);
+}
+
 bool ParseIndexedTopo(TopoInfo& topoInfo)
 {
     nlohmann::json edges = nlohmann::json::array();
