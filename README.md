@@ -7,19 +7,21 @@
 
 <div align="center">
 
-[![Documentation](https://img.shields.io/badge/Documentation-SHMEM-blue)](https://shmem-doc.pages.dev/)[![Release](https://img.shields.io/badge/Release-v1.6.0-brightgreen)](https://gitcode.com/cann/shmem/releases/v1.6.0)[![Platform](https://img.shields.io/badge/Platform-Ascend%20NPU-red)](https://www.hiascend.com/)[![SIG](https://img.shields.io/badge/SIG-shmem-lightgrey)](https://gitcode.com/cann/community/tree/master/CANN/sigs/shmem)
+[![Documentation](https://img.shields.io/badge/Documentation-SHMEM-blue)](https://shmem-doc.pages.dev/)[![Release](https://img.shields.io/badge/Release-v1.7.0-brightgreen)](https://gitcode.com/cann/shmem/releases/v1.7.0)[![Platform](https://img.shields.io/badge/Platform-Ascend%20NPU-red)](https://www.hiascend.com/)[![SIG](https://img.shields.io/badge/SIG-shmem-lightgrey)](https://gitcode.com/cann/community/tree/master/CANN/sigs/shmem)
 
 </div>
 
 ## 最新动态
 
-🚀 [2026/07] [SHMEM v1.6.0](https://gitcode.com/cann/shmem/releases/v1.6.0) 正式发布。
+🚀 [2026/10] [SHMEM v1.7.0](https://gitcode.com/cann/shmem/releases/v1.7.0) 正式发布。
 
-   - 完善 Ascend 950 RDMA 能力，支持 XSCALE（云脉）和 HNS 1825 后端，并补齐 Device 侧 RMA、Atomic、Sync/Barrier 接口。
-   - 增强 Ascend 950 UDMA/MTE 与 SIMT 数据搬运能力，新增 relay RMA、MTE Atomic 和 UB↔GM 接口。
-   - 改进安装与诊断：Python wheel 集成多平台后端，新增 `shmem-config` 环境检查，并补充性能测试与示例。
+   - Ascend 950 RDMA/UDMA 新增 QP-specific put/get 接口，扩展聚合提交能力，支持 UDMA 多链路并发。
+   - A2/A3 SDMA 新增 QP-specific put/get 接口，支持多 QP 通信。
+   - 完善安装与运行时诊断，新增 MegaMoE、UDMA AllReduce 示例及多 QP 性能测试。
 
-> 升级前请阅读 [v1.6.0 Release Notes](https://gitcode.com/cann/shmem/releases/v1.6.0)，重点关注非阻塞接口完成语义、ROCE `atomic_add` 行为变化和版本一致性要求。
+> 升级前请阅读 [v1.7.0 Release Notes](https://gitcode.com/cann/shmem/releases/v1.7.0)，了解多 QP 使用约束、异步通信完成语义及兼容性要求。
+
+📌 [2026/07] [SHMEM v1.6.0](https://gitcode.com/cann/shmem/releases/v1.6.0) 发布：完善 Ascend 950 RDMA、UDMA/MTE 与 SIMT 能力，改进 Python wheel 安装与 `shmem-config` 诊断。
 
 📌 [2026/04] [SHMEM v1.3.0](https://gitcode.com/cann/shmem/releases/v1.3.0) 发布：新增 AICore 直驱能力和 40+ 通信接口，并完善 DFX 工具链。
 

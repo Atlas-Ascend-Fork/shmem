@@ -6,17 +6,21 @@ English | <a href="./README.md">简体中文</a>
 
 <div align="center">
 
-[![Documentation](https://img.shields.io/badge/Documentation-SHMEM-blue)](https://shmem-doc.pages.dev/)[![Release](https://img.shields.io/badge/Release-v1.6.0-brightgreen)](https://gitcode.com/cann/shmem/releases/v1.6.0)[![Platform](https://img.shields.io/badge/Platform-Ascend%20NPU-red)](https://www.hiascend.com/)[![SIG](https://img.shields.io/badge/SIG-shmem-lightgrey)](https://gitcode.com/cann/community/tree/master/CANN/sigs/shmem)
+[![Documentation](https://img.shields.io/badge/Documentation-SHMEM-blue)](https://shmem-doc.pages.dev/)[![Release](https://img.shields.io/badge/Release-v1.7.0-brightgreen)](https://gitcode.com/cann/shmem/releases/v1.7.0)[![Platform](https://img.shields.io/badge/Platform-Ascend%20NPU-red)](https://www.hiascend.com/)[![SIG](https://img.shields.io/badge/SIG-shmem-lightgrey)](https://gitcode.com/cann/community/tree/master/CANN/sigs/shmem)
 
 </div>
 
 ## What's New
-🚀 [July 2026] [SHMEM v1.6.0](https://gitcode.com/cann/shmem/releases/v1.6.0) is now available.
-   - Expanded Ascend 950 RDMA support with XSCALE and HNS 1825 backends, plus Device-side RMA, Atomic, and Sync/Barrier APIs.
-   - Enhanced Ascend 950 UDMA/MTE and SIMT data-movement capabilities, adding relay RMA, MTE Atomic, and UB↔GM APIs.
-   - Improved installation and diagnostics: multi-platform backends integrated into the Python wheel, `shmem-config` environment checks, and additional performance tests and examples.
 
-> Before upgrading, read the [v1.6.0 release notes](https://gitcode.com/cann/shmem/releases/v1.6.0), especially the changes to nonblocking completion semantics, ROCE `atomic_add` behavior, and version consistency requirements.
+🚀 [October 2026] [SHMEM v1.7.0](https://gitcode.com/cann/shmem/releases/v1.7.0) is now available.
+
+   - Added QP-specific put/get APIs for Ascend 950 RDMA/UDMA, expanded aggregate submission support, and enabled concurrent UDMA communication across multiple links.
+   - Added QP-specific put/get APIs for A2/A3 SDMA to support multi-QP communication.
+   - Improved installation and runtime diagnostics, with new MegaMoE and UDMA AllReduce examples and multi-QP performance tests.
+
+> Before upgrading, read the [v1.7.0 release notes](https://gitcode.com/cann/shmem/releases/v1.7.0) for multi-QP usage constraints, asynchronous communication completion semantics, and compatibility requirements.
+
+📌 [July 2026] [SHMEM v1.6.0](https://gitcode.com/cann/shmem/releases/v1.6.0): expanded Ascend 950 RDMA, UDMA/MTE, and SIMT capabilities, and improved Python wheel installation and `shmem-config` diagnostics.
 
 📌 [April 2026] [SHMEM v1.3.0](https://gitcode.com/cann/shmem/releases/v1.3.0): added AI Core direct-driven capabilities and 40+ communication APIs, with expanded DFX tooling.
 
