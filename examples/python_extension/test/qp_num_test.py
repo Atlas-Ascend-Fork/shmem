@@ -21,6 +21,7 @@ from shmem._soc import select_backend
 G_IP_PORT = "tcp://127.0.0.1:8669"
 LOCAL_MEM_SIZE = 1024 * 1024 * 1024
 MAX_QP_NUM = 56
+MAX_AIV_PER_NPU = 72
 
 
 def assert_nonzero(ret, description):
@@ -49,7 +50,15 @@ def run_qp_num_tests():
 
     # Unsupported engines and values must be rejected before initialization.
     assert_nonzero(ash.aclshmemx_set_qp_num(ash.OpEngineType.MTE, 1), "MTE QP configuration")
-    assert_nonzero(ash.aclshmemx_set_qp_num(ash.OpEngineType.SDMA, 1), "SDMA QP configuration")
+    # SDMA is supported with range [1, min(vector-core count, ACLSHMEM_MAX_AIV_PER_NPU)].
+    assert_nonzero(ash.aclshmemx_set_qp_num(ash.OpEngineType.SDMA, 0), "zero SDMA QP configuration")
+    assert_nonzero(
+        ash.aclshmemx_set_qp_num(ash.OpEngineType.SDMA, MAX_AIV_PER_NPU + 1),
+        "out-of-range SDMA QP configuration",
+    )
+    ret = ash.aclshmemx_set_qp_num(ash.OpEngineType.SDMA, 1)
+    if ret != 0:
+        raise ValueError(f"[ERROR] valid SDMA qp_num=1 failed: {ret}")
     supported_engine = None
     if is_ascend950:
         assert_nonzero(ash.aclshmemx_set_qp_num(ash.OpEngineType.UDMA, 0), "zero QP configuration")
