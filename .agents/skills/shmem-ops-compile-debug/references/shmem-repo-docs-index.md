@@ -98,7 +98,7 @@ grep -iE 'fail|error|address in use|bootstrap|AccStore|Memory Heap' "${LOG_DIR}"
 
 | 日志/现象 | 动作 |
 | --- | --- |
-| `address in use` | `pkill -f 'build/bin/<op>|torch_test_'`；`scripts/run.sh` 动态 `IPPORT`/`SHMEM_UID_SESSION_ID` |
+| `address in use` | `pkill -f 'build/bin/<op>\|torch_test_'`；`scripts/run.sh` 动态 `IPPORT`/`SHMEM_UID_SESSION_ID` |
 | `local size diffs` | 各 PE `local_mem_size` 一致（见 `docs/debug/Troubleshooting_FAQs.md`） |
 | `Memory Heap Not Initialized` | init 失败；优先查 bootstrap 与环境 |
 | 无日志 | 确认 `source `${SHMEM_REPO}/install/set_env.sh`；bootstrap 插件与 `libshmem.so` 同目录 |
