@@ -684,18 +684,28 @@ ACLSHMEM_HOST_API int aclshmemx_set_rdma_config(uint64_t offset, uint32_t ub_siz
 ACLSHMEM_HOST_API int aclshmemx_set_udma_config(uint64_t offset, uint32_t ub_size, uint32_t sync_id);
 
 /**
- * @brief Ensures completion of all previously issued operations on symmetric data objects
- *        issued by the calling PE. The quiet is queued on the given stream; the caller must
- *        synchronize the stream to observe completion from the host.
+ * @brief Enqueue a completion point for symmetric-data operations queued on the same stream.
  *
- * @param stream            [in] ACL stream on which to queue the quiet operation. Passing NULL uses the default stream.
+ * @param[in] stream ACL stream on which to queue the quiet; NULL selects the library-managed
+ *                  default stream.
  *
- * @note Quiet operations are scoped to the issuing context: quiet called from the host ensures completion
- *       of host-issued operations; quiet called from a device kernel ensures completion of operations
- *       issued by that kernel.
+ * @note The quiet covers only operations ordered on this stream. Work on another stream
+ *       needs an explicit cross-stream dependency. The call returns after enqueueing;
+ *       synchronize the stream to observe completion.
  */
 ACLSHMEM_HOST_API void aclshmemx_quiet_on_stream(aclrtStream stream);
 #define shmemx_quiet_on_stream aclshmemx_quiet_on_stream
+
+/**
+ * @brief Complete symmetric-data operations previously queued on the library-managed
+ *        default stream, blocking until they finish.
+ *
+ * @note Only work ordered on the default stream is covered. Work queued on another
+ *       stream has no implicit ordering with this call; synchronize that stream or
+ *       establish an explicit dependency before relying on this quiet.
+ */
+ACLSHMEM_HOST_API void aclshmem_quiet(void);
+#define shmem_quiet aclshmem_quiet
 
 #ifdef __cplusplus
 }

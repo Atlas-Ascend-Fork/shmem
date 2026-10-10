@@ -25,6 +25,7 @@ This file provides device-side collective synchronization implementations, ensur
 
 #include "shmemi_device_common.h"
 #include "host_device/shmem_common_types.h"
+#include "shmemi_device_mo.h"
 #include "shmemi_device_p2p_sync.h"
 #include "gm2gm/engine/shmemi_device_rdma.h"
 #include "device/team/shmem_device_team.h"
@@ -503,18 +504,80 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v4(aclshmem_team_t team_idx)
 }
 
 template <bool IS_AIV_ONLY = true>
+ACLSHMEM_DEVICE void aclshmemi_sync_algo(aclshmem_team_t team_idx)
+{
+    aclshmemi_sync_core<IS_AIV_ONLY>();
+
+    __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();
+    aclshmemx_team_t* team_ptr = device_state->team_pools[team_idx];
+
+    bool intra_node_reaches_all = true;
+    bool roce_reaches = false;
+
+    if (team_idx == ACLSHMEM_TEAM_WORLD) {
+        uint8_t quiet_transport_mask =
+            aclshmemi_filter_unsupported_quiet_transports(aclshmemi_get_quiet_transport_mask());
+        if (quiet_transport_mask & ACLSHMEM_TRANSPORT_ROCE) {
+            roce_reaches = true;
+        }
+    } else {
+        constexpr uint8_t intra_node_transport_mask =
+            ACLSHMEM_TRANSPORT_MTE | ACLSHMEM_TRANSPORT_SDMA | ACLSHMEM_TRANSPORT_UDMA;
+
+        for (int32_t team_pe = 0; team_pe < team_ptr->size; ++team_pe) {
+            int32_t global_pe = team_ptr->pe_mapping[team_pe];
+            uint8_t transport_mask = device_state->topo_list[global_pe];
+            intra_node_reaches_all = intra_node_reaches_all && ((transport_mask & intra_node_transport_mask) != 0);
+            roce_reaches = roce_reaches || ((transport_mask & ACLSHMEM_TRANSPORT_ROCE) != 0);
+        }
+    }
+
+    if (roce_reaches) {
+        if ASCEND_IS_AIV {
+            if (AscendC::GetBlockIdx() == 0) {
+                uint64_t copy_ub = device_state->rdma_config.aclshmem_ub;
+                uint32_t sync_id = device_state->rdma_config.sync_id;
+                aclshmemi_roce_team_sync(team_ptr, reinterpret_cast<__ubuf__ char*>(copy_ub), sync_id);
+            }
+        }
+        aclshmemi_sync_core<IS_AIV_ONLY>();
+    } else if (intra_node_reaches_all) {
+        int32_t vec_size = AscendC::GetBlockNum() * AscendC::GetTaskRation();
+        if (team_ptr->size <= SYNC_V3_SMALL_TEAM_SIZE || vec_size >= team_ptr->size) {
+            aclshmemi_sync_npu_v3<IS_AIV_ONLY>(team_idx);
+        } else {
+            aclshmemi_sync_npu_v4<IS_AIV_ONLY>(team_idx);
+        }
+    }
+}
+template <bool IS_AIV_ONLY = true>
+ACLSHMEM_DEVICE void aclshmemi_barrier_algo(aclshmem_team_t team_idx)
+{
+    aclshmemi_sync_core<IS_AIV_ONLY>();
+    if ASCEND_IS_AIV {
+        if (AscendC::GetBlockIdx() == 0) {
+            aclshmemi_quiet();
+        }
+    }
+    aclshmemi_sync_algo<IS_AIV_ONLY>(team_idx);
+}
+
+template <bool IS_AIV_ONLY = true>
 ACLSHMEM_DEVICE void aclshmemi_sync(aclshmem_team_t team)
 {
     if (team == -1) {
         return; // not in team
     }
-    aclshmemx_team_t* sync_team = aclshmemi_get_state()->team_pools[team];
-    int32_t vec_size = AscendC::GetBlockNum() * AscendC::GetTaskRation();
-    if (sync_team->size <= SYNC_V3_SMALL_TEAM_SIZE || vec_size >= sync_team->size) {
-        aclshmemi_sync_npu_v3<IS_AIV_ONLY>(team);
-    } else {
-        aclshmemi_sync_npu_v4<IS_AIV_ONLY>(team);
+    aclshmemi_sync_algo<IS_AIV_ONLY>(team);
+}
+
+template <bool IS_AIV_ONLY = true>
+ACLSHMEM_DEVICE void aclshmemi_barrier(aclshmem_team_t team)
+{
+    if (team == -1) {
+        return; // not in team
     }
+    aclshmemi_barrier_algo<IS_AIV_ONLY>(team);
 }
 
 ACLSHMEM_DEVICE void dcci_cacheline(__gm__ uint8_t* addr)
@@ -578,23 +641,23 @@ ACLSHMEM_DEVICE void aclshmemi_barrier_cross_host(aclshmemx_team_t* team)
     auto sync_counter = aclshmemi_get_team_sync_counter(team->team_idx);
 
     int shift = 1;
+    int round = 0;
     int my_pe_in_team = (my_pe - start) / stride;
     int32_t count = aclshmemi_load((__gm__ int32_t*)sync_counter) + 1;
     aclshmemi_store((__gm__ int32_t*)sync_counter, count);
     dcci_cacheline((__gm__ uint8_t*)sync_counter);
     while (shift < size) {
-        int pre_pe_in_team = (my_pe_in_team - shift + size) % size;
         int next_pe_in_team = (my_pe_in_team + shift) % size;
         int next_pe = start + next_pe_in_team * stride;
 
-        // signal next pe
-        aclshmemi_highlevel_signal_set(
-            (__gm__ int32_t*)(sync_pool + my_pe_in_team), (__gm__ int32_t*)sync_counter, next_pe);
+        // The destination PE receives this round's signal in its own team slot.
+        aclshmemi_highlevel_signal_set((__gm__ int32_t*)(sync_pool + round), (__gm__ int32_t*)sync_counter, next_pe);
 
-        // wait pre pe
-        aclshmemi_signal_wait_until_eq_for_barrier((__gm__ int32_t*)(sync_pool + pre_pe_in_team), count);
+        // Wait for this round's signal from the preceding PE.
+        aclshmemi_signal_wait_until_eq_for_barrier((__gm__ int32_t*)(sync_pool + round), count);
 
         shift *= SHIFT_MULTIPLIER;
+        ++round;
     }
 }
 
@@ -647,9 +710,19 @@ ACLSHMEM_DEVICE void util_set_ffts_config(uint64_t config)
 
 ACLSHMEM_DEVICE void aclshmem_sync(aclshmem_team_t tid) { aclshmemi_sync<false>(tid); }
 
+ACLSHMEM_DEVICE int aclshmem_team_sync(aclshmem_team_t tid)
+{
+    aclshmemi_sync<false>(tid);
+    return 0;
+}
+
 ACLSHMEM_DEVICE void aclshmem_sync_all() { aclshmem_sync(ACLSHMEM_TEAM_WORLD); }
 
-ACLSHMEM_DEVICE void aclshmem_barrier(aclshmem_team_t tid) { aclshmemi_sync<false>(tid); }
+ACLSHMEM_DEVICE int aclshmem_barrier(aclshmem_team_t tid)
+{
+    aclshmemi_barrier<false>(tid);
+    return 0;
+}
 
 ACLSHMEM_DEVICE void aclshmem_barrier_all() { aclshmem_barrier(ACLSHMEM_TEAM_WORLD); }
 
@@ -659,7 +732,7 @@ ACLSHMEM_DEVICE void aclshmemx_sync_vec_all() { aclshmemx_sync_vec(ACLSHMEM_TEAM
 
 ACLSHMEM_DEVICE void aclshmemx_barrier_vec(aclshmem_team_t tid) { aclshmemx_sync_vec(tid); }
 
-ACLSHMEM_DEVICE void aclshmemx_barrier_all_vec() { aclshmemx_sync_vec_all(); }
+ACLSHMEM_DEVICE void aclshmemx_barrier_all_vec() { aclshmemx_sync_vec(ACLSHMEM_TEAM_WORLD); }
 
 #ifdef __cplusplus
 }

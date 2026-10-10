@@ -687,7 +687,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
     uint32_t sync_id, aclshmemx_submit_t action);
 
 /**
- * @brief RDMA Quiet function. This synchronous function ensures all previous RDMA WQEs are completed
+ * @brief RDMA Quiet function. This synchronous function ensures all previous RDMA WQEs on default QP are completed
  * (data has arrived at the destination NIC).
  *
  * @param pe                [in] PE number of the remote PE.

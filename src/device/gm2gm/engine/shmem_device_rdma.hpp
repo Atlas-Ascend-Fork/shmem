@@ -18,6 +18,19 @@
 #include "rdma_backends/rdma_device_backend_base.h"
 #include "rdma_backends/rdma_device_backend_base.hpp"
 
+constexpr int32_t aclshmemi_roce_sync_max_rounds()
+{
+    int32_t rounds = 0;
+    for (uint64_t covered_pes = 1; covered_pes < ACLSHMEM_MAX_PES; covered_pes *= 2) {
+        ++rounds;
+    }
+    return rounds;
+}
+
+static_assert(
+    aclshmemi_roce_sync_max_rounds() <= SYNC_ARRAY_SIZE / ACLSHMEM_SYNCBIT_SIZE,
+    "The per-team sync pool cannot hold all RoCE dissemination rounds");
+
 // Decide Current RDMA Backend
 #include "rdma_backends/rdma_device_backend_in_die.hpp"
 #include "rdma_backends/rdma_device_backend_xscale.hpp"
@@ -184,20 +197,23 @@ ACLSHMEM_DEVICE void aclshmemi_roce_team_sync(aclshmemx_team_t* team, __ubuf__ T
     auto sync_counter = aclshmemi_get_team_sync_counter(team->team_idx);
 
     int shift = 1;
+    int round = 0;
     int my_pe_in_team = (my_pe - start) / stride;
     int32_t count = aclshmemi_load((__gm__ int32_t*)sync_counter) + 1;
     aclshmemi_store((__gm__ int32_t*)sync_counter, count);
     dcci_cacheline((__gm__ uint8_t*)sync_counter);
     while (shift < size) {
-        int pre_pe_in_team = (my_pe_in_team - shift + size) % size;
         int next_pe_in_team = (my_pe_in_team + shift) % size;
         int next_pe = start + next_pe_in_team * stride;
 
+        // Each round has one incoming signal per PE. Index by round so every
+        // access stays within this team's sync array, regardless of team size.
         aclshmemi_highlevel_signal_set(
-            (__gm__ int32_t*)(sync_pool + my_pe_in_team), (__gm__ int32_t*)sync_counter, next_pe, buf, sync_id);
-        aclshmemi_signal_wait_until_eq_for_barrier((__gm__ int32_t*)(sync_pool + pre_pe_in_team), count);
+            (__gm__ int32_t*)(sync_pool + round), (__gm__ int32_t*)sync_counter, next_pe, buf, sync_id);
+        aclshmemi_signal_wait_until_eq_for_barrier((__gm__ int32_t*)(sync_pool + round), count);
 
         shift *= SHIFT_MULTIPLIER;
+        ++round;
     }
 }
 
@@ -833,7 +849,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_quiet(uint32_t pe, __ubuf__ T* buf, uint32_t
     ub_tensor_64.address_.bufferAddr = reinterpret_cast<uint64_t>(buf) + UB_ALIGN_SIZE;
     ub_tensor_64.address_.dataLen = UB_ALIGN_SIZE;
 
-    aclshmemi_roce_quiet(pe, ub_tensor_64, ub_tensor_32, sync_id);
+    aclshmemi_roce_quiet(pe, 0, ub_tensor_64, ub_tensor_32, sync_id);
 }
 
 template <typename T>

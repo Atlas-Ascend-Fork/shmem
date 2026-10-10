@@ -12,22 +12,17 @@
 
 // clang-format off
 /*
- * WARNING: Restrictions of device collective synchronization APIs.
- *
- * 1. All-core synchronization APIs can be used only in MIX kernels. The compiler will optimize the kernel to VEC
- *    or CUBE if it lacks effective cube instructions (for example, Mmad) or vector instructions (for example,
- *    DataCopy). Compiler support is required to remove this restriction; otherwise insert effective Mmad/DataCopy
- *    calls.
- *
- * 2. ACLSHMEM inter-PE synchronization conflicts with SyncAll. Avoid mixing them in the same kernel.
- *
- * 3. We provide two participant scopes:
- *    a. aclshmem_barrier_xxx: all cores participate.
- *    b. aclshmemx_sync_vec / aclshmemx_sync_vec_all: only VEC cores participate. On systems using HCCS or UB,
- *       memory stores issued by participating VEC cores before the sync are visible to participating VEC cores after
- *       the sync. The sync does not complete remote updates issued through ACLSHMEM communication APIs.
- *
- * 4. The scalar unit of a cube core is not synchronized by these APIs. Do not rely on it across the collective.
+ * Collective programming contract:
+ * - The all-core barrier and sync APIs require a MIX kernel; all participating local AIC and AIV
+ *   cores must enter. Vector-only sync APIs involve only AIV cores. The _all forms select
+ *   ACLSHMEM_TEAM_WORLD without changing the local core participation scope.
+ * - Every PE in a team must call its collectives in the same order. Do not overlap collective
+ *   calls on the same team. ACLSHMEM_TEAM_INVALID (-1) is a no-op for team-taking APIs;
+ *   other invalid handles are not covered by this rule.
+ * - Ordinary symmetric-memory stores from participating cores are synchronized on supported
+ *   HCCS/UB paths. The Cube scalar unit is outside this visibility guarantee.
+ * - Device collectives cover Device-issued work; Host-issued work needs the corresponding
+ *   Host-side completion and ordering.
  */
 // clang-format on
 
@@ -54,24 +49,22 @@ ACLSHMEM_DEVICE void util_set_ffts_config(uint64_t config);
 #define shmemx_set_ffts_config util_set_ffts_config
 
 /**
- * @brief aclshmem_barrier is a collective synchronization routine over a team. Control returns from aclshmem_barrier
- *        after all PEs in the team have called aclshmem_barrier.
- *        aclshmem_barrier ensures that all previously issued stores and remote memory updates, including AMOs and
- *        RMA operations, done by any of the PEs in the active set are complete before returning. On systems with
- *        only scale-up network (HCCS), updates are globally visible, whereas on systems with both scale-up network
- *        HCCS and scale-out network (RDMA), ACLSHMEM only guarantees that updates to the memory of a given PE are
- *        visible to that PE.
- *        Barrier operations issued on the CPU and the NPU only complete communication operations that were issued
- *        from the CPU and the NPU, respectively. To ensure completion of NPU-side operations from the CPU, using
- *        aclrtSynchronizeStream/aclrtDeviceSynchronize or stream-based API.
+ * @brief Complete prior communication and synchronize the PEs in a team.
+ * @note All local cores in the declared participation scope must enter, and all team PEs
+ *       must call collectives in the same order. On return, prior communication covered
+ *       by this Device API is complete and its updates are visible to the destination PE.
+ *       The source buffer of a completed transfer may then be reused. QP-specific transfers
+ *       require their matching QP-specific quiet.
  *
- * @param team              [in] team to do barrier
+ * @param[in] team Team to synchronize.
+ * @return 0 after the collective (also for ACLSHMEM_TEAM_INVALID); Device execution errors
+ *         are not reported through this return value.
  */
-ACLSHMEM_DEVICE void aclshmem_barrier(aclshmem_team_t team);
+ACLSHMEM_DEVICE int aclshmem_barrier(aclshmem_team_t team);
 #define shmem_barrier aclshmem_barrier
 
 /**
- * @brief aclshmem_barrier of all PEs.
+ * @brief Perform aclshmem_barrier over ACLSHMEM_TEAM_WORLD with the same local core scope.
  */
 ACLSHMEM_DEVICE void aclshmem_barrier_all(void);
 #define shmem_barrier_all aclshmem_barrier_all
@@ -109,17 +102,33 @@ ACLSHMEM_DEVICE void aclshmemx_barrier_all_vec(void);
 #define shmemx_barrier_all_vec aclshmemx_barrier_all_vec
 
 /**
- * @brief Similar to aclshmem_barrier. In contrast with the aclshmem_barrier routine, aclshmem_sync only ensures
- *        completion and visibility of previously issued memory stores and does not ensure completion of remote memory
- *        updates issued via ACLSHMEM routines.
+ * @brief Wait for all team PEs to reach this synchronization point.
+ * @note On supported HCCS/UB paths, ordinary symmetric-memory stores from participating
+ *       cores are synchronized within the applicable visibility scope. This call does not
+ *       complete outstanding NBI communication. Call the matching quiet before sync when
+ *       communication completion or source-buffer reuse is required, or use barrier instead.
+ *       All cores in the declared participation scope must enter in the same order.
  *
- * @param team           [in] team to synchronize
+ * @param[in] team Team to synchronize.
  */
 ACLSHMEM_DEVICE void aclshmem_sync(aclshmem_team_t team);
 
 /**
- * @brief aclshmem_sync_all of all PEs.
+ * @brief Wait for all team PEs to reach this synchronization point.
+ * @note On supported HCCS/UB paths, ordinary symmetric-memory stores from participating
+ *       cores are synchronized within the applicable visibility scope. This call does not
+ *       complete outstanding NBI communication. Call the matching quiet before sync when
+ *       communication completion or source-buffer reuse is required, or use barrier instead.
+ *       All cores in the declared participation scope must enter in the same order.
  *
+ * @param[in] team Team to synchronize.
+ * @return 0 after the collective (also for ACLSHMEM_TEAM_INVALID); Device execution errors
+ *         are not reported through this return value.
+ */
+ACLSHMEM_DEVICE int aclshmem_team_sync(aclshmem_team_t team);
+
+/**
+ * @brief Perform aclshmem_sync over ACLSHMEM_TEAM_WORLD with the same local core scope.
  */
 ACLSHMEM_DEVICE void aclshmem_sync_all(void);
 

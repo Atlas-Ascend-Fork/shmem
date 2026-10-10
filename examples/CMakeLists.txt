@@ -159,6 +159,7 @@ foreach(EXAMPLE
     kv_shuffle
     aclgraph_demo
     allgather
+    barrier_all
     multi_instance
     rma_d2h_demo
     sdma_d2h_demo

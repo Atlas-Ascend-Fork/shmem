@@ -385,3 +385,12 @@ void aclshmemx_quiet_on_stream(aclrtStream stream)
         SHM_LOG_ERROR("aclshmemx_quiet_on_stream failed");
     }
 }
+
+void aclshmem_quiet(void)
+{
+    aclshmemx_quiet_on_stream(g_state_host.default_stream);
+    aclError sync_status = aclrtSynchronizeStream(g_state_host.default_stream);
+    if (sync_status != ACL_SUCCESS) {
+        SHM_LOG_ERROR("aclshmem_quiet failed to synchronize stream, aclError: " << sync_status);
+    }
+}

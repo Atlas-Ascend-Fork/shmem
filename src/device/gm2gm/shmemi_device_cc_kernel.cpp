@@ -15,18 +15,31 @@
 #include "shmemi_device_common.h"
 #include "device/gm2gm/engine/shmem_device_rdma.h"
 
-// kernels
-ACLSHMEM_GLOBAL void barrier_on_stream_kernel(aclshmem_team_t team, uint64_t ffts_config)
+ACLSHMEM_GLOBAL void aclshmemi_sync_on_stream_kernel(aclshmem_team_t team, uint64_t ffts_config)
 {
-    AscendC::SetSyncBaseAddr(ffts_config);
-    aclshmemi_sync<false>(team);
+    util_set_ffts_config(ffts_config);
+    aclshmemi_sync_algo<false>(team);
+}
+
+ACLSHMEM_GLOBAL void aclshmemi_barrier_on_stream_kernel(aclshmem_team_t team, uint64_t ffts_config)
+{
+    util_set_ffts_config(ffts_config);
+    aclshmemi_barrier_algo<false>(team);
 }
 
 // interfaces
 int32_t aclshmemi_call_barrier_on_stream_kernel(aclshmem_team_t team, aclrtStream stream)
 {
-    barrier_on_stream_kernel<<<1, nullptr, stream>>>(team, util_get_ffts_config());
-    return ACLSHMEM_SUCCESS;
+    (void)aclrtGetLastError(ACL_RT_THREAD_LEVEL);
+    aclshmemi_barrier_on_stream_kernel<<<1, nullptr, stream>>>(team, util_get_ffts_config());
+    return aclrtGetLastError(ACL_RT_THREAD_LEVEL);
+}
+
+int32_t aclshmemi_call_sync_on_stream_kernel(aclshmem_team_t team, aclrtStream stream)
+{
+    (void)aclrtGetLastError(ACL_RT_THREAD_LEVEL);
+    aclshmemi_sync_on_stream_kernel<<<1, nullptr, stream>>>(team, util_get_ffts_config());
+    return aclrtGetLastError(ACL_RT_THREAD_LEVEL);
 }
 
 // kernels

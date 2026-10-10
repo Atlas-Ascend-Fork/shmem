@@ -12,6 +12,10 @@
 
 #include "shmemi_device_common.h"
 
+ACLSHMEM_DEVICE uint8_t aclshmemi_filter_unsupported_quiet_transports(uint8_t quiet_transport_mask);
+
+ACLSHMEM_DEVICE uint8_t aclshmemi_get_quiet_transport_mask();
+
 ACLSHMEM_DEVICE void aclshmemi_quiet();
 
 #endif
