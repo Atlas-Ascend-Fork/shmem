@@ -1497,7 +1497,7 @@
     |instance_id|[in]|实例 ID；仅接受 0 到 254 范围内的非 bool 整数|
     |返回值|[out]|成功返回 ``ACLSHMEM_SUCCESS``，失败返回底层错误码|
 
-66. **aclshmemx_set_qp_num** — 配置每个对端连接创建的 QP 数量。该配置为进程级配置，必须在 ACLSHMEM 初始化前调用，并且所有 PE 必须使用相同的参数。
+66. **aclshmemx_set_qp_num** — 配置数据操作引擎创建的 QP 数量。该配置为进程级配置，必须在 ACLSHMEM 初始化前调用，并且所有 PE 必须使用相同的参数。
 
     ```python
     def aclshmemx_set_qp_num(engine: OpEngineType, qp_num: int) -> int
@@ -1505,8 +1505,8 @@
 
     |参数/返回值|方向|含义|
     |-|-|-|
-    |engine|[in]|数据操作引擎。该接口仅支持 Ascend950；``OpEngineType.UDMA`` 在 Ascend950 上可用，``OpEngineType.ROCE`` 要求 XSCALE 或 HNS_1825 后端|
-    |qp_num|[in]|每个对端连接的 QP 数量，取值范围为 ``[1, ACLSHMEM_MAX_QP_NUM]``（当前最大值为 56）|
+    |engine|[in]|数据操作引擎。``OpEngineType.SDMA`` 的取值范围为 ``[1, min(device vector-core count, ACLSHMEM_MAX_AIV_PER_NPU)]``，每个 QP 对应一个本地 device-only stream 且不绑定对端；``OpEngineType.UDMA`` 在 Ascend950 上可用，``OpEngineType.ROCE`` 要求 XSCALE 或 HNS_1825 后端|
+    |qp_num|[in]|SDMA 的取值范围为 ``[1, min(device vector-core count, ACLSHMEM_MAX_AIV_PER_NPU)]``；UDMA 和 ROCE 的取值范围为 ``[1, ACLSHMEM_MAX_QP_NUM]``（当前最大值为 56），每个对端连接创建一个 QP 组|
     |返回值|[out]|成功返回 ``0``；参数非法返回 ``ACLSHMEM_INVALID_VALUE``；引擎或当前配置不支持时返回 ``ACLSHMEM_NOT_SUPPORTED``|
 
     配置在任一 ACLSHMEM 实例初始化后被冻结；最后一个实例 ``aclshmem_finalize`` 后，QP 数量重置为 1。启用 UDMA relay（``ACLSHMEM_RELAY_SUPPORT=ON``）时仅支持 ``qp_num == 1``，多 QP 配置会在初始化阶段返回 ``ACLSHMEM_NOT_SUPPORTED``。

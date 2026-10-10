@@ -1428,13 +1428,13 @@ The following APIs expose the same operations as their Host counterparts. Addres
     |instance_id|[in]|Instance ID; accepts only non-bool integers from 0 to 254|
     |Return Value|[out]|Returns `ACLSHMEM_SUCCESS` on success or a native error code on failure|
 
-66. **aclshmemx_set_qp_num** — Configure the number of QPs created per peer connection before initialization.
+66. **aclshmemx_set_qp_num** — Configure the number of QPs created for a data operation engine before initialization.
 
     ```python
     def aclshmemx_set_qp_num(engine: OpEngineType, qp_num: int) -> int
     ```
 
-    The process-wide setting must be identical on every PE. `qp_num` must be in the range `[1, ACLSHMEM_MAX_QP_NUM]`; unsupported engines or backends return `ACLSHMEM_NOT_SUPPORTED`.
+    The process-wide setting must be identical on every PE. SDMA accepts `[1, min(device vector-core count, ACLSHMEM_MAX_AIV_PER_NPU)]` and creates local device-only streams that are not bound to a peer. UDMA and ROCE create one QP group per peer connection and accept `[1, ACLSHMEM_MAX_QP_NUM]` (currently 56); unsupported engines or backends return `ACLSHMEM_NOT_SUPPORTED`.
 
 67. **aclshmemx_set_attr_uniqueid_args** — Populate an `InitAttr` object from unique-ID initialization arguments.
 
