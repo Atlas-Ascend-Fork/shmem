@@ -12,21 +12,28 @@
 
 #include "host_device/shmem_common_types.h"
 #include "device_simt/shmem_simt_common_types.h"
+#include "utils/shmemi_simt_kernel_debug.h"
 
-namespace simt
+namespace simt {
+
+__simt_callee__ inline void aclshmemi_check_team_pe(int pe, int team_size)
 {
+    if (pe < 0 || pe >= team_size) {
+        simt::aclshmemi_kernel_abort("invalid PE index: pe=%d, team_size=%d\n", pe, team_size);
+    }
+}
 
 __simt_callee__ inline int aclshmem_my_pe(void)
 {
     __gm__ aclshmem_device_host_state_simt_t* device_state = simt::aclshmemi_get_state();
-    __gm__ aclshmemx_team_t *team_ptr = (__gm__ aclshmemx_team_t *)device_state->team_pools[ACLSHMEM_TEAM_WORLD];
+    __gm__ aclshmemx_team_t* team_ptr = (__gm__ aclshmemx_team_t*)device_state->team_pools[ACLSHMEM_TEAM_WORLD];
     return team_ptr->mype;
 }
 
 __simt_callee__ inline int aclshmem_n_pes(void)
 {
     __gm__ aclshmem_device_host_state_simt_t* device_state = simt::aclshmemi_get_state();
-    __gm__ aclshmemx_team_t *team_ptr = (__gm__ aclshmemx_team_t *)device_state->team_pools[ACLSHMEM_TEAM_WORLD];
+    __gm__ aclshmemx_team_t* team_ptr = (__gm__ aclshmemx_team_t*)device_state->team_pools[ACLSHMEM_TEAM_WORLD];
     return team_ptr->size;
 }
 
@@ -35,7 +42,7 @@ __simt_callee__ inline int aclshmem_team_my_pe(aclshmem_team_t team)
     if (team == ACLSHMEM_TEAM_INVALID) {
         return -1;
     } else {
-        __gm__ aclshmemx_team_t *src_team_ptr = (__gm__ aclshmemx_team_t *)aclshmemi_get_state()->team_pools[team];
+        __gm__ aclshmemx_team_t* src_team_ptr = (__gm__ aclshmemx_team_t*)aclshmemi_get_state()->team_pools[team];
         return (src_team_ptr != nullptr ? src_team_ptr->mype : -1);
     }
 }
@@ -45,7 +52,7 @@ __simt_callee__ inline int aclshmem_team_n_pes(aclshmem_team_t team)
     if (team == ACLSHMEM_TEAM_INVALID) {
         return -1;
     } else {
-        __gm__ aclshmemx_team_t *src_team_ptr = (__gm__ aclshmemx_team_t *)aclshmemi_get_state()->team_pools[team];
+        __gm__ aclshmemx_team_t* src_team_ptr = (__gm__ aclshmemx_team_t*)aclshmemi_get_state()->team_pools[team];
         return (src_team_ptr != nullptr ? src_team_ptr->size : -1);
     }
 }
@@ -55,14 +62,12 @@ __simt_callee__ inline int aclshmem_team_translate_pe(aclshmem_team_t src_team, 
     if (src_team == ACLSHMEM_TEAM_INVALID || dest_team == ACLSHMEM_TEAM_INVALID) {
         return -1;
     }
-    __gm__ aclshmem_device_host_state_simt_t *device_state = aclshmemi_get_state();
+    __gm__ aclshmem_device_host_state_simt_t* device_state = aclshmemi_get_state();
 
-    __gm__ aclshmemx_team_t *src_team_ptr = (__gm__ aclshmemx_team_t *)device_state->team_pools[src_team];
-    __gm__ aclshmemx_team_t *dest_team_ptr = (__gm__ aclshmemx_team_t *)device_state->team_pools[dest_team];
+    __gm__ aclshmemx_team_t* src_team_ptr = (__gm__ aclshmemx_team_t*)device_state->team_pools[src_team];
+    __gm__ aclshmemx_team_t* dest_team_ptr = (__gm__ aclshmemx_team_t*)device_state->team_pools[dest_team];
 
-    if (src_pe >= src_team_ptr->size) {
-        return -1;
-    }
+    ACLSHMEM_DEBUG_FUNC(simt::aclshmemi_check_team_pe, src_pe, src_team_ptr->size);
 
     int global_pe = src_team_ptr->pe_mapping[src_pe];
     return dest_team_ptr->pe_mapping[global_pe + ACLSHMEM_MAX_PES];
@@ -73,12 +78,10 @@ __simt_callee__ inline int aclshmem_team_pe_mapping(aclshmem_team_t team, int pe
     if (team == ACLSHMEM_TEAM_INVALID) {
         return -1;
     }
-    __gm__ aclshmem_device_host_state_simt_t *device_state = aclshmemi_get_state();
-    __gm__ aclshmemx_team_t *team_ptr = (__gm__ aclshmemx_team_t *)device_state->team_pools[team];
+    __gm__ aclshmem_device_host_state_simt_t* device_state = aclshmemi_get_state();
+    __gm__ aclshmemx_team_t* team_ptr = (__gm__ aclshmemx_team_t*)device_state->team_pools[team];
 
-    if (pe >= team_ptr->size) {
-        return -1;
-    }
+    ACLSHMEM_DEBUG_FUNC(simt::aclshmemi_check_team_pe, pe, team_ptr->size);
 
     return team_ptr->pe_mapping[pe];
 }
