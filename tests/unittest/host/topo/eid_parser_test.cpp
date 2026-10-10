@@ -56,7 +56,7 @@ TEST_F(EidParserTest, GetPortIdFromHexString)
 
     for (auto& it : port_map) {
         auto port = aclshmemi_eid_parser_t::get_port_id(it.first);
-        EXPECT_TRUE(port.has_value());
+        ASSERT_TRUE(port.has_value());
         EXPECT_EQ(port.value(), it.second);
     }
 }
@@ -114,7 +114,7 @@ TEST_F(EidParserTest, GetMaxFeId)
     hex32_to_bin16("00000000000000a000100000dfdf0038", eid_list[3].eid.raw);
 
     auto max_fe = aclshmemi_eid_parser_t::get_max_fe_id(eid_list, 4);
-    EXPECT_TRUE(max_fe.has_value());
+    ASSERT_TRUE(max_fe.has_value());
     EXPECT_EQ(max_fe.value(), 5);
 }
 

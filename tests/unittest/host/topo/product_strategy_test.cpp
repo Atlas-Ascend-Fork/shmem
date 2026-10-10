@@ -27,42 +27,42 @@ protected:
 TEST_F(ProductStrategyTest, CreateCardNoMesh)
 {
     auto strategy = aclshmemi_product_strategy_t::create(ACLSHMEMI_MAIN_BOARD_ID_CARD_NOMESH);
-    EXPECT_TRUE(strategy != nullptr);
+    ASSERT_NE(strategy, nullptr);
     EXPECT_EQ(strategy->get_root_info_size(), 4096);
 }
 
 TEST_F(ProductStrategyTest, CreateCard2PMesh)
 {
     auto strategy = aclshmemi_product_strategy_t::create(ACLSHMEMI_MAIN_BOARD_ID_CARD_2PMESH);
-    EXPECT_TRUE(strategy != nullptr);
+    ASSERT_NE(strategy, nullptr);
     EXPECT_EQ(strategy->get_root_info_size(), 4096);
 }
 
 TEST_F(ProductStrategyTest, CreateCard4PMesh)
 {
     auto strategy = aclshmemi_product_strategy_t::create(ACLSHMEMI_MAIN_BOARD_ID_CARD_4PMESH);
-    EXPECT_TRUE(strategy != nullptr);
+    ASSERT_NE(strategy, nullptr);
     EXPECT_EQ(strategy->get_root_info_size(), 4096);
 }
 
 TEST_F(ProductStrategyTest, CreateServer8PMesh)
 {
     auto strategy = aclshmemi_product_strategy_t::create(ACLSHMEMI_MAIN_BOARD_ID_SERVER_8PMESH);
-    EXPECT_TRUE(strategy != nullptr);
+    ASSERT_NE(strategy, nullptr);
     EXPECT_EQ(strategy->get_root_info_size(), 4096);
 }
 
 TEST_F(ProductStrategyTest, CreatePod)
 {
     auto strategy = aclshmemi_product_strategy_t::create(ACLSHMEMI_MAIN_BOARD_ID_POD);
-    EXPECT_TRUE(strategy != nullptr);
+    ASSERT_NE(strategy, nullptr);
     EXPECT_EQ(strategy->get_root_info_size(), 4096);
 }
 
 TEST_F(ProductStrategyTest, CreatePod2D)
 {
     auto strategy = aclshmemi_product_strategy_t::create(ACLSHMEMI_MAIN_BOARD_ID_POD_2D);
-    EXPECT_TRUE(strategy != nullptr);
+    ASSERT_NE(strategy, nullptr);
     EXPECT_EQ(strategy->get_root_info_size(), 4096);
 }
 

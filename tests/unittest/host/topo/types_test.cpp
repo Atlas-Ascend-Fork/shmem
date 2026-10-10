@@ -23,7 +23,8 @@ protected:
     void TearDown() override {}
 };
 
-static void hex32_to_bin16(const char* hex_str, uint8_t* bin_out) {
+static void hex32_to_bin16(const char* hex_str, uint8_t* bin_out)
+{
     for (int i = 0; i < 16; i++) {
         char c1 = hex_str[2 * i];
         char c2 = hex_str[2 * i + 1];
@@ -33,7 +34,8 @@ static void hex32_to_bin16(const char* hex_str, uint8_t* bin_out) {
     }
 }
 
-TEST_F(TypesTest, AddrSetEid) {
+TEST_F(TypesTest, AddrSetEid)
+{
     aclshmemi_addr_t addr;
     dcmi_urma_eid_t eid;
     hex32_to_bin16("000000000000002000100000dfdf0020", eid.raw);
@@ -44,7 +46,8 @@ TEST_F(TypesTest, AddrSetEid) {
     EXPECT_EQ(addr.addr, "000000000000002000100000dfdf0020");
 }
 
-TEST_F(TypesTest, AddrSetIp) {
+TEST_F(TypesTest, AddrSetIp)
+{
     aclshmemi_addr_t addr;
     int ret = aclshmemi_addr_set_ip(addr, "192.168.1.1");
     EXPECT_EQ(ret, 0);
@@ -52,27 +55,30 @@ TEST_F(TypesTest, AddrSetIp) {
     EXPECT_EQ(addr.addr, "192.168.1.1");
 }
 
-TEST_F(TypesTest, AddrSetPlaneId) {
+TEST_F(TypesTest, AddrSetPlaneId)
+{
     aclshmemi_addr_t addr;
     int ret = aclshmemi_addr_set_plane_id(addr, "plane0");
     EXPECT_EQ(ret, 0);
     EXPECT_EQ(addr.plane_id, "plane0");
 }
 
-TEST_F(TypesTest, AddrAddPort) {
+TEST_F(TypesTest, AddrAddPort)
+{
     aclshmemi_addr_t addr;
     int ret = aclshmemi_addr_add_port(addr, "port0");
     EXPECT_EQ(ret, 0);
-    EXPECT_EQ(addr.ports.size(), 1);
+    ASSERT_EQ(addr.ports.size(), 1);
     EXPECT_EQ(addr.ports[0], "port0");
 
     ret = aclshmemi_addr_add_port(addr, "port1");
     EXPECT_EQ(ret, 0);
-    EXPECT_EQ(addr.ports.size(), 2);
+    ASSERT_EQ(addr.ports.size(), 2);
     EXPECT_EQ(addr.ports[1], "port1");
 }
 
-TEST_F(TypesTest, AddrToString) {
+TEST_F(TypesTest, AddrToString)
+{
     aclshmemi_addr_t addr;
     addr.addr_type = "EID";
     addr.addr = "000000000000002000100000dfdf0020";
@@ -87,7 +93,8 @@ TEST_F(TypesTest, AddrToString) {
     EXPECT_TRUE(str.find("\"plane_id\": \"plane0\"") != std::string::npos);
 }
 
-TEST_F(TypesTest, NetLayerInit) {
+TEST_F(TypesTest, NetLayerInit)
+{
     aclshmemi_net_layer_t layer;
     int ret = aclshmemi_net_layer_init(layer, 0, "instance0");
     EXPECT_EQ(ret, 0);
@@ -98,7 +105,8 @@ TEST_F(TypesTest, NetLayerInit) {
     EXPECT_TRUE(layer.addr_list.empty());
 }
 
-TEST_F(TypesTest, NetLayerSetNetType) {
+TEST_F(TypesTest, NetLayerSetNetType)
+{
     aclshmemi_net_layer_t layer;
     aclshmemi_net_layer_init(layer, 0, "instance0");
     int ret = aclshmemi_net_layer_set_net_type(layer, "MESH");
@@ -106,7 +114,8 @@ TEST_F(TypesTest, NetLayerSetNetType) {
     EXPECT_EQ(layer.net_type, "MESH");
 }
 
-TEST_F(TypesTest, NetLayerSetNetAttr) {
+TEST_F(TypesTest, NetLayerSetNetAttr)
+{
     aclshmemi_net_layer_t layer;
     aclshmemi_net_layer_init(layer, 0, "instance0");
     int ret = aclshmemi_net_layer_set_net_attr(layer, "FULL");
@@ -114,7 +123,8 @@ TEST_F(TypesTest, NetLayerSetNetAttr) {
     EXPECT_EQ(layer.net_attr, "FULL");
 }
 
-TEST_F(TypesTest, NetLayerAddAddr) {
+TEST_F(TypesTest, NetLayerAddAddr)
+{
     aclshmemi_net_layer_t layer;
     aclshmemi_net_layer_init(layer, 0, "instance0");
 
@@ -127,7 +137,8 @@ TEST_F(TypesTest, NetLayerAddAddr) {
     EXPECT_EQ(layer.addr_list.size(), 1);
 }
 
-TEST_F(TypesTest, NetLayerSetAddrAt) {
+TEST_F(TypesTest, NetLayerSetAddrAt)
+{
     aclshmemi_net_layer_t layer;
     aclshmemi_net_layer_init(layer, 0, "instance0");
 
@@ -141,7 +152,7 @@ TEST_F(TypesTest, NetLayerSetAddrAt) {
 
     aclshmemi_net_layer_add_addr(layer, addr1);
     int ret = aclshmemi_net_layer_set_addr_at(layer, addr2, 0);
-    EXPECT_EQ(ret, 0);
+    ASSERT_EQ(ret, 0);
     EXPECT_EQ(layer.addr_list[0].addr, "000000000000002000100000dfdf0028");
 
     ret = aclshmemi_net_layer_set_addr_at(layer, addr1, 1);
@@ -149,7 +160,8 @@ TEST_F(TypesTest, NetLayerSetAddrAt) {
     EXPECT_EQ(layer.addr_list.size(), 2);
 }
 
-TEST_F(TypesTest, NetLayerToString) {
+TEST_F(TypesTest, NetLayerToString)
+{
     aclshmemi_net_layer_t layer;
     aclshmemi_net_layer_init(layer, 0, "instance0");
     aclshmemi_net_layer_set_net_type(layer, "MESH");
@@ -169,7 +181,8 @@ TEST_F(TypesTest, NetLayerToString) {
     EXPECT_TRUE(str.find("000000000000002000100000dfdf0020") != std::string::npos);
 }
 
-TEST_F(TypesTest, RankInit) {
+TEST_F(TypesTest, RankInit)
+{
     aclshmemi_rank_t rank;
     int ret = aclshmemi_rank_init(rank, 0, 1);
     EXPECT_EQ(ret, 0);
@@ -178,7 +191,8 @@ TEST_F(TypesTest, RankInit) {
     EXPECT_TRUE(rank.level_list.empty());
 }
 
-TEST_F(TypesTest, RankAddNetLayer) {
+TEST_F(TypesTest, RankAddNetLayer)
+{
     aclshmemi_rank_t rank;
     aclshmemi_rank_init(rank, 0, 1);
 
@@ -190,7 +204,8 @@ TEST_F(TypesTest, RankAddNetLayer) {
     EXPECT_EQ(rank.level_list.size(), 1);
 }
 
-TEST_F(TypesTest, RankToString) {
+TEST_F(TypesTest, RankToString)
+{
     aclshmemi_rank_t rank;
     aclshmemi_rank_init(rank, 0, 1);
 
@@ -205,7 +220,8 @@ TEST_F(TypesTest, RankToString) {
     EXPECT_TRUE(str.find("\"net_type\": \"MESH\"") != std::string::npos);
 }
 
-TEST_F(TypesTest, RootInfoInit) {
+TEST_F(TypesTest, RootInfoInit)
+{
     aclshmemi_root_info_t root_info;
     int ret = aclshmemi_root_info_init(root_info);
     EXPECT_EQ(ret, 0);
@@ -214,7 +230,8 @@ TEST_F(TypesTest, RootInfoInit) {
     EXPECT_TRUE(root_info.ranks.empty());
 }
 
-TEST_F(TypesTest, RootInfoSetTopoFilePath) {
+TEST_F(TypesTest, RootInfoSetTopoFilePath)
+{
     aclshmemi_root_info_t root_info;
     aclshmemi_root_info_init(root_info);
 
@@ -223,7 +240,8 @@ TEST_F(TypesTest, RootInfoSetTopoFilePath) {
     EXPECT_EQ(root_info.topo_file_path, "/usr/local/Ascend/driver/topo/950/atlas_300a.json");
 }
 
-TEST_F(TypesTest, RootInfoAddRank) {
+TEST_F(TypesTest, RootInfoAddRank)
+{
     aclshmemi_root_info_t root_info;
     aclshmemi_root_info_init(root_info);
 
@@ -235,7 +253,8 @@ TEST_F(TypesTest, RootInfoAddRank) {
     EXPECT_EQ(root_info.ranks.size(), 1);
 }
 
-TEST_F(TypesTest, RootInfoToString) {
+TEST_F(TypesTest, RootInfoToString)
+{
     aclshmemi_root_info_t root_info;
     aclshmemi_root_info_init(root_info);
     aclshmemi_root_info_set_topo_file_path(root_info, "/usr/local/Ascend/driver/topo/test.json");
@@ -251,7 +270,8 @@ TEST_F(TypesTest, RootInfoToString) {
     EXPECT_TRUE(str.find("\"device_id\": 0") != std::string::npos);
 }
 
-TEST_F(TypesTest, RootInfoGetTopoFilePath) {
+TEST_F(TypesTest, RootInfoGetTopoFilePath)
+{
     aclshmemi_root_info_t root_info;
     aclshmemi_root_info_init(root_info);
     aclshmemi_root_info_set_topo_file_path(root_info, "/test/path.json");
@@ -260,7 +280,8 @@ TEST_F(TypesTest, RootInfoGetTopoFilePath) {
     EXPECT_EQ(path, "/test/path.json");
 }
 
-TEST_F(TypesTest, CompleteRootInfoSerialization) {
+TEST_F(TypesTest, CompleteRootInfoSerialization)
+{
     aclshmemi_root_info_t root_info;
     aclshmemi_root_info_init(root_info);
     aclshmemi_root_info_set_topo_file_path(root_info, "/usr/local/Ascend/driver/topo/950/atlas_850_1.json");
