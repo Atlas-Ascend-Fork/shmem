@@ -63,7 +63,6 @@ bash run.sh -pes 2 -op all -type int -elems 1024
 bash run.sh -pes 2 -op put -type uint8 -elems 1048576
 bash run.sh -pes 2 -op get -type int64 -elems 262144
 bash run.sh -pes 2 -op all -type fp32 -elems 262144
-bash run.sh -pes 2 -op put -type uint8 -elems 1048576 -heap_mb 16
 ```
 
 After the case is executed, if `[SUCCESS] put op pass in pe <my_pe>` is displayed, the `put` result verification on the current PE is successful. If `[SUCCESS] get op pass in pe <my_pe>` is displayed, the `get` result verification on the current PE is successful. If `[SUCCESS] sdma_d2h_demo run success in pe <my_pe>` is displayed, the example on the current PE is successfully executed and its resources are released properly.
@@ -87,7 +86,6 @@ If the first eight values in each segment match `expected`, the output shows tha
 | `-op` | `all` | Operation mode. The options are `put`, `get`, and `all`. |
 | `-type` | `int` | Data type. The options are `int`, `uint8`, `int64`, and `fp32`. |
 | `-elems` | `1048576` | Number of elements on each PE. |
-| `-heap_mb` | `16` | SHMEM heap size of each PE, in MB. |
 
 ## Restrictions
 
@@ -100,3 +98,9 @@ For example, to run four PEs, specify `-pes 4`:
 ```bash
 bash run.sh -pes 4 -op put -type uint8 -elems 1048576
 ```
+
+### HOST_SIDE Heap Size Constraint
+
+The `HOST_SIDE` SHMEM heap of each PE must hold the segments of all PEs, with a total size of `-pes * -elems * sizeof(type)` bytes. The sample automatically derives the heap size from this value, rounding it up to 2 MB (huge-page aligned), with 16 MB minimum and 40 GB maximum (that is, `ACLSHMEM_MAX_LOCAL_SIZE`); no manual configuration is needed, and parameter validation fails when the upper limit is exceeded.
+
+For example, with `-pes 8 -elems 1048576`, the heap for `int`/`fp32` and `int64` is automatically derived as 32 MB and 64 MB respectively (`uint8` requires 8 MB, and the 16 MB floor applies).

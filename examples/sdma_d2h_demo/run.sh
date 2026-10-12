@@ -43,7 +43,6 @@ IPPORT="tcp://127.0.0.1:8766"
 TEST_OP="all"
 TEST_TYPE="int"
 ELEM_COUNT="1048576"
-HEAP_MB="16"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -92,15 +91,6 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             ;;
-        -heap_mb)
-            if [ -n "$2" ]; then
-                HEAP_MB="$2"
-                shift 2
-            else
-                echo "Error: -heap_mb requires a value."
-                exit 1
-            fi
-            ;;
         -example)
             if [ -n "$2" ]; then
                 EXAMPLE="$2"
@@ -145,7 +135,7 @@ started_count=0
 for (( idx = 0; idx < PE_SIZE; idx = idx + 1 )); do
     # 多PE样例必须同时拉起多个进程，否则SHMEM初始化和barrier会等待缺失PE。
     "${PROJECT_ROOT}/build/bin/${EXAMPLE}" "${PE_SIZE}" "${idx}" "${IPPORT}" "${TEST_OP}" "${TEST_TYPE}" \
-        "${ELEM_COUNT}" "${HEAP_MB}" &
+        "${ELEM_COUNT}" &
     pid=$!
     pids+=("$pid")
     started_count=$((started_count + 1))

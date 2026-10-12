@@ -63,7 +63,6 @@ bash run.sh -pes 2 -op all -type int -elems 1024
 bash run.sh -pes 2 -op put -type uint8 -elems 1048576
 bash run.sh -pes 2 -op get -type int64 -elems 262144
 bash run.sh -pes 2 -op all -type fp32 -elems 262144
-bash run.sh -pes 2 -op put -type uint8 -elems 1048576 -heap_mb 16
 ```
 
 用例执行完成，打屏信息出现"[SUCCESS] put op pass in pe <my_pe>"，说明当前 PE 的 `put` 结果校验成功；打屏信息出现"[SUCCESS] get op pass in pe <my_pe>"，说明当前 PE 的 `get` 结果校验成功；打屏信息出现"[SUCCESS] sdma_d2h_demo run success in pe <my_pe>"，说明当前 PE 样例执行成功且资源释放正常。
@@ -87,7 +86,6 @@ bash run.sh -pes 2 -op put -type uint8 -elems 1048576 -heap_mb 16
 | `-op` | `all` | 运行模式，支持 `put`、`get`、`all`。 |
 | `-type` | `int` | 数据类型，支持 `int`、`uint8`、`int64`、`fp32`。 |
 | `-elems` | `1048576` | 每个 PE 的元素个数。 |
-| `-heap_mb` | `16` | 每个 PE 的 SHMEM heap 大小，单位 MB。 |
 
 ## 约束限制
 
@@ -100,3 +98,9 @@ bash run.sh -pes 2 -op put -type uint8 -elems 1048576 -heap_mb 16
 ```bash
 bash run.sh -pes 4 -op put -type uint8 -elems 1048576
 ```
+
+### HOST_SIDE heap 大小约束
+
+每个 PE 的 `HOST_SIDE` SHMEM heap 需容纳所有 PE 的 segment，总字节数为 `-pes * -elems * sizeof(type)`。样例会按该字节数自动推导 heap 大小，向上取整到 2 MB（大页对齐），最小 16 MB、上限 40 GB（即 `ACLSHMEM_MAX_LOCAL_SIZE`），无需手动指定；超出上限时参数校验会报错退出。
+
+例如 `-pes 8 -elems 1048576` 时，`int`/`fp32`、`int64` 的 heap 分别自动推导为 32 MB、64 MB（`uint8` 需 8 MB，按 16 MB 下限分配）。
