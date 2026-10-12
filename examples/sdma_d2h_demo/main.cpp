@@ -73,7 +73,7 @@ constexpr uint32_t SDMA_UB_OFFSET = 1024;
 constexpr uint32_t SDMA_UB_SIZE = 64;
 // 默认每个 PE 准备 1024 * 1024 个元素。
 constexpr size_t DEFAULT_ELEM_COUNT = 1024 * 1024;
-// 默认HOST_SIDE heap只需覆盖本样例数据区；缩小默认值可避免1GB级VMM授权先于SDMA数据面验证失败。
+// 自动推导 heap 的下限（MB）；保持小值可避免1GB级VMM授权先于SDMA数据面验证失败。
 constexpr size_t DEFAULT_HEAP_MB = 16;
 constexpr uint64_t BYTES_PER_MB = 1024UL * 1024UL;
 // 每个 PE 写入 pe + 10，方便肉眼区分 PE0/PE1/PE2 的数据。
@@ -180,6 +180,48 @@ bool validate_workload(int n_pes, size_t elem_count, uint64_t local_mem_size)
         return false;
     }
 
+    return true;
+}
+
+// 按HOST_SIDE heap需容纳所有PE segment的规则推导默认 heap：
+// heap_mb = ceil(n_pes * elem_count * sizeof(T) / 2MB) * 2，下限 DEFAULT_HEAP_MB，上限 ACLSHMEM_MAX_LOCAL_SIZE。
+// heap 分配层要求 2MB（ACLSHMEM_PAGE_SIZE）整数倍，ACLSHMEM_EXTRA_SIZE 已对齐，故 local_mem_size 也须对齐。
+bool derive_default_heap_mb(int n_pes, size_t elem_count, const std::string& data_type, size_t* heap_mb)
+{
+    size_t type_size = 0;
+    if (data_type == "int") {
+        type_size = sizeof(int);
+    } else if (data_type == "uint8") {
+        type_size = sizeof(uint8_t);
+    } else if (data_type == "int64") {
+        type_size = sizeof(int64_t);
+    } else if (data_type == "fp32") {
+        type_size = sizeof(float);
+    } else {
+        std::cerr << "Unsupported type: " << data_type << std::endl;
+        return false;
+    }
+
+    size_t pe_count = static_cast<size_t>(n_pes);
+    if (elem_count > std::numeric_limits<size_t>::max() / pe_count) {
+        std::cerr << "Invalid elem_count: total element count overflow" << std::endl;
+        return false;
+    }
+    size_t total_elems = pe_count * elem_count;
+    if (total_elems > std::numeric_limits<size_t>::max() / type_size) {
+        std::cerr << "Invalid elem_count: total byte size overflow" << std::endl;
+        return false;
+    }
+    uint64_t total_bytes = static_cast<uint64_t>(total_elems) * type_size;
+    constexpr uint64_t heap_align_mb = ACLSHMEM_PAGE_SIZE / BYTES_PER_MB;
+    uint64_t required_mb = (total_bytes + ACLSHMEM_PAGE_SIZE - 1) / ACLSHMEM_PAGE_SIZE * heap_align_mb;
+    constexpr uint64_t max_heap_mb = ACLSHMEM_MAX_LOCAL_SIZE / BYTES_PER_MB;
+    if (required_mb > max_heap_mb) {
+        std::cerr << "Invalid elem_count: required heap " << required_mb << "MB exceeds ACLSHMEM_MAX_LOCAL_SIZE ("
+                  << max_heap_mb << "MB), please decrease elem_count or n_pes" << std::endl;
+        return false;
+    }
+    *heap_mb = static_cast<size_t>(std::max<uint64_t>(required_mb, DEFAULT_HEAP_MB));
     return true;
 }
 
@@ -686,7 +728,7 @@ int run_op_by_type(const demo_args_t& args)
 
 void print_usage(const char* program)
 {
-    std::cerr << "Usage: " << program << " <n_pes> <my_pe> <ipport> <op> <type> [elem_count] [heap_mb]" << std::endl;
+    std::cerr << "Usage: " << program << " <n_pes> <my_pe> <ipport> <op> <type> [elem_count]" << std::endl;
     std::cerr << "  op: put | get | all" << std::endl;
     std::cerr << "  type: int | uint8 | int64 | fp32" << std::endl;
 }
@@ -697,15 +739,13 @@ bool parse_and_validate_args(int argc, char* argv[], demo_args_t* args)
         std::cerr << "Invalid args output: nullptr" << std::endl;
         return false;
     }
-    if (argc < INDEX6 || argc > INDEX8) {
+    if (argc < INDEX6 || argc > INDEX7) {
         print_usage(argv[INDEX0]);
         return false;
     }
 
     constexpr int max_int = std::numeric_limits<int>::max();
     constexpr size_t max_kernel_elem_count = static_cast<size_t>(std::numeric_limits<int>::max());
-    constexpr size_t max_heap_mb = std::numeric_limits<uint64_t>::max() / BYTES_PER_MB;
-    size_t heap_mb = DEFAULT_HEAP_MB;
 
     if (!parse_int_arg("n_pes", argv[INDEX1], 1, max_int, &args->n_pes) ||
         !parse_int_arg("my_pe", argv[INDEX2], 0, max_int, &args->my_pe)) {
@@ -739,12 +779,11 @@ bool parse_and_validate_args(int argc, char* argv[], demo_args_t* args)
         print_usage(argv[INDEX0]);
         return false;
     }
-    if (argc == INDEX8 && (!parse_size_arg("elem_count", argv[INDEX6], 1, max_kernel_elem_count, &args->elem_count) ||
-                           !parse_size_arg("heap_mb", argv[INDEX7], 1, max_heap_mb, &heap_mb))) {
-        print_usage(argv[INDEX0]);
+
+    size_t heap_mb = 0;
+    if (!derive_default_heap_mb(args->n_pes, args->elem_count, args->data_type, &heap_mb)) {
         return false;
     }
-
     args->local_mem_size = static_cast<uint64_t>(heap_mb) * BYTES_PER_MB;
 
     if (!validate_workload_by_type(*args)) {
