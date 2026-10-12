@@ -77,7 +77,6 @@ protected:
         for (int rank = 0; rank < handle->npes; ++rank) {
             for (size_t idx = 0; idx < count; ++idx) {
                 output[rank * count + idx] = input[idx];
-                output[rank * count + idx].peer_rank = static_cast<uint32_t>(rank);
             }
         }
         return ACLSHMEM_SUCCESS;
@@ -138,13 +137,11 @@ protected:
         return 0;
     }
 
-    static void AddEndpoint(UdmaTransportManager& manager, uint32_t eid, uint32_t peer, uintptr_t handle)
+    static void AddEndpoint(UdmaTransportManager& manager, uint32_t eid, uintptr_t handle)
     {
-        const auto key = std::make_pair(eid, peer);
         EndpointDesc desc{};
         manager.endpoint_handle_map_[eid] = Handle(handle);
-        manager.endpoint_local_desc_map_[eid] = desc;
-        manager.endpoint_desc_map_[key] = desc;
+        manager.endpoint_desc_map_[eid] = desc;
         manager.endpoint_listen_port_map_[eid] = static_cast<uint16_t>(1000 + handle);
     }
 
@@ -173,12 +170,10 @@ protected:
             local_eid, remote_eid, NetType::TopoFileDesc, net_layer, "instance", "plane", 1});
     }
 
-    static void AddRemoteDescriptor(
-        Exchange& exchange, uint32_t rank, uint32_t index, uint32_t local_rank, uint32_t eid)
+    static void AddRemoteDescriptor(Exchange& exchange, uint32_t rank, uint32_t index, uint32_t eid)
     {
         Descriptor& descriptor = exchange.descs[static_cast<size_t>(rank) * exchange.max_count + index];
         descriptor.valid = 1;
-        descriptor.peer_rank = local_rank;
         descriptor.eid_index = eid;
         descriptor.listen_port = static_cast<uint16_t>(2000 + eid);
     }
@@ -302,7 +297,6 @@ TEST_F(UdmaEndpointExchangeTest, PreservesRankStridePaddingAndTailAcrossChunks)
     for (uint32_t rank = 0; rank < 3; ++rank) {
         for (uint32_t idx = 0; idx < 5; ++idx) {
             const auto& desc = exchange.descs[rank * 5 + idx];
-            EXPECT_EQ(desc.peer_rank, rank);
             EXPECT_EQ(desc.eid_index, idx);
             EXPECT_EQ(desc.valid, idx < 4 ? 1U : 0U);
             EXPECT_EQ(desc.listen_port, 100U + idx);
@@ -321,7 +315,6 @@ TEST_F(UdmaEndpointExchangeTest, SingleChunkMatchesSplitExchange)
     ASSERT_EQ(single.descs.size(), split.descs.size());
     for (size_t idx = 0; idx < split.descs.size(); ++idx) {
         EXPECT_EQ(single.descs[idx].eid_index, split.descs[idx].eid_index);
-        EXPECT_EQ(single.descs[idx].peer_rank, split.descs[idx].peer_rank);
         EXPECT_EQ(single.descs[idx].valid, split.descs[idx].valid);
     }
 }
@@ -337,9 +330,9 @@ TEST_F(UdmaEndpointExchangeTest, StopsAtFailedChunk)
 TEST_F(UdmaEndpointExchangeTest, RegistersOneHeapOnEverySelectedUniqueEndpoint)
 {
     UdmaTransportManager manager;
-    AddEndpoint(manager, 10, 1, 1);
-    AddEndpoint(manager, 11, 1, 2);
-    AddEndpoint(manager, 12, 2, 3);
+    AddEndpoint(manager, 10, 1);
+    AddEndpoint(manager, 11, 2);
+    AddEndpoint(manager, 12, 3);
 
     TransportMemoryRegion region{};
     region.addr = 0x100000;
@@ -354,9 +347,8 @@ TEST_F(UdmaEndpointExchangeTest, RegistersOneHeapOnEverySelectedUniqueEndpoint)
 TEST_F(UdmaEndpointExchangeTest, RegistersSharedLocalEidOnlyOnceAcrossPeers)
 {
     UdmaTransportManager manager;
-    AddEndpoint(manager, 7, 1, 7);
-    AddEndpoint(manager, 7, 2, 7);
-    AddEndpoint(manager, 7, 3, 7);
+    // One local endpoint represents the same EID reused by routes to multiple peers.
+    AddEndpoint(manager, 7, 7);
 
     TransportMemoryRegion region{};
     region.addr = 0x100000;
@@ -366,7 +358,7 @@ TEST_F(UdmaEndpointExchangeTest, RegistersSharedLocalEidOnlyOnceAcrossPeers)
 
     EXPECT_EQ(mem_reg_endpoints_, (std::vector<EndpointHandle>{Handle(7)}));
     EXPECT_EQ(RegisteredEndpointCount(manager, region.addr), 1U);
-    EXPECT_EQ(LogicalEndpointCount(manager), 3U);
+    EXPECT_EQ(LogicalEndpointCount(manager), 1U);
 }
 
 TEST_F(UdmaEndpointExchangeTest, BuildsOneChannelForEveryPeerQpFromFinalRoutes)
@@ -382,10 +374,10 @@ TEST_F(UdmaEndpointExchangeTest, BuildsOneChannelForEveryPeerQpFromFinalRoutes)
     AddRoute(manager, 2, 12, 22, 0);
     AddRoute(manager, 2, 13, 23, 1);
     AddRoute(manager, 2, 12, 22, 0);
-    AddEndpoint(manager, 10, 1, 10);
-    AddEndpoint(manager, 11, 1, 11);
-    AddEndpoint(manager, 12, 2, 12);
-    AddEndpoint(manager, 13, 2, 13);
+    AddEndpoint(manager, 10, 10);
+    AddEndpoint(manager, 11, 11);
+    AddEndpoint(manager, 12, 12);
+    AddEndpoint(manager, 13, 13);
 
     TransportMemoryRegion region{};
     region.addr = 0x200000;
@@ -398,10 +390,10 @@ TEST_F(UdmaEndpointExchangeTest, BuildsOneChannelForEveryPeerQpFromFinalRoutes)
     exchange.max_count = 3;
     exchange.counts = {0, 3, 3};
     exchange.descs.resize(9);
-    AddRemoteDescriptor(exchange, 1, 0, 0, 20);
-    AddRemoteDescriptor(exchange, 1, 1, 0, 21);
-    AddRemoteDescriptor(exchange, 2, 0, 0, 22);
-    AddRemoteDescriptor(exchange, 2, 1, 0, 23);
+    AddRemoteDescriptor(exchange, 1, 0, 20);
+    AddRemoteDescriptor(exchange, 1, 1, 21);
+    AddRemoteDescriptor(exchange, 2, 0, 22);
+    AddRemoteDescriptor(exchange, 2, 1, 23);
 
     std::vector<uint32_t> slots;
     std::vector<uint32_t> dst_pes;

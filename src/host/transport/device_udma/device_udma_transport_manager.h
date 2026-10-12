@@ -79,7 +79,6 @@ private:
     // real entries from the zero padding used to make every rank contribute max_count slots.
     struct ExchangedEndpointDesc {
         uint32_t eid_index{0};
-        uint32_t peer_rank{0};
         uint32_t valid{0};
         uint16_t listen_port{0};
         uint16_t reserved{0};
@@ -121,7 +120,7 @@ private:
         QpRoute default_route{};
         std::vector<QpRoute> qp_routes{};
     };
-    bool CreateEndpoint(uint32_t eid_index, uint32_t peer_rank, const std::array<uint8_t, 16>& target_eid_raw);
+    bool CreateEndpoint(uint32_t eid_index, const std::array<uint8_t, 16>& target_eid_raw);
     Result PrepareOpenDevice(uint32_t device_id, uint32_t rank_count);
     // Allgather the local HCOMM endpoint descriptors into `exchange`.
     Result ExchangeEndpointDescriptors(EndpointExchange& exchange) const;
@@ -210,10 +209,9 @@ private:
     // N x N routing matrix: [rank * rank_count_ + peer] = local-port eid_index `rank` uses to reach
     // `peer`. Only read on the relay path to resolve each (actual_pe, relay_pe) slot's target EID.
     std::vector<int32_t> all_local_routes_;
-    // HCOMM endpoints and memory registrations are local-EID resources and are shared by all peers using that EID.
-    // endpoint_desc_map_ retains the logical (eid_index, peer_rank) bindings required by descriptor exchange.
-    std::map<std::pair<uint32_t, uint32_t>, EndpointDesc> endpoint_desc_map_;
-    std::map<uint32_t, EndpointDesc> endpoint_local_desc_map_;              // eid_index -> endpoint desc
+    // HCOMM endpoints, exchanged descriptors, and memory registrations are local-EID resources,
+    // uniquely identified by the local EID index and shared by all peers using that EID.
+    std::map<uint32_t, EndpointDesc> endpoint_desc_map_;
     std::map<uint32_t, EndpointHandle> endpoint_handle_map_;                // eid_index -> handle
     std::map<uint32_t, uint16_t> endpoint_listen_port_map_;                 // eid_index -> port
     std::map<uint64_t, std::map<uint32_t, HcommMemHandle>> mem_record_map_; // addr -> eid_index -> handle
