@@ -26,7 +26,7 @@ function run_allgather()
 
     cur_dir=${EXAMPLES_DIR}/allgather/
     cd ${cur_dir}
-    bash run.sh -pes 2 -type int
+    bash run.sh -pes 2 -type int32_t
     return $?
 }
 

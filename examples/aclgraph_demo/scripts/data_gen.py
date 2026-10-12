@@ -51,7 +51,9 @@ def gen_golden_data():
         "bfloat16_t": bfloat16
     }
 
-    data_type = type_map.get(args.test_type, 'float16_t')
+    data_type = type_map.get(args.test_type)
+    if data_type is None:
+        raise ValueError(f"unsupported test_type: {args.test_type}, supported types: {list(type_map.keys())}")
     pe_size = args.pe_size
 
     case_num = 24

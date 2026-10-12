@@ -65,11 +65,22 @@ def get_pref_path(path):
 def process_kernel_data():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(script_dir)
-    tiling_df = open_input_file(os.path.join(parent_dir, "results.csv"))
+    results_csv = os.path.join(parent_dir, "results.csv")
+    if not os.path.isfile(results_csv):
+        print(f"no results csv: {results_csv}, skip data statistic")
+        return
+    tiling_df = open_input_file(results_csv)
     print(tiling_df)
 
-    pref_file_list = get_pref_path(os.path.join(parent_dir, "output"))
+    output_dir = os.path.join(parent_dir, "output")
+    if not os.path.isdir(output_dir):
+        print(f"no profiler output dir: {output_dir}, skip data statistic")
+        return
+    pref_file_list = [f for f in get_pref_path(output_dir) if f]
     print(pref_file_list)
+    if not pref_file_list:
+        print("no task_time csv in profiler output, skip data statistic")
+        return
 
     case_num = len(tiling_df)
     perf_output = np.zeros((case_num, )).astype(np.float32)
