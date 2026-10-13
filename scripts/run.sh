@@ -145,6 +145,12 @@ cd "$BUILD_PATH"
 UT_RC=0
 ./bin/aclshmem_unittest "$RANK_SIZE" "$IPPORT" "$GNPU_NUM" "$FIRST_RANK" "$FIRST_NPU"  --gtest_output=xml:test_detail.xml --gtest_filter=${TEST_FILTER} || UT_RC=$?
 
+TOPO_UT_RC=0
+TOPO_UT_TARGET="aclshmem_topo_unittest"
+if [[ -x "./bin/${TOPO_UT_TARGET}" ]]; then
+    "./bin/${TOPO_UT_TARGET}" --gtest_output="xml:${TOPO_UT_TARGET}_detail.xml" --gtest_filter=${TEST_FILTER} || TOPO_UT_RC=$?
+fi
+
 # HBM 内存泄漏检查: UT 运行后再次采样并与基线对比, 检测到泄漏时最终退出码非 0
 HBM_RC=0
 bash "$PROJECT_ROOT/tests/unittest/scripts/hbm_leak_check.sh" after "$FIRST_NPU" "$GNPU_NUM" "$HBM_STATE_FILE" || HBM_RC=$?
@@ -164,5 +170,8 @@ fi
 cd ${CURRENT_DIR}
 if [ "$UT_RC" -ne 0 ]; then
     exit "$UT_RC"
+fi
+if [ "$TOPO_UT_RC" -ne 0 ]; then
+    exit "$TOPO_UT_RC"
 fi
 exit "$HBM_RC"

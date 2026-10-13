@@ -17,8 +17,6 @@ if(NOT SOC_TYPE STREQUAL "Ascend950")
 endif()
 if(NOT SOC_TYPE STREQUAL "Ascend950")
     list(FILTER ACLSHMEM_HOST_FILES EXCLUDE REGEX "host/transport/topo")
-elseif(NOT ACLSHMEM_RDMA_SUPPORT)
-    list(FILTER ACLSHMEM_HOST_FILES EXCLUDE REGEX "host/transport/topo/rootinfo/aclshmemi_hal")
 endif()
 if(NOT (ACLSHMEM_RDMA_SUPPORT AND SOC_TYPE STREQUAL "Ascend950"))
     list(FILTER ACLSHMEM_HOST_FILES EXCLUDE REGEX "host/transport/device_rdma/device_rdma_transport_manager_v2")
@@ -33,11 +31,12 @@ endif()
 
 file(GLOB_RECURSE TEST_HOST_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*_test.cpp")
 file(GLOB_RECURSE TOPO_TEST_HOST_FILES "${CMAKE_CURRENT_SOURCE_DIR}/topo/*_test.cpp")
+
 if(NOT SOC_TYPE STREQUAL "Ascend950")
     list(FILTER TEST_HOST_FILES EXCLUDE REGEX "init/user_buffer_heap_test[.]cpp$")
     list(FILTER TEST_HOST_FILES EXCLUDE REGEX "topo/")
     list(FILTER TEST_HOST_FILES EXCLUDE REGEX "transport/device_udma/")
-elseif(ACLSHMEM_RDMA_SUPPORT)
+else()
     list(FILTER TEST_HOST_FILES EXCLUDE REGEX "topo/")
 endif()
 file(GLOB_RECURSE CONFIG_STORE_FILES ${PROJECT_SOURCE_DIR}/src/host/bootstrap/config_store/*.cpp)
@@ -65,29 +64,20 @@ int main()
 set(CMAKE_REQUIRED_INCLUDES "${_ACLSHMEM_SAVED_CMAKE_REQUIRED_INCLUDES}")
 unset(_ACLSHMEM_SAVED_CMAKE_REQUIRED_INCLUDES)
 
-if(SOC_TYPE STREQUAL "Ascend950" AND NOT ACLSHMEM_RDMA_SUPPORT)
-    file(GLOB_RECURSE TOPO_SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/host/transport/topo/*.cpp)
-    list(FILTER TOPO_SOURCE_FILES EXCLUDE REGEX "root_info_generate")
-    list(FILTER TOPO_SOURCE_FILES EXCLUDE REGEX "aclshmemi_hal")
-    file(GLOB MOCK_TOPO_FILES "${CMAKE_CURRENT_SOURCE_DIR}/topo/mock_hal.cpp")
-else()
-    set(TOPO_SOURCE_FILES "")
-    set(MOCK_TOPO_FILES "")
-endif()
-
-if(SOC_TYPE STREQUAL "Ascend950" AND ACLSHMEM_RDMA_SUPPORT)
-    file(GLOB_RECURSE RDMA_TOPO_SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/host/transport/topo/*.cpp)
-    list(FILTER RDMA_TOPO_SOURCE_FILES EXCLUDE REGEX "root_info_generate")
-    list(FILTER RDMA_TOPO_SOURCE_FILES EXCLUDE REGEX "aclshmemi_hal")
+if(SOC_TYPE STREQUAL "Ascend950")
+    file(GLOB_RECURSE TOPO_UNITTEST_SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/host/transport/topo/*.cpp)
+    list(FILTER TOPO_UNITTEST_SOURCE_FILES EXCLUDE REGEX "root_info_generate")
+    list(FILTER TOPO_UNITTEST_SOURCE_FILES EXCLUDE REGEX "aclshmemi_hal")
+    set(ACLSHMEM_TOPO_UNITTEST_TARGET aclshmem_topo_unittest)
     add_executable(
-        aclshmem_rdma_topo_unittest
+        ${ACLSHMEM_TOPO_UNITTEST_TARGET}
         ${TOPO_TEST_HOST_FILES}
-        ${RDMA_TOPO_SOURCE_FILES}
+        ${TOPO_UNITTEST_SOURCE_FILES}
         ${UNDER_API_FILES}
         ${CMAKE_CURRENT_SOURCE_DIR}/topo/mock_hal.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/topo/topo_test_main.cpp)
-    target_compile_options(aclshmem_rdma_topo_unittest PRIVATE ${CMAKE_CPP_COMPILE_OPTIONS} -g -fprofile-arcs -ftest-coverage)
-    target_include_directories(aclshmem_rdma_topo_unittest PRIVATE
+    target_compile_options(${ACLSHMEM_TOPO_UNITTEST_TARGET} PRIVATE ${CMAKE_CPP_COMPILE_OPTIONS} -g -fprofile-arcs -ftest-coverage)
+    target_include_directories(${ACLSHMEM_TOPO_UNITTEST_TARGET} PRIVATE
         ${PROJECT_SOURCE_DIR}/include/
         ${PROJECT_SOURCE_DIR}/src/
         ${PROJECT_SOURCE_DIR}/src/host
@@ -115,11 +105,11 @@ if(SOC_TYPE STREQUAL "Ascend950" AND ACLSHMEM_RDMA_SUPPORT)
         ${PROJECT_SOURCE_DIR}/src/host/transport/device_sdma
         ${PROJECT_SOURCE_DIR}/src/host/transport/device_udma
         ${PROJECT_SOURCE_DIR}/src/host/transport/topo/rootinfo)
-    target_link_directories(aclshmem_rdma_topo_unittest PRIVATE ${PROJECT_SOURCE_DIR}/3rdparty/googletest/lib)
-    target_link_libraries(aclshmem_rdma_topo_unittest PRIVATE gtest gmock gcov shmem_utils)
+    target_link_directories(${ACLSHMEM_TOPO_UNITTEST_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/3rdparty/googletest/lib)
+    target_link_libraries(${ACLSHMEM_TOPO_UNITTEST_TARGET} PRIVATE gtest gmock gcov shmem_utils)
 endif()
 
-add_library(aclshmem_unittest_host OBJECT ${ACLSHMEM_HOST_FILES} ${TEST_HOST_FILES} ${CONFIG_STORE_FILES} ${TOPO_SOURCE_FILES} ${UNDER_API_FILES} ${MOCK_TOPO_FILES})
+add_library(aclshmem_unittest_host OBJECT ${ACLSHMEM_HOST_FILES} ${TEST_HOST_FILES} ${CONFIG_STORE_FILES} ${UNDER_API_FILES})
 target_compile_definitions(aclshmem_unittest_host PRIVATE ACLSHMEM_UNIT_TEST=1)
 
 if(SOC_TYPE STREQUAL "Ascend950")
