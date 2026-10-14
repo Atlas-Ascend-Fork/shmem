@@ -204,14 +204,16 @@ public:
     explicit TopoQuerier(
         const RootInfo& r, const TopoInfo& t, uint32_t myRank, const std::vector<uint32_t>& rankToLocalId,
         const std::vector<std::vector<SyncEndpoint>>& rankIdxToSyncEndpoint,
-        const std::map<uint32_t, uint32_t>& netLayerPolicy = {}, bool multiLinkEnabled = false)
+        const std::map<uint32_t, uint32_t>& netLayerPolicy = {}, bool multiLinkEnabled = false,
+        const std::vector<uint32_t>* rankToServerId = nullptr)
         : rootInfo_(r),
           topoInfo_(t),
           myRank_(myRank),
           rankToLocalId_(rankToLocalId),
           rankIdxToSyncEndpoint_(rankIdxToSyncEndpoint),
           netLayerPolicy_(netLayerPolicy),
-          multiLinkEnabled_(multiLinkEnabled)
+          multiLinkEnabled_(multiLinkEnabled),
+          rankToServerId_(rankToServerId)
     {}
 
     Result GetEidRoutes(uint32_t targetRank, uint32_t routeCount, std::vector<EidRoute>& routes);
@@ -229,6 +231,7 @@ private:
     const std::vector<std::vector<SyncEndpoint>>& rankIdxToSyncEndpoint_;
     std::map<uint32_t, uint32_t> netLayerPolicy_;
     bool multiLinkEnabled_{false};
+    const std::vector<uint32_t>* rankToServerId_{nullptr};
 };
 
 } // namespace transport

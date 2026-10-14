@@ -487,6 +487,8 @@ int aclshmemi_init_backend::reach_info_init(void*& gva)
     auto quiet_state = reinterpret_cast<aclshmemi_device_quiet_state_t*>(
         reinterpret_cast<uint8_t*>(elem->entity_device_state) + sizeof(aclshmem_device_host_state_t));
     quiet_state->quiet_transport_mask = 0;
+    constexpr uint32_t remoteTransportMask =
+        HYBM_DOP_TYPE_MTE | HYBM_DOP_TYPE_DEVICE_RDMA | HYBM_DOP_TYPE_DEVICE_SDMA | HYBM_DOP_TYPE_DEVICE_UDMA;
 
     for (int32_t i = 0; i < host_state->npes; i++) {
         hybm_data_op_type reaches_types;
@@ -494,6 +496,11 @@ int aclshmemi_init_backend::reach_info_init(void*& gva)
         if (ret != 0) {
             SHM_LOG_ERROR("hybm_entity_reach_types failed: " << ret);
             return ACLSHMEM_SMEM_ERROR;
+        }
+        if (i != host_state->mype &&
+            (static_cast<uint32_t>(reaches_types) & remoteTransportMask) == HYBM_DOP_TYPE_DEFAULT) {
+            SHM_LOG_ERROR("No reachable transport backend for remote rank " << i);
+            return ACLSHMEM_NOT_SUPPORTED;
         }
         host_state->p2p_device_heap_base[i] = (void*)((uintptr_t)gva + aligned * static_cast<uint32_t>(i));
         SHM_LOG_DEBUG("rank " << i << " p2p_heap_base: " << host_state->p2p_device_heap_base[i]);

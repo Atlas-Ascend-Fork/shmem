@@ -1130,8 +1130,8 @@ Result UdmaTransportManager::ExchangeEndpointDescriptors(EndpointExchange& excha
     const auto max_it = std::max_element(exchange.counts.begin(), exchange.counts.end());
     exchange.max_count = (max_it == exchange.counts.end()) ? 0 : *max_it;
     if (exchange.max_count == 0) {
-        SHM_LOG_ERROR("No local hcomm endpoint descriptor was exchanged.");
-        return ACLSHMEM_INNER_ERROR;
+        SHM_LOG_INFO("No UDMA-reachable peer was found; skip endpoint descriptor exchange.");
+        return ACLSHMEM_SUCCESS;
     }
     size_t descriptor_count = 0;
     if (!GetEndpointExchangeSize(rank_count_, exchange.max_count, descriptor_count)) {
@@ -1393,11 +1393,14 @@ Result UdmaTransportManager::BuildDirectChannels(const EndpointExchange& exchang
             continue;
         }
         auto route_it = peer_routes_.find(peer);
-        if (route_it == peer_routes_.end() || route_it->second.qp_routes.size() != qp_num_) {
+        if (route_it == peer_routes_.end()) {
+            SHM_LOG_INFO("Skip UDMA channel creation for unreachable peer rank " << peer);
+            continue;
+        }
+        if (route_it->second.qp_routes.size() != qp_num_) {
             SHM_LOG_ERROR(
-                "Failed to find per-QP EID routes for peer "
-                << peer << ", qpNum = " << qp_num_
-                << ", routeCount = " << (route_it == peer_routes_.end() ? 0 : route_it->second.qp_routes.size()));
+                "Failed to find per-QP EID routes for peer " << peer << ", qpNum = " << qp_num_
+                                                             << ", routeCount = " << route_it->second.qp_routes.size());
             return ACLSHMEM_INNER_ERROR;
         }
         for (uint32_t qp_idx = 0; qp_idx < qp_num_; ++qp_idx) {
@@ -1468,6 +1471,12 @@ Result UdmaTransportManager::AsyncConnect()
             (void)DlHcommApi::HcommChannelDestroy(state.handles.data(), static_cast<uint32_t>(state.handles.size()));
         }
         return channel_build_ret;
+    }
+
+    if (state.handles.empty()) {
+        SHM_LOG_INFO("No UDMA-reachable peer was found for rank " << rank_id_ << "; use another transport backend.");
+        connected_ = true;
+        return ACLSHMEM_SUCCESS;
     }
 
     channel_handles_ = std::move(state.handles);
@@ -1560,6 +1569,7 @@ Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank
     RootInfo root_info;
     TopoInfo topo_info;
     uint32_t local_id = 0;
+    uint32_t local_server_id = 0;
     uint32_t eid_count = 0;
     int32_t phy_id = -1;
 
@@ -1587,6 +1597,13 @@ Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank
         SHM_LOG_ERROR("Failed to find local_id for phy_id: " << phy_id_);
         return ACLSHMEM_INNER_ERROR;
     }
+    uint32_t sd_id = 0;
+    uint32_t super_pod_id = 0;
+    ret = MemSegment::GetDeviceInfo(sd_id, local_server_id, super_pod_id);
+    if (ret != ACLSHMEM_SUCCESS) {
+        SHM_LOG_ERROR("Failed to get local server id for UDMA topology routing, ret = " << ret);
+        return ret;
+    }
     if (!TopoReader::GetEidCount(root_info, eid_count)) {
         SHM_LOG_ERROR("Failed to find eid count from rootinfo.");
         return ACLSHMEM_INNER_ERROR;
@@ -1603,6 +1620,8 @@ Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank
 
     std::vector<uint32_t> local_id_list(rank_count);
     g_boot_handle.allgather(&local_id, local_id_list.data(), sizeof(uint32_t), &g_boot_handle);
+    std::vector<uint32_t> server_id_list(rank_count);
+    g_boot_handle.allgather(&local_server_id, server_id_list.data(), sizeof(uint32_t), &g_boot_handle);
 
     std::vector<std::vector<SyncEndpoint>> rank_idx_to_sync_endpoint;
     if (!BuildSyncEndpoints(root_info, topo_info, rank_count, rank_idx_to_sync_endpoint)) {
@@ -1612,7 +1631,7 @@ Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank
 
     TopoQuerier topo_querier(
         root_info, topo_info, rank_id_, local_id_list, rank_idx_to_sync_endpoint, net_layer_policy_,
-        multi_link_enabled_);
+        multi_link_enabled_, &server_id_list);
 
     // Local outbound EID index toward each peer, later allgathered into the full N x N routing
     // matrix the relay path consumes. INVALID_EID_INDEX marks self / unroutable slots.
@@ -1625,6 +1644,15 @@ Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank
         std::vector<EidRoute> eid_routes;
         const uint32_t route_count = ACLSHMEM_UDMA_RELAY_ENABLED ? 1U : qp_num_;
         const Result route_result = topo_querier.GetEidRoutes(peer, route_count, eid_routes);
+        if (route_result == ACLSHMEM_NOT_SUPPORTED) {
+            if constexpr (!ACLSHMEM_UDMA_RELAY_ENABLED) {
+                SHM_LOG_INFO(
+                    "Skip UDMA endpoint preparation for unreachable peer rank "
+                    << peer << ". The local_id was " << local_id << " and the peer local_id was "
+                    << local_id_list[peer]);
+                continue;
+            }
+        }
         if (route_result != ACLSHMEM_SUCCESS || eid_routes.size() != route_count) {
             SHM_LOG_ERROR(
                 "Failed to resolve the local EID route for peer rank "

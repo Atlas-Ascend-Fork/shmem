@@ -103,6 +103,12 @@ ACLSHMEM_DEVICE void aclshmem_putmem_signal(
         aclshmemx_udma_quiet(pe);
         return;
     }
+    if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&
+        (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {
+        ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");
+        trap();
+        return;
+    }
     /* CopyUB Config Set */
     uint64_t copy_ub = device_state->mte_config.aclshmem_ub;
     uint32_t copy_ub_size = device_state->mte_config.ub_size;
@@ -128,6 +134,12 @@ ACLSHMEM_DEVICE void aclshmem_putmem_signal(
             aclshmemx_udma_quiet(pe);                                                                               \
             return;                                                                                                 \
         }                                                                                                           \
+        if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                          \
+            (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                              \
+            ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                          \
+            trap();                                                                                                 \
+            return;                                                                                                 \
+        }                                                                                                           \
         AscendC::TEventID copy_event_id = (AscendC::TEventID)device_state->mte_config.sync_id;                      \
         uint64_t copy_ub = device_state->mte_config.aclshmem_ub;                                                    \
         uint32_t copy_ub_size = device_state->mte_config.ub_size;                                                   \
@@ -145,6 +157,12 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL);
         int32_t signal, int sig_op, int pe)                                                                           \
     {                                                                                                                 \
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                    \
+        if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                            \
+            (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                                \
+            ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                            \
+            trap();                                                                                                   \
+            return;                                                                                                   \
+        }                                                                                                             \
         AscendC::TEventID copy_event_id = (AscendC::TEventID)device_state->mte_config.sync_id;                        \
         uint64_t copy_ub = device_state->mte_config.aclshmem_ub;                                                      \
         AscendC::LocalTensor<TYPE> ub_tensor;                                                                         \
@@ -164,6 +182,12 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR);
         int32_t signal, int sig_op, int pe)                                                                         \
     {                                                                                                               \
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                  \
+        if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                          \
+            (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                              \
+            ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                          \
+            trap();                                                                                                 \
+            return;                                                                                                 \
+        }                                                                                                           \
         AscendC::TEventID copy_event_id = (AscendC::TEventID)device_state->mte_config.sync_id;                      \
         uint64_t copy_ub = device_state->mte_config.aclshmem_ub;                                                    \
         uint32_t copy_ub_size = device_state->mte_config.ub_size;                                                   \
@@ -181,6 +205,12 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED);
         const non_contiguous_copy_param& copy_params, __gm__ int32_t* sig_addr, int32_t signal, int sig_op, int pe) \
     {                                                                                                               \
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                  \
+        if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                          \
+            (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                              \
+            ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                          \
+            trap();                                                                                                 \
+            return;                                                                                                 \
+        }                                                                                                           \
         AscendC::TEventID copy_event_id = (AscendC::TEventID)device_state->mte_config.sync_id;                      \
         uint64_t copy_ub = device_state->mte_config.aclshmem_ub;                                                    \
         AscendC::LocalTensor<TYPE> ub_tensor;                                                                       \
@@ -216,6 +246,12 @@ ACLSHMEM_DEVICE void aclshmem_putmem_signal_nbi(
             signal, sig_op, pe);
         return;
     }
+    if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&
+        (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {
+        ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");
+        trap();
+        return;
+    }
     /* CopyUB Config Set */
     uint64_t copy_ub = device_state->mte_config.aclshmem_ub;
     uint32_t copy_ub_size = device_state->mte_config.ub_size;
@@ -242,6 +278,12 @@ ACLSHMEM_DEVICE void aclshmem_putmem_signal_nbi(
             aclshmemi_udma_put_signal_nbi(device_state, dst, src, elem_size, sig_addr, signal, sig_op, pe);          \
             return;                                                                                                  \
         }                                                                                                            \
+        if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                           \
+            (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                               \
+            ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                           \
+            trap();                                                                                                  \
+            return;                                                                                                  \
+        }                                                                                                            \
         AscendC::TEventID copy_event_id = (AscendC::TEventID)device_state->mte_config.sync_id;                       \
         uint64_t copy_ub = device_state->mte_config.aclshmem_ub;                                                     \
         uint32_t copy_ub_size = device_state->mte_config.ub_size;                                                    \
@@ -259,6 +301,12 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_NBI);
         int32_t signal, int sig_op, int pe)                                                                           \
     {                                                                                                                 \
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                    \
+        if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                            \
+            (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                                \
+            ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                            \
+            trap();                                                                                                   \
+            return;                                                                                                   \
+        }                                                                                                             \
         AscendC::TEventID copy_event_id = (AscendC::TEventID)device_state->mte_config.sync_id;                        \
         uint64_t copy_ub = device_state->mte_config.aclshmem_ub;                                                      \
         AscendC::LocalTensor<TYPE> ub_tensor;                                                                         \
@@ -278,6 +326,12 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_NBI);
         int32_t signal, int sig_op, int pe)                                                                         \
     {                                                                                                               \
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                  \
+        if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                          \
+            (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                              \
+            ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                          \
+            trap();                                                                                                 \
+            return;                                                                                                 \
+        }                                                                                                           \
         AscendC::TEventID copy_event_id = (AscendC::TEventID)device_state->mte_config.sync_id;                      \
         uint64_t copy_ub = device_state->mte_config.aclshmem_ub;                                                    \
         uint32_t copy_ub_size = device_state->mte_config.ub_size;                                                   \
@@ -295,6 +349,12 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED_NBI);
         const non_contiguous_copy_param& copy_params, __gm__ int32_t* sig_addr, int32_t signal, int sig_op, int pe) \
     {                                                                                                               \
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                  \
+        if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                          \
+            (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                              \
+            ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                          \
+            trap();                                                                                                 \
+            return;                                                                                                 \
+        }                                                                                                           \
         AscendC::TEventID copy_event_id = (AscendC::TEventID)device_state->mte_config.sync_id;                      \
         uint64_t copy_ub = device_state->mte_config.aclshmem_ub;                                                    \
         AscendC::LocalTensor<TYPE> ub_tensor;                                                                       \
