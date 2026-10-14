@@ -28,6 +28,7 @@
 #include <runtime/rt_ffts.h>
 #include "shmem.h"
 
+using CsvFilePath = std::string;
 using CsvDataTable = std::vector<std::vector<std::string>>;
 
 #define INFO_LOG(fmt, args...) fprintf(stdout, "[INFO] " fmt "\n", ##args)
@@ -35,33 +36,33 @@ using CsvDataTable = std::vector<std::vector<std::string>>;
 #define ERROR_LOG(fmt, args...) fprintf(stdout, "[ERROR] " fmt "\n", ##args)
 
 // Macro function for unwinding acl errors.
-#define ACL_CHECK(status)                                                                    \
-    do {                                                                                     \
-        aclError error = status;                                                             \
-        if (error != ACL_ERROR_NONE) {                                                       \
-            std::cerr << __FILE__ << ":" << __LINE__ << " aclError:" << error << std::endl;  \
-        }                                                                                    \
+#define ACL_CHECK(status)                                                                   \
+    do {                                                                                    \
+        aclError error = status;                                                            \
+        if (error != ACL_ERROR_NONE) {                                                      \
+            std::cerr << __FILE__ << ":" << __LINE__ << " aclError:" << error << std::endl; \
+        }                                                                                   \
     } while (0)
 
 // ACL错误检查宏
-#define ACL_CHECK_WITH_RET(cond, log_func, return_expr)                                                           \
-    do {                                                                                                 \
-        if ((cond) != ACL_ERROR_NONE) {                                                                  \
-            log_func;                                                                                    \
-            return_expr;                                                                                 \
-        }                                                                                                \
+#define ACL_CHECK_WITH_RET(cond, log_func, return_expr) \
+    do {                                                \
+        if ((cond) != ACL_ERROR_NONE) {                 \
+            log_func;                                   \
+            return_expr;                                \
+        }                                               \
     } while (0)
 
 // Macro function for unwinding rt errors.
-#define RT_CHECK(status)                                                                     \
-    do {                                                                                     \
-        rtError_t error = status;                                                            \
-        if (error != RT_ERROR_NONE) {                                                        \
-            std::cerr << __FILE__ << ":" << __LINE__ << " rtError:" << error << std::endl;   \
-        }                                                                                    \
+#define RT_CHECK(status)                                                                   \
+    do {                                                                                   \
+        rtError_t error = status;                                                          \
+        if (error != RT_ERROR_NONE) {                                                      \
+            std::cerr << __FILE__ << ":" << __LINE__ << " rtError:" << error << std::endl; \
+        }                                                                                  \
     } while (0)
 
-inline bool ReadFile(const std::string &filePath, void *buffer, size_t bufferSize)
+inline bool ReadFile(const std::string& filePath, void* buffer, size_t bufferSize)
 {
     struct stat sBuf;
     int fileStatus = stat(filePath.data(), &sBuf);
@@ -81,7 +82,7 @@ inline bool ReadFile(const std::string &filePath, void *buffer, size_t bufferSiz
         return false;
     }
 
-    std::filebuf *buf = file.rdbuf();
+    std::filebuf* buf = file.rdbuf();
     size_t size = buf->pubseekoff(0, std::ios::end, std::ios::in);
     if (size == 0) {
         ERROR_LOG("File size is 0");
@@ -94,12 +95,12 @@ inline bool ReadFile(const std::string &filePath, void *buffer, size_t bufferSiz
         return false;
     }
     buf->pubseekpos(0, std::ios::in);
-    buf->sgetn(static_cast<char *>(buffer), size);
+    buf->sgetn(static_cast<char*>(buffer), size);
     file.close();
     return true;
 }
 
-inline bool WriteFile(const std::string &filePath, const void *buffer, size_t size, size_t offset = 0)
+inline bool WriteFile(const std::string& filePath, const void* buffer, size_t size, size_t offset = 0)
 {
     if (buffer == nullptr) {
         ERROR_LOG("Write file failed. Buffer is nullptr.");
@@ -127,7 +128,7 @@ inline bool WriteFile(const std::string &filePath, const void *buffer, size_t si
     }
 
     // write data
-    if (write(fd, static_cast<const char *>(buffer), size) != static_cast<ssize_t>(size)) {
+    if (write(fd, static_cast<const char*>(buffer), size) != static_cast<ssize_t>(size)) {
         std::cerr << "Failed to write to file: " << strerror(errno) << std::endl;
     }
 
@@ -138,8 +139,9 @@ inline bool WriteFile(const std::string &filePath, const void *buffer, size_t si
     return true;
 }
 
-inline int32_t test_set_attr(int32_t my_pe, int32_t n_pes, uint64_t local_mem_size, const char *ip_port, aclshmemx_uniqueid_t default_flag_uid,
-                       aclshmemx_init_attr_t *attributes)
+inline int32_t test_set_attr(
+    int32_t my_pe, int32_t n_pes, uint64_t local_mem_size, const char* ip_port, aclshmemx_uniqueid_t default_flag_uid,
+    aclshmemx_init_attr_t* attributes)
 {
     size_t ip_len = 0;
     if (ip_port != nullptr) {
@@ -154,14 +156,15 @@ inline int32_t test_set_attr(int32_t my_pe, int32_t n_pes, uint64_t local_mem_si
     attributes->n_pes = n_pes;
     attributes->ip_port[ip_len] = '\0';
     attributes->local_mem_size = local_mem_size;
-    attributes->option_attr = {attr_version, ACLSHMEM_DATA_OP_MTE, DEFAULT_TIMEOUT, 
-                               DEFAULT_TIMEOUT, DEFAULT_TIMEOUT};
-    attributes->comm_args = reinterpret_cast<void *>(&default_flag_uid);
+    attributes->option_attr = {attr_version, ACLSHMEM_DATA_OP_MTE, DEFAULT_TIMEOUT, DEFAULT_TIMEOUT, DEFAULT_TIMEOUT};
+    attributes->comm_args = reinterpret_cast<void*>(&default_flag_uid);
     return ACLSHMEM_SUCCESS;
 }
 
-inline bool make_dir(const std::string& path) {
-    if (path.empty()) return true;
+inline bool make_dir(const std::string& path)
+{
+    if (path.empty())
+        return true;
 
     // 尝试创建目录，0755 权限
     if (mkdir(path.c_str(), 0755) == 0) {
@@ -176,27 +179,34 @@ inline bool make_dir(const std::string& path) {
     }
 
     // 目录创建失败，打印错误原因
-    std::cerr << "[ERROR] Failed to create directory '" << path 
-              << "' (errno: " << errno << "): ";
+    std::cerr << "[ERROR] Failed to create directory '" << path << "' (errno: " << errno << "): ";
     switch (errno) {
-        case EACCES: std::cerr << "Permission denied"; break;
-        case EROFS:  std::cerr << "Read-only file system"; break;
-        case ENAMETOOLONG: std::cerr << "Path name too long"; break;
-        default: std::cerr << "Unknown error";
+        case EACCES:
+            std::cerr << "Permission denied";
+            break;
+        case EROFS:
+            std::cerr << "Read-only file system";
+            break;
+        case ENAMETOOLONG:
+            std::cerr << "Path name too long";
+            break;
+        default:
+            std::cerr << "Unknown error";
     }
     std::cerr << std::endl;
     return false;
 }
 
-inline std::string get_dir(const std::string& filename) {
+inline std::string get_dir(const std::string& filename)
+{
     size_t pos = filename.find_last_of("/");
-    if (pos == std::string::npos) return "";
+    if (pos == std::string::npos)
+        return "";
     return filename.substr(0, pos);
 }
 
-
-inline void write_csv(const std::string& filename, const std::vector<std::vector<std::string>>& data) {
-
+inline void write_csv(const CsvFilePath& filename, const CsvDataTable& data)
+{
     std::string dir = get_dir(filename);
     if (!dir.empty() && !make_dir(dir)) {
         std::cerr << "Error: create dir failed: " << dir << std::endl;
@@ -223,39 +233,43 @@ inline void write_csv(const std::string& filename, const std::vector<std::vector
     out_file.close();
 }
 
-inline std::string int_to_string(int value) {
+inline std::string int_to_string(int value)
+{
     std::ostringstream oss;
     oss << value;
     return oss.str();
 }
 
-inline std::string uint64_to_string(uint64_t value) {
+inline std::string uint64_to_string(uint64_t value)
+{
     std::ostringstream oss;
     oss << value;
     return oss.str();
 }
 
-inline std::string float_to_string(float value) {
+inline std::string float_to_string(float value)
+{
     std::ostringstream oss;
     oss << value;
     return oss.str();
 }
 
-inline std::string double_to_string(double value) {
+inline std::string double_to_string(double value)
+{
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(4) << value;
     return oss.str();
 }
 
-inline void collect_prof_data_to_csv(aclshmem_prof_pe_t *out_profs, int frame_id, int block_size, 
-                                    uint64_t datasize, int g_npus, int ub_size,
-                                    std::vector<std::vector<std::string>>& prof_csv_data)
+inline void collect_prof_data_to_csv(
+    aclshmem_prof_pe_t* out_profs, int frame_id, int block_size, uint64_t datasize, int g_npus, int ub_size,
+    CsvDataTable& prof_csv_data)
 {
     if (out_profs == nullptr) {
         return;
     }
-    
-    const char *soc_name = aclrtGetSocName();
+
+    const char* soc_name = aclrtGetSocName();
     int64_t cycle2us = 50;
     std::string soc_str;
     if (soc_name != nullptr) {
@@ -265,58 +279,52 @@ inline void collect_prof_data_to_csv(aclshmem_prof_pe_t *out_profs, int frame_id
         }
     }
     INFO_LOG("SocName: %s, cycle2us: %lld", soc_str.c_str(), (long long)cycle2us);
-    
+
     double max_core_time = 0.0;
     std::vector<double> core_times;
-    
+
     int actual_blocks = std::min(block_size, ACLSHMEM_CYCLE_PROF_MAX_BLOCK);
-    
+
     for (int32_t block_id = 0; block_id < actual_blocks; block_id++) {
-        aclshmem_prof_block_t *prof = &out_profs->block_prof[block_id];
+        aclshmem_prof_block_t* prof = &out_profs->block_prof[block_id];
 
         if (prof->ccount[frame_id] == 0) {
             continue;
         }
 
         double avg_us = (double)prof->cycles[frame_id] / prof->ccount[frame_id] / cycle2us;
-        
+
         if (avg_us > max_core_time) {
             max_core_time = avg_us;
         }
         core_times.push_back(avg_us);
     }
-    
+
     double bandwidth = 0.0;
     if (max_core_time > 0) {
         bandwidth = (double)datasize * (double)block_size / max_core_time * 1000000.0 / 1024.0 / 1024.0 / 1024.0;
     }
-    
-    std::vector<std::string> sub_data = {
-        int_to_string(datasize), 
-        int_to_string(g_npus), 
-        int_to_string(block_size), 
-        int_to_string(ub_size),
-        double_to_string(bandwidth),
-        double_to_string(max_core_time)
-    };
-    
+
+    std::vector<std::string> sub_data = {int_to_string(datasize),     int_to_string(g_npus),
+                                         int_to_string(block_size),   int_to_string(ub_size),
+                                         double_to_string(bandwidth), double_to_string(max_core_time)};
+
     for (size_t i = 0; i < core_times.size(); i++) {
         sub_data.push_back(double_to_string(core_times[i]));
     }
-    
+
     prof_csv_data.push_back(sub_data);
 }
 
-inline void collect_prof_data_to_csv_v2(const aclshmem_prof_pe_t *out_profs, int frame_id,
-                                        uint64_t datasize, int block_size, int g_npus_arg,
-                                        int ub_size, int loop_count, bool compute_bandwidth,
-                                        std::vector<std::vector<std::string>> &prof_csv_data)
+inline void collect_prof_data_to_csv_v2(
+    const aclshmem_prof_pe_t* out_profs, int frame_id, uint64_t datasize, int block_size, int g_npus_arg, int ub_size,
+    int loop_count, bool compute_bandwidth, CsvDataTable& prof_csv_data)
 {
     if (out_profs == nullptr) {
         return;
     }
 
-    const char *soc_name = aclrtGetSocName();
+    const char* soc_name = aclrtGetSocName();
     int64_t cycle2us = 50;
     if (soc_name != nullptr && std::string(soc_name).find("Ascend950") != std::string::npos) {
         cycle2us = 1000;
@@ -327,7 +335,7 @@ inline void collect_prof_data_to_csv_v2(const aclshmem_prof_pe_t *out_profs, int
     const int actual_blocks = std::min(block_size, ACLSHMEM_CYCLE_PROF_MAX_BLOCK);
 
     for (int32_t block_id = 0; block_id < actual_blocks; block_id++) {
-        const aclshmem_prof_block_t *prof = &out_profs->block_prof[block_id];
+        const aclshmem_prof_block_t* prof = &out_profs->block_prof[block_id];
         if (prof->ccount[frame_id] == 0) {
             continue;
         }
@@ -348,19 +356,15 @@ inline void collect_prof_data_to_csv_v2(const aclshmem_prof_pe_t *out_profs, int
     double bandwidth_gb = 0.0;
     double bandwidth_gib = 0.0;
     if (compute_bandwidth && max_core_time > 0) {
-        const double bytes_per_sec = static_cast<double>(datasize) * static_cast<double>(block_size)
-                                     / max_core_time * 1000000.0;
+        const double bytes_per_sec =
+            static_cast<double>(datasize) * static_cast<double>(block_size) / max_core_time * 1000000.0;
         bandwidth_gb = bytes_per_sec / 1000.0 / 1000.0 / 1000.0;
         bandwidth_gib = bytes_per_sec / 1024.0 / 1024.0 / 1024.0;
     }
 
     std::vector<std::string> row = {
-        uint64_to_string(datasize),
-        int_to_string(g_npus_arg),
-        int_to_string(block_size),
-        int_to_string(ub_size),
-        double_to_string(bandwidth_gb),
-        double_to_string(bandwidth_gib),
+        uint64_to_string(datasize),      int_to_string(g_npus_arg),      int_to_string(block_size),
+        int_to_string(ub_size),          double_to_string(bandwidth_gb), double_to_string(bandwidth_gib),
         double_to_string(max_core_time),
     };
     for (double core_time : core_times) {
@@ -369,7 +373,7 @@ inline void collect_prof_data_to_csv_v2(const aclshmem_prof_pe_t *out_profs, int
     prof_csv_data.push_back(row);
 }
 
-inline std::vector<int> parse_block_list(const char *block_list_str)
+inline std::vector<int> parse_block_list(const char* block_list_str)
 {
     std::vector<int> block_sizes;
     if (block_list_str == nullptr || block_list_str[0] == '\0') {
@@ -380,7 +384,8 @@ inline std::vector<int> parse_block_list(const char *block_list_str)
     size_t start = 0;
     while (start < list_str.size()) {
         size_t comma_pos = list_str.find(',', start);
-        std::string token = list_str.substr(start, comma_pos == std::string::npos ? std::string::npos : comma_pos - start);
+        std::string token =
+            list_str.substr(start, comma_pos == std::string::npos ? std::string::npos : comma_pos - start);
         if (!token.empty()) {
             int block_size = std::atoi(token.c_str());
             if (block_size <= 0) {
@@ -397,7 +402,7 @@ inline std::vector<int> parse_block_list(const char *block_list_str)
     return block_sizes;
 }
 
-inline void print_block_sizes(const std::vector<int> &block_sizes_arg)
+inline void print_block_sizes(const std::vector<int>& block_sizes_arg)
 {
     std::cout << "核数列表: ";
     for (size_t i = 0; i < block_sizes_arg.size(); ++i) {

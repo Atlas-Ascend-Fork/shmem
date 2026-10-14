@@ -11,6 +11,7 @@
 #include "kernel_operator.h"
 #include "acl/acl.h"
 #include "shmem.h"
+#include "mstx_example_report.h"
 #include "utils/prof/shmemi_prof.h"
 
 #include <type_traits>
@@ -33,9 +34,18 @@ constexpr int64_t SDMA_ISSUE_LIMIT = 256;
 constexpr uint64_t MIN_SDMA_BYTES = 2 * 1024 * 1024;
 constexpr int64_t COMBINE_ASSIST_FIELDS = 3;
 constexpr int64_t COMBINE_ALIGN_BYTES = 32;
-constexpr int64_t COMBINE_SLOT_INT32 = COMBINE_ALIGN_BYTES / static_cast<int64_t>(sizeof(int32_t));
-constexpr uint32_t COMBINE_STATUS_UB_OFFSET = 32;
+constexpr int64_t COMBINE_STATUS_SLOT_BYTES = 64;
+constexpr int64_t COMBINE_SLOT_INT32 = COMBINE_STATUS_SLOT_BYTES / static_cast<int64_t>(sizeof(int32_t));
+// Keep the 64-byte READY buffer below DIRECT_UB_OFFSET (64).
+constexpr uint32_t COMBINE_STATUS_UB_OFFSET = 0;
 constexpr int32_t COMBINE_STATUS_READY = 1;
+
+#if defined(__DAV_C220_VEC__) || defined(__DAV_C220_CUBE__)
+constexpr uint64_t COMBINE_CYCLES_PER_US = 50;
+#else
+constexpr uint64_t COMBINE_CYCLES_PER_US = 1000;
+#endif
+constexpr uint64_t COMBINE_STATUS_WAIT_TIMEOUT_CYCLES = 60ULL * 1000 * 1000 * COMBINE_CYCLES_PER_US;
 
 ACLSHMEM_DEVICE int64_t CombineAlignUp(int64_t value, int64_t alignment)
 {
@@ -90,6 +100,24 @@ ACLSHMEM_DEVICE uint64_t CombineThresholdNum(
     return remote_tokens * static_cast<uint64_t>(h) * static_cast<uint64_t>(elem_size);
 }
 
+ACLSHMEM_DEVICE bool CombineWaitStatus(__gm__ int32_t* status_addr, int64_t rank, int64_t slot)
+{
+    EXAMPLE_MSTX_FUSE_SCOPE_START();
+    const uint64_t start_cycles = static_cast<uint64_t>(AscendC::GetSystemCycle());
+    while (static_cast<uint64_t>(AscendC::GetSystemCycle()) - start_cycles < COMBINE_STATUS_WAIT_TIMEOUT_CYCLES) {
+        dcci_cacheline(reinterpret_cast<__gm__ uint8_t*>(status_addr));
+        if (*reinterpret_cast<__gm__ volatile int32_t*>(status_addr) == COMBINE_STATUS_READY) {
+            EXAMPLE_MSTX_FUSE_SCOPE_END();
+            EXAMPLE_MSTX_SIGNAL_WAIT_REPORT(status_addr, ACLSHMEM_CMP_EQ, COMBINE_STATUS_READY);
+            return true;
+        }
+    }
+    EXAMPLE_MSTX_FUSE_SCOPE_END();
+    aclshmemi_kernel_abort(
+        "combine READY wait timeout: rank=%d slot=%d\n", static_cast<int>(rank), static_cast<int>(slot));
+    return false;
+}
+
 template <typename T>
 ACLSHMEM_DEVICE void combine_classic(
     uint64_t fftsAddr, __gm__ T* expand_x, __gm__ int32_t* assist_info_for_combine, __gm__ int32_t* ep_recv_count,
@@ -110,7 +138,8 @@ ACLSHMEM_DEVICE void combine_classic(
     const int64_t slot_num = bs * k;
     const int64_t data_stride =
         CombineAlignUp(h * static_cast<int64_t>(sizeof(T)), COMBINE_ALIGN_BYTES) / static_cast<int64_t>(sizeof(T));
-    const int64_t data_bytes = slot_num * data_stride * static_cast<int64_t>(sizeof(T));
+    const int64_t data_bytes =
+        CombineAlignUp(slot_num * data_stride * static_cast<int64_t>(sizeof(T)), COMBINE_STATUS_SLOT_BYTES);
 
     __gm__ T* data_base = (__gm__ T*)shmem_window;
     __gm__ int32_t* status_base = (__gm__ int32_t*)(shmem_window + data_bytes);
@@ -234,14 +263,18 @@ ACLSHMEM_DEVICE void combine_classic(
     if (perf_mode != 0) {
         SHMEMI_PROF_END(comm_frame_id);
     }
+    // Match dispatch's stage boundary: all AIVs must finish publishing payload
+    // and READY signals before any AIV starts waiting on the receive window.
+    aclshmemi_sync_core_soft();
 
     // Stage 2: wait for every topK result of each local token and reduce with expert_scales.
     for (int64_t token_id = aiv_index; token_id < bs; token_id += GetBlockNum()) {
         for (int64_t topk_id = 0; topk_id < k; ++topk_id) {
             const int64_t slot = token_id * k + topk_id;
             for (int64_t status_idx = 0; status_idx < COMBINE_SLOT_INT32; ++status_idx) {
-                aclshmem_signal_wait_until(
-                    status_base + slot * COMBINE_SLOT_INT32 + status_idx, ACLSHMEM_CMP_EQ, COMBINE_STATUS_READY);
+                if (!CombineWaitStatus(status_base + slot * COMBINE_SLOT_INT32 + status_idx, my_rank, slot)) {
+                    return;
+                }
             }
         }
 

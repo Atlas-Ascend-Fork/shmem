@@ -19,6 +19,7 @@
 #include "param.h"
 #include "shmem.h"
 #include "utils.h"
+#include "sdma_preflight.h"
 #include "moe_perf_host.h"
 
 #include "dispatch_kernel.h"
@@ -470,12 +471,23 @@ int main(int argc, char* argv[])
     ACL_CHECK(aclInit(nullptr));
     ACL_CHECK(aclrtSetDevice(device_id));
 
+    if (!CheckSdmaAvailable(static_cast<uint32_t>(args.pe_size), "DispatchDoubleplane")) {
+        ACL_CHECK(aclrtResetDevice(device_id));
+        ACL_CHECK(aclFinalize());
+        return 1;
+    }
+
     aclshmemx_init_attr_t attributes;
     test_set_attr(args.pe_id, args.pe_size, 1024UL * 1024UL * 1024, ipport, default_flag_uid, &attributes);
     attributes.option_attr.data_op_engine_type =
         static_cast<data_op_engine_type_t>(ACLSHMEM_DATA_OP_MTE | ACLSHMEM_DATA_OP_SDMA);
-    ACL_CHECK(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_SDMA, static_cast<uint32_t>(args.pe_size)));
-    ACL_CHECK(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes));
+    const int32_t init_ret = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes);
+    if (init_ret != ACLSHMEM_SUCCESS) {
+        std::cerr << "[DispatchDoubleplane] SDMA SHMEM initialization failed, ret=" << init_ret << std::endl;
+        ACL_CHECK(aclrtResetDevice(device_id));
+        ACL_CHECK(aclFinalize());
+        return 1;
+    }
 
     int status = 0;
     if (std::string(data_type) == "int" || std::string(data_type) == "int32_t") {
