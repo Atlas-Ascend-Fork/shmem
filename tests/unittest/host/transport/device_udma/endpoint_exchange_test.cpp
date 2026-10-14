@@ -408,6 +408,41 @@ TEST_F(UdmaEndpointExchangeTest, BuildsOneChannelForEveryPeerQpFromFinalRoutes)
     EXPECT_EQ(qp_indices, (std::vector<uint32_t>{0, 1, 2, 0, 1, 2}));
 }
 
+TEST_F(UdmaEndpointExchangeTest, SkipsPeersWithoutUdmaRoutes)
+{
+    UdmaTransportManager manager;
+    ConfigureManager(manager, 0, 3, 2);
+
+    AddRoute(manager, 1, 10, 20, 0);
+    AddRoute(manager, 1, 11, 21, 1);
+    AddEndpoint(manager, 10, 10);
+    AddEndpoint(manager, 11, 11);
+
+    TransportMemoryRegion region{};
+    region.addr = 0x200000;
+    region.size = 0x4000;
+    region.flags = REG_MR_FLAG_HBM;
+    ASSERT_EQ(manager.RegisterMemoryRegion(region), ACLSHMEM_SUCCESS);
+    ASSERT_EQ(mem_reg_endpoints_.size(), 2U);
+
+    Exchange exchange;
+    exchange.max_count = 2;
+    exchange.counts = {0, 2, 0};
+    exchange.descs.resize(6);
+    AddRemoteDescriptor(exchange, 1, 0, 20);
+    AddRemoteDescriptor(exchange, 1, 1, 21);
+
+    std::vector<uint32_t> slots;
+    std::vector<uint32_t> dst_pes;
+    std::vector<uint32_t> qp_indices;
+    ASSERT_EQ(BuildDirect(manager, exchange, slots, dst_pes, qp_indices), ACLSHMEM_SUCCESS);
+
+    EXPECT_EQ(channel_endpoints_, (std::vector<EndpointHandle>{Handle(10), Handle(11)}));
+    EXPECT_EQ(slots, (std::vector<uint32_t>{1, 1}));
+    EXPECT_EQ(dst_pes, (std::vector<uint32_t>{1, 1}));
+    EXPECT_EQ(qp_indices, (std::vector<uint32_t>{0, 1}));
+}
+
 } // namespace device
 } // namespace transport
 } // namespace shm

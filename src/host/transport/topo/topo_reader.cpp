@@ -938,11 +938,13 @@ const SyncEndpoint* FindEndpointByPortPlaneAndFabric(
         if (fabric != TopoFabric::Mesh && endpoint.planeId != localEndpoint.planeId) {
             continue;
         }
+        // CLOS endpoints are usable only inside the same rootinfo network instance.
+        // This applies to merged TOPO_FILE_DESC endpoints as well as explicit CLOS
+        // endpoints; otherwise equal server-local topology IDs from another machine
+        // can be combined into a route which HCOMM cannot actually connect.
         if (fabric == TopoFabric::Clos &&
-            ((endpoint.netType == NetType::Clos && endpoint.netLayer != netLayer) ||
-             ((localEndpoint.netType == NetType::Clos || endpoint.netType == NetType::Clos) &&
-              (localEndpoint.netLayer != endpoint.netLayer ||
-               localEndpoint.netInstanceId != endpoint.netInstanceId)))) {
+            (endpoint.netLayer != netLayer || localEndpoint.netLayer != endpoint.netLayer ||
+             localEndpoint.netInstanceId != endpoint.netInstanceId)) {
             continue;
         }
 
@@ -1182,6 +1184,15 @@ bool TopoQuerier::GetEidRouteMesh1D(uint32_t targetRank, EidRoute& route)
         return false;
     }
 
+    if (rankToServerId_ != nullptr && myRank_ < rankToServerId_->size() && targetRank < rankToServerId_->size() &&
+        (*rankToServerId_)[myRank_] != (*rankToServerId_)[targetRank]) {
+        SHM_LOG_DEBUG(
+            "Mesh1D route skipped, server mismatch for rank " << myRank_ << " (" << (*rankToServerId_)[myRank_]
+                                                              << ") and target rank " << targetRank << " ("
+                                                              << (*rankToServerId_)[targetRank] << ").");
+        return false;
+    }
+
     // Driver Mesh edges use server-local IDs, so TOPO_FILE_DESC must retain
     // the layer-0 instance boundary before those IDs are matched.
     const std::string myInstance = MeshNetInstanceId(topoInfo_, rankIdxToSyncEndpoint_, myRank_);
@@ -1334,12 +1345,12 @@ Result TopoQuerier::ResolveEidRoutes(uint32_t targetRank, uint32_t routeCount, s
     }
 
     if (routeChoices.empty()) {
-        SHM_LOG_ERROR(
+        SHM_LOG_INFO(
             "EID route failed, no usable route choices for rank "
             << myRank_ << " to target rank " << targetRank << ", hasMesh=" << hasMesh
             << ", closCandidateCount=" << candidates.size() << ", configuredPolicyCount=" << netLayerPolicy_.size()
             << ", multiLink=" << multiLinkEnabled_);
-        return ACLSHMEM_INNER_ERROR;
+        return ACLSHMEM_NOT_SUPPORTED;
     }
 
     routes.reserve(routeCount);

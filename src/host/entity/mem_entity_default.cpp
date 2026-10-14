@@ -936,8 +936,14 @@ hybm_data_op_type MemEntityDefault::CanReachDataOperators(uint32_t remoteRank) c
     if ((options_.bmDataOpType & HYBM_DOP_TYPE_DEVICE_RDMA) != 0) {
         supportDataOp |= HYBM_DOP_TYPE_DEVICE_RDMA;
     }
-    // UDMA does not support self-send; keep the local rank reachable through MTE only.
-    if (remoteRank != options_.rankId && sdmaReach && ((options_.bmDataOpType & HYBM_DOP_TYPE_DEVICE_UDMA) != 0)) {
+    // UDMA does not support self-send. A peer is UDMA-reachable only when route preparation
+    // resolved at least one QP route; otherwise selection falls through to another reachable backend.
+    uint32_t netLayer = 0;
+    const bool udmaReach =
+        remoteRank != options_.rankId && sdmaReach && ((options_.bmDataOpType & HYBM_DOP_TYPE_DEVICE_UDMA) != 0) &&
+        transportManager_ != nullptr &&
+        transportManager_->GetQpNetLayer(ACLSHMEM_DATA_OP_UDMA, remoteRank, 0, netLayer) == ACLSHMEM_SUCCESS;
+    if (udmaReach) {
         supportDataOp |= HYBM_DOP_TYPE_DEVICE_UDMA;
     }
 

@@ -127,6 +127,32 @@ TEST_F(UdmaRouteTest, UbxDefaultMixedAndRepeatedClos)
     EXPECT_EQ(routes[1].netLayer, 1U);
 }
 
+TEST_F(UdmaRouteTest, UbxClosRejectsPeerFromAnotherNetworkInstance)
+{
+    for (auto& root : roots) {
+        root.levels.push_back(std::make_shared<LevelInfo>(LevelInfo{0, "local-domain", NetType::TopoFileDesc, ""}));
+    }
+    Add(NetType::Clos, "clos", 1, 11, 2, 2, 0, "local-domain");
+    endpoints[0][0].netType = NetType::TopoFileDesc;
+    endpoints[1][0].netType = NetType::TopoFileDesc;
+    endpoints[1][0].netInstanceId = "remote-domain";
+
+    TopoQuerier querier(roots[0], topo, 0, localIds, endpoints, {}, true);
+    std::vector<EidRoute> routes;
+    EXPECT_EQ(querier.GetEidRoutes(1, 1, routes), ACLSHMEM_NOT_SUPPORTED);
+    EXPECT_TRUE(routes.empty());
+}
+
+TEST_F(UdmaRouteTest, MeshRejectsPeerFromAnotherServer)
+{
+    Add(NetType::Mesh, "mesh", 0, 10, 1, 1, 0);
+    const std::vector<uint32_t> serverIds{1, 2};
+    TopoQuerier querier(roots[0], topo, 0, localIds, endpoints, {}, false, &serverIds);
+    std::vector<EidRoute> routes;
+    EXPECT_EQ(querier.GetEidRoutes(1, 1, routes), ACLSHMEM_NOT_SUPPORTED);
+    EXPECT_TRUE(routes.empty());
+}
+
 TEST_F(UdmaRouteTest, PodSortsShuffledPlanesAndKeepsCustomSelection)
 {
     Add(NetType::Clos, "small", 2, 12, 2, 2);
@@ -328,7 +354,7 @@ TEST_F(UdmaRouteTest, RejectsIpAddressCandidatesForDirectUdma)
 
     TopoQuerier querier(roots[0], topo, 0, localIds, endpoints, {}, true);
     std::vector<EidRoute> routes;
-    EXPECT_EQ(querier.GetEidRoutes(1, 1, routes), ACLSHMEM_INNER_ERROR);
+    EXPECT_EQ(querier.GetEidRoutes(1, 1, routes), ACLSHMEM_NOT_SUPPORTED);
     EXPECT_TRUE(routes.empty());
 }
 
