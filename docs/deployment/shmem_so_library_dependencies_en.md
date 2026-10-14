@@ -15,7 +15,7 @@ This guide is intended for development and O&M personnel in the Linux environmen
 | `libshmem.so` | Main SHMEM function library, which provides external core APIs| Yes|
 | `aclshmem_bootstrap_config_store.so` | Default/Unique ID boot initialization capability| Yes|
 | `aclshmem_bootstrap_mpi.so` | MPI boot initialization capability (only in the MPI scenario)| No|
-| `libshmem_utils.so` (if the build product exists)| Library of common tools and basic capability| Yes|
+| `libshmem_utils.so` | Library of common tools and basic capability| Yes|
 
 ### 1.2.1 External .so Files That Are Dynamically Loaded at Runtime (Visible in the Target Environment)
 | File Name| Source| Purpose|
@@ -58,8 +58,8 @@ graph TD
     classDef strong fill:#FDE2E2,stroke:#C53030,stroke-width:1px;
     classDef weak fill:#E6FFFA,stroke:#2C7A7B,stroke-width:1px;
 
-    class A,C,E,F,G,H,I,J,K,L,M,N,O strong;
-    class B,D,P weak;
+    class A,B,C,E,F,G,H,I,J,K,L,M,N,O strong;
+    class D,P weak;
 ```
 
 ## 1.4 Deployment Procedure (Linux)

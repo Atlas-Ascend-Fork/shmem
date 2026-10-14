@@ -18,7 +18,7 @@
 | `libshmem.so` | SHMEM主功能库，提供对外核心接口 | 是 |
 | `aclshmem_bootstrap_config_store.so` | 默认/UniqueID引导初始化能力 | 是 |
 | `aclshmem_bootstrap_mpi.so` | MPI引导初始化能力（仅MPI场景） | 否 |
-| `libshmem_utils.so`（如构建产物存在） | 公共工具与基础能力库 | 是 |
+| `libshmem_utils.so` | 公共工具与基础能力库 | 是 |
 
 ### 1.2.1 运行时动态加载的外部SO（需在目标环境可见）
 
@@ -65,8 +65,8 @@ graph TD
     classDef strong fill:#FDE2E2,stroke:#C53030,stroke-width:1px;
     classDef weak fill:#E6FFFA,stroke:#2C7A7B,stroke-width:1px;
 
-    class A,C,E,F,G,H,I,J,K,L,M,N,O strong;
-    class B,D,P weak;
+    class A,B,C,E,F,G,H,I,J,K,L,M,N,O strong;
+    class D,P weak;
 ```
 
 ## 1.4 部署步骤（Linux）
