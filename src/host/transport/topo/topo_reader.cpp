@@ -962,7 +962,8 @@ bool ResolveRouteByPortsAndPlane(
     const TopoInfo& topoInfo, const RootInfo& rootInfo, const std::vector<SyncEndpoint>& localEndpoints,
     const std::vector<SyncEndpoint>& peerEndpoints, const std::string& localPort, const std::string& remotePort,
     TopoFabric fabric, uint32_t& localEidIndex, EidData& localEidRaw, uint32_t& remoteEidIndex, std::string& planeId,
-    uint32_t netLayer = 0, std::string* netInstanceId = nullptr, uint32_t* resolvedNetLayer = nullptr)
+    uint32_t netLayer = 0, std::string* netInstanceId = nullptr, uint32_t* resolvedNetLayer = nullptr,
+    size_t* resolvedPortCount = nullptr)
 {
     const SyncEndpoint* bestLocalEndpoint = nullptr;
     const SyncEndpoint* bestPeerEndpoint = nullptr;
@@ -1013,6 +1014,9 @@ bool ResolveRouteByPortsAndPlane(
     if (resolvedNetLayer != nullptr) {
         *resolvedNetLayer = bestLocalEndpoint->netLayer;
     }
+    if (resolvedPortCount != nullptr) {
+        *resolvedPortCount = std::min(bestLocalEndpoint->ports.size(), bestPeerEndpoint->ports.size());
+    }
     return true;
 }
 
@@ -1062,9 +1066,11 @@ std::vector<ClosRouteCandidate> BuildClosRouteCandidates(
                 uint32_t remoteEidIndex = 0;
                 std::string planeId;
                 std::string netInstanceId;
+                size_t resolvedPortCount = 0;
                 if (!ResolveRouteByPortsAndPlane(
                         topoInfo, rootInfo, myEndpoints, peerEndpoints, localPort, remotePort, TopoFabric::Clos,
-                        localEidIndex, localEidRaw, remoteEidIndex, planeId, myEdge.netLayer, &netInstanceId)) {
+                        localEidIndex, localEidRaw, remoteEidIndex, planeId, myEdge.netLayer, &netInstanceId, nullptr,
+                        &resolvedPortCount)) {
                     continue;
                 }
                 ClosRouteCandidate candidate;
@@ -1089,7 +1095,7 @@ std::vector<ClosRouteCandidate> BuildClosRouteCandidates(
                     candidate.orderedEidFirst = remoteEidIndex;
                     candidate.orderedEidSecond = localEidIndex;
                 }
-                candidate.portCount = std::min(myEdge.ports.size(), peerEdge.ports.size());
+                candidate.portCount = resolvedPortCount;
                 candidates.push_back(std::move(candidate));
             }
         }

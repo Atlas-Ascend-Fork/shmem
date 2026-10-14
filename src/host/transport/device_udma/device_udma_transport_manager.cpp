@@ -104,6 +104,23 @@ TopoFabric ClassifyEndpointFabric(const TopoInfo& topoInfo, const std::vector<Ei
     return TopoFabric::Unknown;
 }
 
+TopoFabric ResolveEndpointFabric(NetType netType, const TopoInfo& topoInfo, const std::vector<EidPort>& ports)
+{
+    // An explicit rootinfo network type is authoritative. In particular, an
+    // aggregated PoD CLOS address can contain ports which also appear in a
+    // Mesh topology edge; inferring its fabric from the complete port set
+    // would incorrectly turn that explicit CLOS endpoint into Unknown.
+    if (netType == NetType::Mesh) {
+        return TopoFabric::Mesh;
+    }
+    if (netType == NetType::Clos) {
+        return TopoFabric::Clos;
+    }
+    // TOPO_FILE_DESC intentionally relies on the driver topology to identify
+    // the fabric because its rootinfo level describes a merged topology.
+    return ClassifyEndpointFabric(topoInfo, ports);
+}
+
 std::string MakeUdmaChannelName(uint32_t local_rank, uint32_t peer, uint32_t qp_idx)
 {
     const uint32_t low_rank = std::min(local_rank, peer);
@@ -1492,7 +1509,7 @@ bool UdmaTransportManager::BuildSyncEndpoints(
         endpoint.netLayer = rank_addr->levelInfo->netLayer;
         endpoint.netInstanceId = rank_addr->levelInfo->netInstanceId;
         endpoint.netType = rank_addr->levelInfo->netType;
-        endpoint.fabric = ClassifyEndpointFabric(topo_info, rank_addr->ports);
+        endpoint.fabric = ResolveEndpointFabric(endpoint.netType, topo_info, rank_addr->ports);
         endpoint.addrType = rank_addr->addrType;
         endpoint.planeId = rank_addr->planeId;
         endpoint.ports = rank_addr->ports;
