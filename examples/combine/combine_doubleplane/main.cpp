@@ -26,6 +26,7 @@
 #include "param.h"
 #include "shmem.h"
 #include "utils.h"
+#include "sdma_preflight.h"
 
 #include "combine_kernel.h"
 
@@ -95,8 +96,10 @@ size_t AlignUp(size_t value, size_t alignment) { return (value + alignment - 1) 
 
 size_t CombineWindowBytes(size_t bs, size_t h, size_t topk, size_t elem_size)
 {
+    constexpr size_t status_slot_bytes = 64;
     const size_t payload_stride = AlignUp(h * elem_size, ALIGN_BYTES);
-    return bs * topk * payload_stride + bs * topk * ALIGN_BYTES;
+    const size_t payload_bytes = AlignUp(bs * topk * payload_stride, status_slot_bytes);
+    return payload_bytes + bs * topk * status_slot_bytes;
 }
 
 bool MakeDirs(const std::string& path)
@@ -546,12 +549,23 @@ int main(int argc, char* argv[])
     ACL_CHECK(aclInit(nullptr));
     ACL_CHECK(aclrtSetDevice(device_id));
 
+    if (!CheckSdmaAvailable(static_cast<uint32_t>(args.pe_size), "CombineDoubleplane")) {
+        ACL_CHECK(aclrtResetDevice(device_id));
+        ACL_CHECK(aclFinalize());
+        return 1;
+    }
+
     aclshmemx_init_attr_t attributes;
     test_set_attr(args.pe_id, args.pe_size, 1024UL * 1024UL * 1024, ipport, default_flag_uid, &attributes);
     attributes.option_attr.data_op_engine_type =
         static_cast<data_op_engine_type_t>(ACLSHMEM_DATA_OP_MTE | ACLSHMEM_DATA_OP_SDMA);
-    ACL_CHECK(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_SDMA, static_cast<uint32_t>(args.pe_size)));
-    ACL_CHECK(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes));
+    const int32_t init_ret = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes);
+    if (init_ret != ACLSHMEM_SUCCESS) {
+        std::cerr << "[CombineDoubleplane] SDMA SHMEM initialization failed, ret=" << init_ret << std::endl;
+        ACL_CHECK(aclrtResetDevice(device_id));
+        ACL_CHECK(aclFinalize());
+        return 1;
+    }
 
     int status = 0;
     if (std::string(data_type) == "int" || std::string(data_type) == "int32_t") {
