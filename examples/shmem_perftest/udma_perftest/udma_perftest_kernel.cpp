@@ -117,10 +117,180 @@ __aicore__ inline void udma_perf_quiet(int peer, uint32_t qp_idx)
     }
 }
 
+// 时延模式接口形态槽位，与 host 侧 CSV PlainLat/QpLat/DeferLat/SubmitLat 列对应
+constexpr int UDMA_PERF_IFACE_PLAIN = 0;
+constexpr int UDMA_PERF_IFACE_QP = 1;
+constexpr int UDMA_PERF_IFACE_DEFER = 2;
+constexpr int UDMA_PERF_IFACE_SUBMIT = 3;
+constexpr int UDMA_PERF_IFACE_COUNT = 4;
+
+// 按接口形态提交 count 个操作（warmup 用）：plain/QP/submit 逐次独立提交，defer 一次聚合提交
+template <typename T>
+__aicore__ inline void udma_perf_lat_submit_batch(
+    __gm__ T* dst, __gm__ T* src, __ubuf__ T* ub_ptr, uint32_t elements, uint32_t peer_pe, int iface, uint32_t count)
+{
+    if (iface == UDMA_PERF_IFACE_DEFER) {
+        if (count > 1) {
+            aclshmemx_submit_state_t submit_state{};
+            aclshmemx_defer_t defer_action(submit_state);
+            aclshmemx_submit_t submit_action(submit_state);
+            for (uint32_t i = 0; i < count - 1; ++i) {
+                aclshmemx_udma_put_nbi<T>(dst, src, ub_ptr, elements, peer_pe, 0, defer_action);
+            }
+            aclshmemx_udma_put_nbi<T>(dst, src, ub_ptr, elements, peer_pe, 0, submit_action);
+        } else {
+            aclshmemx_udma_put_nbi<T>(dst, src, ub_ptr, elements, peer_pe);
+        }
+        return;
+    }
+    if (iface == UDMA_PERF_IFACE_SUBMIT) {
+        for (uint32_t op = 0; op < count; ++op) {
+            aclshmemx_submit_state_t submit_state{};
+            aclshmemx_submit_t submit_action(submit_state);
+            aclshmemx_udma_put_nbi<T>(dst, src, ub_ptr, elements, peer_pe, 0, submit_action);
+        }
+        return;
+    }
+    if (iface == UDMA_PERF_IFACE_QP) {
+        for (uint32_t op = 0; op < count; ++op) {
+            aclshmemx_udma_qp_put_nbi<T>(dst, src, ub_ptr, elements, peer_pe, 0, 0);
+        }
+        return;
+    }
+    for (uint32_t op = 0; op < count; ++op) {
+        aclshmemx_udma_put_nbi<T>(dst, src, ub_ptr, elements, peer_pe);
+    }
+}
+
+// 按接口形态选择 quiet：QP 形态走 QP0 指定 quiet；其余（含聚合 defer/submit，均使用普通重载）走普通 quiet，
+// 避免 relay 构建下 qp_quiet 不支持导致 kernel_abort
+__aicore__ inline void udma_perf_lat_quiet(int peer_pe, int iface)
+{
+    if (iface == UDMA_PERF_IFACE_QP) {
+        aclshmemx_udma_qp_quiet(peer_pe, 0);
+    } else {
+        aclshmemx_udma_quiet(peer_pe);
+    }
+}
+
+// defer 接口时延：窗口内 N 次 defer 连续整体计时后除以 N 摊薄到单次调用，最后 1 次 submit 补齐并提交
+// 聚合组（不计时），窗口间 quiet 不计时；返回摊薄到单次 defer 的 cycles
+template <typename T>
+__aicore__ inline int64_t udma_perf_lat_time_defer(
+    __gm__ T* dst, __gm__ T* src, __ubuf__ T* ub_ptr, uint32_t elements, uint32_t peer_pe, int loop_test, int window)
+{
+    int64_t total_cycles = 0;
+    int64_t total_ops = 0;
+    const int full_groups = loop_test / window;
+    const int remainder = loop_test - full_groups * window;
+    for (int g = 0; g < full_groups + (remainder > 0 ? 1 : 0); ++g) {
+        const int group = g < full_groups ? window : remainder;
+        if (group <= 0) {
+            break;
+        }
+        aclshmemx_submit_state_t submit_state{};
+        aclshmemx_defer_t defer_action(submit_state);
+        aclshmemx_submit_t submit_action(submit_state);
+        AscendC::PipeBarrier<PIPE_ALL>();
+        const int64_t start = AscendC::GetSystemCycle();
+        for (int op = 0; op < group; ++op) {
+            aclshmemx_udma_put_nbi<T>(dst, src, ub_ptr, elements, peer_pe, 0, defer_action);
+        }
+        total_cycles += AscendC::GetSystemCycle() - start;
+        total_ops += group;
+        aclshmemx_udma_put_nbi<T>(dst, src, ub_ptr, elements, peer_pe, 0, submit_action);
+        aclshmemx_udma_quiet(peer_pe);
+    }
+    return total_ops > 0 ? total_cycles / total_ops : -1;
+}
+
+// submit 接口时延：连续调用 loop_test 次单操作 submit（逐次独立 submit state）后结束计时，再除以
+// loop_test；quiet 不计时且只在整段计时结束后执行
+template <typename T>
+__aicore__ inline int64_t udma_perf_lat_time_submit(
+    __gm__ T* dst, __gm__ T* src, __ubuf__ T* ub_ptr, uint32_t elements, uint32_t peer_pe, int loop_test)
+{
+    AscendC::PipeBarrier<PIPE_ALL>();
+    const int64_t start = AscendC::GetSystemCycle();
+    for (int op = 0; op < loop_test; ++op) {
+        aclshmemx_submit_state_t submit_state{};
+        aclshmemx_submit_t submit_action(submit_state);
+        aclshmemx_udma_put_nbi<T>(dst, src, ub_ptr, elements, peer_pe, 0, submit_action);
+    }
+    AscendC::PipeBarrier<PIPE_ALL>();
+    const int64_t total_cycles = AscendC::GetSystemCycle() - start;
+    aclshmemx_udma_quiet(peer_pe);
+    return loop_test > 0 ? total_cycles / loop_test : -1;
+}
+
+// lat 模式主逻辑：遍历全部接口形态（plain/QP/defer/submit），各自 warmup + 计时，
+// 单次调用摊薄 cycles 写入 timing_out[iface]；-1 表示窗口不满足聚合条件
+template <typename T>
+__aicore__ inline void udma_perf_lat_run_ifaces(
+    __gm__ T* dst_gm, __gm__ T* src_gm, __ubuf__ T* ub_ptr, uint32_t elements, uint32_t peer_pe, int loop_test,
+    int batch_size, int warmup, int ub_size_kb, int32_t frame_id, __gm__ int64_t* timing_out)
+{
+    // UB staging 内可同时暂存的 WQE 数（每个 64B）；defer 窗口 N + 1 条 submit 需落在限额内
+    const int ub_wqe_limit = ub_size_kb > 0 ? ub_size_kb * 1024 / 64 : 1;
+    int agg_window = batch_size > 1 ? batch_size : 2;
+    if (agg_window > ub_wqe_limit - 1) {
+        agg_window = ub_wqe_limit - 1;
+    }
+    const int defer_warmup = warmup > ub_wqe_limit ? ub_wqe_limit : warmup;
+    static const int kIfaceOrder[UDMA_PERF_IFACE_COUNT] = {
+        UDMA_PERF_IFACE_PLAIN, UDMA_PERF_IFACE_QP, UDMA_PERF_IFACE_DEFER, UDMA_PERF_IFACE_SUBMIT};
+    for (int order = 0; order < UDMA_PERF_IFACE_COUNT; ++order) {
+        const int iface = kIfaceOrder[order];
+#if defined(ACLSHMEM_RELAY_SUPPORT)
+        // relay 构建不支持 QP 专有接口，跳过 QP 槽并输出 N/A（-1）
+        if (iface == UDMA_PERF_IFACE_QP) {
+            if (timing_out != nullptr) {
+                timing_out[iface] = -1;
+            }
+            continue;
+        }
+#endif
+        const uint32_t warmup_count = static_cast<uint32_t>(iface == UDMA_PERF_IFACE_DEFER ? defer_warmup : warmup);
+        udma_perf_lat_submit_batch<T>(dst_gm, src_gm, ub_ptr, elements, peer_pe, iface, warmup_count);
+        udma_perf_lat_quiet(peer_pe, iface);
+
+        int64_t per_op_cycles = -1;
+        const int prof_frame = frame_id * UDMA_PERF_IFACE_COUNT + iface;
+        if (iface == UDMA_PERF_IFACE_DEFER) {
+            SHMEMI_PROF_START(prof_frame);
+            per_op_cycles = agg_window >= 2 ? udma_perf_lat_time_defer<T>(
+                                                  dst_gm, src_gm, ub_ptr, elements, peer_pe, loop_test, agg_window) :
+                                              -1;
+            SHMEMI_PROF_END(prof_frame);
+        } else if (iface == UDMA_PERF_IFACE_SUBMIT) {
+            SHMEMI_PROF_START(prof_frame);
+            per_op_cycles = udma_perf_lat_time_submit<T>(dst_gm, src_gm, ub_ptr, elements, peer_pe, loop_test);
+            SHMEMI_PROF_END(prof_frame);
+        } else {
+            SHMEMI_PROF_START(prof_frame);
+            AscendC::PipeBarrier<PIPE_ALL>();
+            const int64_t pass_start = AscendC::GetSystemCycle();
+            udma_perf_lat_submit_batch<T>(
+                dst_gm, src_gm, ub_ptr, elements, peer_pe, iface, static_cast<uint32_t>(loop_test));
+            AscendC::PipeBarrier<PIPE_ALL>();
+            const int64_t total_cycles = AscendC::GetSystemCycle() - pass_start;
+            udma_perf_lat_quiet(peer_pe, iface);
+            SHMEMI_PROF_END(prof_frame);
+            per_op_cycles = loop_test > 0 ? total_cycles / loop_test : 0;
+        }
+        if (timing_out != nullptr) {
+            timing_out[iface] = per_op_cycles;
+        }
+    }
+    if (timing_out != nullptr) {
+        dcci_cachelines(reinterpret_cast<__gm__ uint8_t*>(timing_out), sizeof(int64_t) * UDMA_PERF_IFACE_COUNT);
+    }
+}
+
 template <typename T, bool USE_QP>
 __aicore__ inline void udma_perf_test_put_impl(
     GM_ADDR dst_gva, GM_ADDR src_gva, int elements, int32_t frame_id, perftest::udma_mode_t test_mode, int ub_size_kb,
-    int64_t prof_pe_val, int loop_count, int metric, int batch)
+    int64_t prof_pe_val, int loop_count, int metric, int batch, GM_ADDR timing_out_gva)
 {
     const int64_t pe = aclshmem_my_pe();
     const int peer_pe = (pe + 1) % aclshmem_n_pes();
@@ -145,32 +315,32 @@ __aicore__ inline void udma_perf_test_put_impl(
     const bool aggregate = batch > 1;
     AscendC::PipeBarrier<PIPE_ALL>();
 
+    if (metric == static_cast<int>(perftest::PERF_METRIC_LAT)) {
+        udma_perf_lat_run_ifaces<T>(
+            dst_gm, src_gm, ub_ptr, static_cast<uint32_t>(elements), peer_pe, loop_test, batch, warmup, ub_size_kb,
+            frame_id, reinterpret_cast<__gm__ int64_t*>(timing_out_gva));
+        aclshmemx_sync_vec_all();
+        return;
+    }
+
     for (int i = 0; i < warmup; ++i) {
         udma_perf_put_once<T, USE_QP>(dst_gm, src_gm, ub_ptr, static_cast<uint32_t>(elements), peer_pe, qp_idx);
     }
     udma_perf_quiet<USE_QP>(peer_pe, qp_idx);
     SHMEMI_PROF_START(frame_id);
-    if (metric == static_cast<int>(perftest::PERF_METRIC_LAT)) {
-        for (int i = 0; i < loop_test; ++i) {
-            udma_perf_put_once<T, USE_QP>(dst_gm, src_gm, ub_ptr, static_cast<uint32_t>(elements), peer_pe, qp_idx);
-        }
-        SHMEMI_PROF_END(frame_id);
+    const int full_groups = loop_test / quiet_batch;
+    const int remainder = loop_test - full_groups * quiet_batch;
+    for (int g = 0; g < full_groups; ++g) {
+        udma_perf_put_group<T, USE_QP>(
+            dst_gm, src_gm, ub_ptr, static_cast<uint32_t>(elements), peer_pe, qp_idx, quiet_batch, aggregate);
         udma_perf_quiet<USE_QP>(peer_pe, qp_idx);
-    } else {
-        const int full_groups = loop_test / quiet_batch;
-        const int remainder = loop_test - full_groups * quiet_batch;
-        for (int g = 0; g < full_groups; ++g) {
-            udma_perf_put_group<T, USE_QP>(
-                dst_gm, src_gm, ub_ptr, static_cast<uint32_t>(elements), peer_pe, qp_idx, quiet_batch, aggregate);
-            udma_perf_quiet<USE_QP>(peer_pe, qp_idx);
-        }
-        if (remainder > 0) {
-            udma_perf_put_group<T, USE_QP>(
-                dst_gm, src_gm, ub_ptr, static_cast<uint32_t>(elements), peer_pe, qp_idx, remainder, aggregate);
-            udma_perf_quiet<USE_QP>(peer_pe, qp_idx);
-        }
-        SHMEMI_PROF_END(frame_id);
     }
+    if (remainder > 0) {
+        udma_perf_put_group<T, USE_QP>(
+            dst_gm, src_gm, ub_ptr, static_cast<uint32_t>(elements), peer_pe, qp_idx, remainder, aggregate);
+        udma_perf_quiet<USE_QP>(peer_pe, qp_idx);
+    }
+    SHMEMI_PROF_END(frame_id);
     aclshmemx_sync_vec_all();
 }
 
@@ -274,20 +444,23 @@ __aicore__ inline void udma_perf_test_put_signal_impl(
 #define DEFINE_UDMA_PERF_KERNEL_FOR_TYPE(type_name, cpp_type)                                                         \
     extern "C" __global__ __vector__ void udma_perf_test_##type_name##_put(                                           \
         GM_ADDR dst_gva, GM_ADDR src_gva, int elements, int32_t frame_id, perftest::udma_mode_t test_mode,            \
-        int ub_size_kb, int64_t prof_pe_val, int loop_count, int metric, int batch, int qp_count)                     \
+        int ub_size_kb, int64_t prof_pe_val, int loop_count, int metric, int batch, int qp_count, GM_ADDR timing_gva) \
     {                                                                                                                 \
         if (qp_count > 1) {                                                                                           \
             udma_perf_test_put_impl<cpp_type, true>(                                                                  \
-                dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kb, prof_pe_val, loop_count, metric, batch); \
+                dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kb, prof_pe_val, loop_count, metric, batch,  \
+                timing_gva);                                                                                          \
         } else {                                                                                                      \
             udma_perf_test_put_impl<cpp_type, false>(                                                                 \
-                dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kb, prof_pe_val, loop_count, metric, batch); \
+                dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kb, prof_pe_val, loop_count, metric, batch,  \
+                timing_gva);                                                                                          \
         }                                                                                                             \
     }                                                                                                                 \
     extern "C" __global__ __vector__ void udma_perf_test_##type_name##_get(                                           \
         GM_ADDR dst_gva, GM_ADDR src_gva, int elements, int32_t frame_id, perftest::udma_mode_t test_mode,            \
-        int ub_size_kb, int64_t prof_pe_val, int loop_count, int batch, int qp_count)                                 \
+        int ub_size_kb, int64_t prof_pe_val, int loop_count, int batch, int qp_count, GM_ADDR timing_gva)             \
     {                                                                                                                 \
+        (void)timing_gva;                                                                                             \
         if (qp_count > 1) {                                                                                           \
             udma_perf_test_get_impl<cpp_type, true>(                                                                  \
                 dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kb, prof_pe_val, loop_count, batch);         \
@@ -298,8 +471,9 @@ __aicore__ inline void udma_perf_test_put_signal_impl(
     }                                                                                                                 \
     extern "C" __global__ __vector__ void udma_perf_test_##type_name##_put_signal(                                    \
         GM_ADDR dst_gva, GM_ADDR src_gva, GM_ADDR sig_gva, int elements, int32_t frame_id, int64_t prof_pe_val,       \
-        int loop_count, uint64_t signal_base, int batch)                                                              \
+        int loop_count, uint64_t signal_base, int batch, GM_ADDR timing_gva)                                          \
     {                                                                                                                 \
+        (void)timing_gva;                                                                                             \
         udma_perf_test_put_signal_impl<cpp_type>(                                                                     \
             dst_gva, src_gva, sig_gva, elements, frame_id, prof_pe_val, loop_count, signal_base, batch);              \
     }
@@ -315,17 +489,19 @@ DEFINE_UDMA_PERF_KERNEL_FOR_TYPE(uint32, uint32_t)
 DEFINE_UDMA_PERF_KERNEL_FOR_TYPE(uint64, uint64_t)
 DEFINE_UDMA_PERF_KERNEL_FOR_TYPE(char, char)
 
-#define DISPATCH_UDMA_PERF_PUT(type_name, cpp_type)                   \
-    udma_perf_test_##type_name##_put<<<block_dim, nullptr, stream>>>( \
-        dst_gva, src_gva, elements, frame_id, t_mode, ub_size_kb, prof_pe_val, loop_count, metric, batch, qp_count)
+#define DISPATCH_UDMA_PERF_PUT(type_name, cpp_type)                                                                 \
+    udma_perf_test_##type_name##_put<<<block_dim, nullptr, stream>>>(                                               \
+        dst_gva, src_gva, elements, frame_id, t_mode, ub_size_kb, prof_pe_val, loop_count, metric, batch, qp_count, \
+        timing_gva)
 
-#define DISPATCH_UDMA_PERF_GET(type_name, cpp_type)                   \
-    udma_perf_test_##type_name##_get<<<block_dim, nullptr, stream>>>( \
-        dst_gva, src_gva, elements, frame_id, t_mode, ub_size_kb, prof_pe_val, loop_count, batch, qp_count)
+#define DISPATCH_UDMA_PERF_GET(type_name, cpp_type)                                                         \
+    udma_perf_test_##type_name##_get<<<block_dim, nullptr, stream>>>(                                       \
+        dst_gva, src_gva, elements, frame_id, t_mode, ub_size_kb, prof_pe_val, loop_count, batch, qp_count, \
+        timing_gva)
 
 #define DISPATCH_UDMA_PERF_PUT_SIGNAL(type_name, cpp_type)                   \
     udma_perf_test_##type_name##_put_signal<<<block_dim, nullptr, stream>>>( \
-        dst_gva, src_gva, sig_gva, elements, frame_id, prof_pe_val, loop_count, signal_base, batch)
+        dst_gva, src_gva, sig_gva, elements, frame_id, prof_pe_val, loop_count, signal_base, batch, timing_gva)
 
 #define DISPATCH_UDMA_PERF_FOR_ALL_TYPES(MACRO) \
     switch (d_type) {                           \
@@ -367,7 +543,7 @@ DEFINE_UDMA_PERF_KERNEL_FOR_TYPE(char, char)
 extern "C" void launch_udma_perf_kernel(
     uint32_t block_dim, void* stream, uint8_t* dst_gva, uint8_t* src_gva, uint8_t* sig_gva, int elements,
     int32_t frame_id, int test_mode, int data_type, int ub_size_kb, int64_t prof_pe_val, int loop_count,
-    uint64_t signal_base, int metric, int batch, int qp_count)
+    uint64_t signal_base, int metric, int batch, int qp_count, uint8_t* timing_gva)
 {
     perftest::udma_mode_t t_mode = static_cast<perftest::udma_mode_t>(test_mode);
     perftest::perf_data_type_t d_type = static_cast<perftest::perf_data_type_t>(data_type);

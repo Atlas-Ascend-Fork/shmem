@@ -126,9 +126,9 @@ while [[ $# -gt 0 ]]; do
             echo "  -e|--exponent <exponent>        单个 QP 的数据量幂数"
             echo "  --exponent-range <min> <max>    单个 QP 的数据量幂数范围"
             echo "  --loop-count <count>            循环次数 (默认 1000)"
-            echo "  --ub-size <size>                UB size(KB)，用于低阶 UDMA 入参和 CSV；高阶默认 MTE staging 需至少 128B"
-            echo "  --metric <bw|lat>               性能口径 (lat 仅支持 -t put)"
-            echo "  --batch <N>                     BW 测试：0=普通 NBI 全异步，1=每次后 quiet，>1=每批 defer...submit 后 quiet"
+            echo "  --ub-size <size>                UB size(KB)，用于低阶 UDMA 入参和 CSV；lat 聚合窗口场景自动上调"
+            echo "  --metric <bw|lat>               性能口径 (lat 仅支持 -t put 和单 QP，自动遍历 plain/QP/defer/submit 四种接口形态)"
+            echo "  --batch <N>                     BW：0=普通 NBI 全异步，1=每次后 quiet，>1=每批 defer...submit 后 quiet；lat：聚合窗口大小 (默认 100)"
             echo "  -pes <size>                     PE 数量"
             echo "  -ipport <ip:port>               通信地址"
             echo "  -gnpus <num>                    NPU 数量"
@@ -166,12 +166,48 @@ if ! [[ "$BATCH" =~ ^[0-9]+$ ]]; then
     echo "错误: --batch 必须是非负整数 (got '$BATCH')"
     exit 1
 fi
+if ! [[ "$LOOP_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+    echo "错误: --loop-count 必须是正整数 (got '$LOOP_COUNT')"
+    exit 1
+fi
+if ! [[ "$UB_SIZE" =~ ^[0-9]+$ ]]; then
+    echo "错误: --ub-size 必须是非负整数 (got '$UB_SIZE')"
+    exit 1
+fi
+
+# 时延路径：batch 为聚合接口窗口（N 次 defer + 1 次 submit），默认 100；UB 覆盖 warmup 与窗口
+if [[ "$METRIC" == "lat" ]]; then
+    if [[ "$BATCH" -eq 0 ]]; then
+        BATCH=100
+    fi
+    if [[ "$BATCH" -gt "$LOOP_COUNT" ]]; then
+        BATCH="$LOOP_COUNT"
+    fi
+    AGG_WQE_COUNT=$((BATCH + 1))
+    if [[ "$AGG_WQE_COUNT" -lt 100 ]]; then
+        AGG_WQE_COUNT=100
+    fi
+    REQUIRED_UB_KB=$(((AGG_WQE_COUNT * 64 + 1023) / 1024))
+    if [[ "$REQUIRED_UB_KB" -gt 248 ]]; then
+        echo "错误: 时延窗口 $BATCH 所需 UB ${REQUIRED_UB_KB}KB 超过 Ascend950 可用上限 248KB，请减小 --batch"
+        exit 1
+    fi
+    if [[ "$UB_SIZE" -lt "$REQUIRED_UB_KB" ]]; then
+        echo "警告: 聚合时延场景要求 --ub-size >= ${REQUIRED_UB_KB}KB，当前为 ${UB_SIZE}KB，已自动修正"
+        UB_SIZE="$REQUIRED_UB_KB"
+    fi
+fi
+
 if ! [[ "$BLOCK_SIZE_INPUT" =~ ^[0-9]+$ ]] || [ "$BLOCK_SIZE_INPUT" -lt 1 ] || [ "$BLOCK_SIZE_INPUT" -gt 56 ]; then
     echo "错误: --block-size 必须是 [1,56] 内的整数"
     exit 1
 fi
 if [[ "$BLOCK_SIZE_INPUT" -gt 1 && ( "$TEST_TYPE" == "put_signal" || "$TEST_TYPE" == "all" ) ]]; then
     echo "错误: 多 QP 仅支持 put/bi_put/get/bi_get；put_signal 保持单 QP"
+    exit 1
+fi
+if [[ "$METRIC" == "lat" && "$BLOCK_SIZE_INPUT" -gt 1 ]]; then
+    echo "错误: --metric lat 不支持多 QP，请使用 -b 1 (当前 -b $BLOCK_SIZE_INPUT)"
     exit 1
 fi
 

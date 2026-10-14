@@ -31,10 +31,13 @@ aclshmemx_uniqueid_t default_flag_uid;
 
 static aclshmem_prof_pe_t* out_profs;
 
+// 时延模式每 PE 的接口形态槽位（普通/QP/defer/submit），与 kernel 侧 UDMA_PERF_IFACE_* 对应
+constexpr int LAT_IFACE_COUNT = 4;
+
 extern "C" void launch_udma_perf_kernel(
     uint32_t block_dim, void* stream, uint8_t* dst_gva, uint8_t* src_gva, uint8_t* sig_gva, int elements,
     int32_t frame_id, int test_mode, int data_type, int ub_size_kb, int64_t prof_pe_val, int loop_count,
-    uint64_t signal_base, int metric, int batch, int qp_count);
+    uint64_t signal_base, int metric, int batch, int qp_count, uint8_t* timing_gva);
 
 static perftest::udma_mode_t get_udma_mode(const char* test_type_str)
 {
@@ -66,13 +69,17 @@ int test_udma_perf_test_impl(
 {
     static const char* kFunc = "test_udma_perf_test_impl";
     const uint32_t block_dim =
-        (test_mode == perftest::TEST_MODE_UDMA_PUT_SIGNAL) ? 1U : static_cast<uint32_t>(qp_count);
+        (test_mode == perftest::TEST_MODE_UDMA_PUT_SIGNAL || metric == perftest::PERF_METRIC_LAT) ?
+            1U :
+            static_cast<uint32_t>(qp_count);
     int32_t device_id = (pe_id % g_npus + f_npu);
+    pe_id += f_pe;
     int ret = 0;
     aclrtStream stream = nullptr;
     void* sig_ptr = nullptr;
     void* dst_ptr = nullptr;
     void* src_ptr = nullptr;
+    void* timing_ptr = nullptr;
     aclshmemx_init_attr_t attributes;
     bool acl_initialized = false;
     bool device_set = false;
@@ -109,6 +116,20 @@ int test_udma_perf_test_impl(
         PERFTEST_CHECK_GOTO(
             aclrtMemcpy(
                 sig_ptr, n_pes * sizeof(uint64_t), sig_init.data(), n_pes * sizeof(uint64_t),
+                ACL_MEMCPY_HOST_TO_DEVICE),
+            ret, cleanup);
+    }
+    if (metric == perftest::PERF_METRIC_LAT) {
+        timing_ptr = aclshmem_malloc(sizeof(int64_t) * LAT_IFACE_COUNT);
+        if (timing_ptr == nullptr) {
+            std::cerr << "[ERROR] [" << kFunc << "] aclshmem_malloc failed for timing slots" << std::endl;
+            ret = -1;
+            goto cleanup;
+        }
+        std::vector<int64_t> timing_zero(LAT_IFACE_COUNT, 0);
+        PERFTEST_CHECK_GOTO(
+            aclrtMemcpy(
+                timing_ptr, sizeof(int64_t) * LAT_IFACE_COUNT, timing_zero.data(), sizeof(int64_t) * LAT_IFACE_COUNT,
                 ACL_MEMCPY_HOST_TO_DEVICE),
             ret, cleanup);
     }
@@ -152,7 +173,7 @@ int test_udma_perf_test_impl(
         launch_udma_perf_kernel(
             block_dim, stream, (uint8_t*)dst_ptr, (uint8_t*)src_ptr, (uint8_t*)sig_ptr, elements, frame_id,
             static_cast<int>(test_mode), static_cast<int>(data_type_enum), ub_size_kb, prof_pe, loop_count, signal_base,
-            static_cast<int>(metric), batch, qp_count);
+            static_cast<int>(metric), batch, qp_count, (uint8_t*)timing_ptr);
         PERFTEST_CHECK_GOTO(aclrtSynchronizeStream(stream), ret, cleanup);
 
         bool verify_success = true;
@@ -238,10 +259,42 @@ int test_udma_perf_test_impl(
             }
         }
 
-        aclshmemx_get_prof(&out_profs, false);
-        collect_prof_data_to_csv_v2(
-            out_profs, frame_id, datasize, qp_count, g_npus, ub_size_kb, loop_count, metric == perftest::PERF_METRIC_BW,
-            csv_data);
+        if (metric == perftest::PERF_METRIC_LAT) {
+            // 槽位与 kernel 侧 UDMA_PERF_IFACE_* 对应，值为单次调用摊薄 cycles，-1 表示 N/A
+            std::vector<int64_t> timing_host(LAT_IFACE_COUNT, 0);
+            PERFTEST_CHECK_GOTO(
+                aclrtMemcpy(
+                    timing_host.data(), sizeof(int64_t) * LAT_IFACE_COUNT, timing_ptr,
+                    sizeof(int64_t) * LAT_IFACE_COUNT, ACL_MEMCPY_DEVICE_TO_HOST),
+                ret, cleanup);
+            constexpr int64_t cycle2us = 1000; // Ascend950 计数器 1GHz；UDMA 仅在 950 编译期使能
+            static const char* kLatIfaceNames[LAT_IFACE_COUNT] = {"plain", "qp", "defer", "submit"};
+            std::string lat_cell[LAT_IFACE_COUNT] = {"-", "-", "-", "-"};
+            if (pe_id == prof_pe) {
+                for (int iface = 0; iface < LAT_IFACE_COUNT; ++iface) {
+                    const int64_t cycles = timing_host[iface];
+                    if (cycles < 0) {
+                        std::cout << "[LAT][" << kLatIfaceNames[iface] << "] PE" << pe_id << ": N/A (window too small)"
+                                  << std::endl;
+                        continue;
+                    }
+                    const double latency_us = static_cast<double>(cycles) / cycle2us;
+                    std::cout << "[LAT][" << kLatIfaceNames[iface] << "] PE" << pe_id << ": " << latency_us << " us"
+                              << std::endl;
+                    lat_cell[iface] = double_to_string(latency_us);
+                }
+            } else {
+                std::cout << "[LAT] PE" << pe_id << ": idle (unidirectional)" << std::endl;
+            }
+            csv_data.push_back(
+                {uint64_to_string(datasize), int_to_string(g_npus), int_to_string(static_cast<int>(block_dim)),
+                 double_to_string(ub_size_kb), lat_cell[0], lat_cell[1], lat_cell[2], lat_cell[3]});
+        } else {
+            aclshmemx_get_prof(&out_profs, false);
+            collect_prof_data_to_csv_v2(
+                out_profs, frame_id, datasize, qp_count, g_npus, ub_size_kb, loop_count,
+                metric == perftest::PERF_METRIC_BW, csv_data);
+        }
 
         aclshmem_free(dst_ptr);
         dst_ptr = nullptr;
@@ -266,6 +319,9 @@ cleanup:
     }
     if (sig_ptr != nullptr) {
         aclshmem_free(sig_ptr);
+    }
+    if (timing_ptr != nullptr) {
+        aclshmem_free(timing_ptr);
     }
     if (shmem_initialized) {
         PERFTEST_CHECK_CLEANUP(aclshmem_finalize(), ret);
@@ -385,6 +441,11 @@ int main(int argc, char* argv[])
         std::cerr << "Error: --metric lat is only supported with -t put (got '" << test_type << "')" << std::endl;
         return 1;
     }
+    if (metric == perftest::PERF_METRIC_LAT && qp_count > 1) {
+        std::cerr << "Error: --metric lat does not support multi-QP; use -b 1 (got qp_count=" << qp_count << ")"
+                  << std::endl;
+        return 1;
+    }
 
     if (batch < 0) {
         std::cerr << "Error: --batch must be >= 0 (got " << batch << ")" << std::endl;
@@ -421,12 +482,27 @@ int main(int argc, char* argv[])
             return 1;
         }
     }
+    if (metric == perftest::PERF_METRIC_LAT) {
+        // 时延模式：batch 为聚合接口的窗口大小，默认 warmup 次数；窗口 N 次 defer + 1 次 submit 需落在 UB 内
+        if (batch == 0) {
+            batch = perftest::PERFTEST_WARMUP_ITERS;
+        }
+        if (batch > loop_count) {
+            batch = loop_count;
+        }
+        const uint64_t ub_bytes = ub_size_kb > 0 ? static_cast<uint64_t>(ub_size_kb) * 1024ULL : 0ULL;
+        if (static_cast<uint64_t>(batch + 1) * 64ULL > ub_bytes) {
+            std::cerr << "Error: --batch " << batch << " window needs " << ((batch + 1) * 64)
+                      << "B UB staging (defer window + submit), exceeds --ub-size " << ub_size_kb << " KB" << std::endl;
+            return 1;
+        }
+    }
     if (min_exponent < 0 || min_exponent > max_exponent || max_exponent > 62) {
         std::cerr << "Error: exponent range must satisfy 0 <= min <= max <= 62 (got " << min_exponent << "-"
                   << max_exponent << ")" << std::endl;
         return 1;
     }
-    std::cout << "[INFO] udma_perftest start, pe=" << pe_id << ", t=" << test_type << ", d=" << fuc_data_type
+    std::cout << "[INFO] udma_perftest start, pe=" << (pe_id + f_pe) << ", t=" << test_type << ", d=" << fuc_data_type
               << ", exp=" << min_exponent << "-" << max_exponent << ", loop=" << loop_count << ", ub=" << ub_size_kb
               << "KB"
               << ", metric=" << metric_str << ", batch=" << batch << ", qp_count=" << qp_count << std::endl;
@@ -459,9 +535,15 @@ int main(int argc, char* argv[])
     const char* prof_pe_env = std::getenv("SHMEM_CYCLE_PROF_PE");
     int prof_pe = (prof_pe_env != nullptr) ? std::atoi(prof_pe_env) : 0;
 
-    std::vector<std::vector<std::string>> csv_data = {
-        {"DataSize/B", "Npus", "Blocks", "UBsize/KB", "Bandwidth/GB/s(1000)", "Bandwidth/GiB/s(1024)", "CoreMaxTime/us",
-         "SingleCoreTime/us"}};
+    std::vector<std::vector<std::string>> csv_data;
+    if (metric == perftest::PERF_METRIC_LAT) {
+        csv_data = {
+            {"DataSize/B", "Npus", "Blocks", "UBsize/KB", "PlainLat/us", "QpLat/us", "DeferLat/us", "SubmitLat/us"}};
+    } else {
+        csv_data = {
+            {"DataSize/B", "Npus", "Blocks", "UBsize/KB", "Bandwidth/GB/s(1000)", "Bandwidth/GiB/s(1024)",
+             "CoreMaxTime/us", "SingleCoreTime/us"}};
+    }
 
     int status = 0;
 #define UDMA_TEST_IMPL_OP(type)                                                                                   \
@@ -472,10 +554,10 @@ int main(int argc, char* argv[])
 #undef UDMA_TEST_IMPL_OP
 
     if (status != 0) {
-        std::cerr << "[FAILED] udma_perftest failed in pe " << pe_id << std::endl;
+        std::cerr << "[FAILED] udma_perftest failed in pe " << (pe_id + f_pe) << std::endl;
         return status;
     }
-    if (pe_id == prof_pe) {
+    if ((pe_id + f_pe) == prof_pe) {
         std::string output_suffix;
         if (qp_count > 1)
             output_suffix += "_qp" + int_to_string(qp_count);
@@ -484,6 +566,6 @@ int main(int argc, char* argv[])
         write_csv(csv_filename, csv_data);
     }
 
-    std::cout << "[SUCCESS] udma_perftest done in pe " << pe_id << std::endl;
+    std::cout << "[SUCCESS] udma_perftest done in pe " << (pe_id + f_pe) << std::endl;
     return 0;
 }

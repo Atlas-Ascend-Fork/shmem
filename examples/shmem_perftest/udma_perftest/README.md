@@ -44,6 +44,19 @@ cd examples/shmem_perftest/udma_perftest/
 ./run.sh [选项]
 ```
 
+### 跨机运行
+
+每台机器各执行一次 `run.sh`：`-fpe` 指定本机首个全局 PE，`-ipport` 统一指向 PE0 所在机器。以 2 机 × 8 卡 = 16 PE 为例（node0 IP 为 192.168.1.10）：
+
+```bash
+# node0：全局 PE 0~7
+bash run.sh -t bi_put -pes 16 -gnpus 8 -fpe 0 -fnpu 0 -ipport tcp://192.168.1.10:8899
+# node1：全局 PE 8~15
+bash run.sh -t bi_put -pes 16 -gnpus 8 -fpe 8 -fnpu 0 -ipport tcp://192.168.1.10:8899
+```
+
+> 跨机建议使用 `bi_put`/`bi_get`（环形模式，每个 PE 都有数据收发）。
+
 ### 命令行参数
 
 | 参数 | 缩写 | 描述 | 默认值 |
@@ -56,14 +69,14 @@ cd examples/shmem_perftest/udma_perftest/
 | `--exponent-range <min> <max>` | - | 单个 QP 的数据量幂数范围 | 3 17 |
 | `--loop-count <count>` | - | 循环次数 | 1000 |
 | `--ub-size <size>` | - | UB size (KB)；本 perftest 传给低阶 UDMA 接口并写入 CSV。高阶 UDMA RMA 默认 MTE staging 的 UB 配置要求至少 128 B | 16 |
-| `--metric <bw\|lat>` | - | 性能口径：`bw` 测带宽，`lat` 测单次 put_nbi 下发延时（仅 `-t put` 支持） | bw |
-| `--batch <N>` | - | BW 测试批大小：`0` 或 `1` 使用普通 NBI；`N > 1` 时每批前 `N-1` 个操作使用 `defer`，最后一个使用 `submit`，随后调用 `quiet`。每个 WQE 在 UB 中占用 64 B，要求有效 batch 小于 4096 且 `N * 64 <= --ub-size * 1024`；`lat` 模式忽略此参数。 | 0 |
+| `--metric <bw\|lat>` | - | 性能口径：`bw`=带宽，`lat`=接口延迟，一次遍历全部接口形态（详见下方说明） | bw |
+| `--batch <n>` | - | `bw`：连续发起多少次操作后等待完成；`lat`：聚合接口的窗口大小（详见下方说明） | `0` |
 | `-pes <size>` | - | PE 数量 | 2 |
 | `-ipport <ip:port>` | - | 通信地址 | tcp://127.0.0.1:8768 |
 | `-gnpus <num>` | - | NPU 数量 | 2 |
 | `-fnpu <id>` | - | 首个 NPU ID | 0 |
 | `-fpe <id>` | - | 首个 PE ID | 0 |
-| `-a/--analyse <mode>` | - | 分析模式 (none / plot / md) | none |
+| `-a/--analyse <mode>` | - | 分析模式 (none / plot / md)；plot/md 由 `perf_data_process.py` 出图/出报告，lat 模式输出四种接口形态的时延曲线与数据表 | none |
 
 ### DRAM / D2H 内存约束
 
@@ -79,12 +92,29 @@ UDMA 是异步 NBI 接口，benchmark 把 `put_nbi/get_nbi` 提交与 `quiet` �
   - `Bandwidth/GB/s` = `datasize × qp_count / (window_us / loop_count)`；`datasize` 是单个 QP 的数据量
   - `CoreMaxTime/SingleCoreTime` 列填 `window_us / loop_count`
   - 适用于 `put / bi_put / get / bi_get / put_signal`
-- **`--metric lat`**：`prof_start → loop(put_nbi) → prof_end → quiet`，`quiet` 移出窗口，只测下发本身。
-  - `CoreMaxTime/SingleCoreTime` 列填 `window_us / loop_count`，即单次 `put_nbi` 平均下发耗时
-  - `Bandwidth/GB/s` 填 0，对延时口径无意义
-  - **仅 `-t put` 支持**；其他 `-t` 与 `--metric lat` 组合会直接报错退出
+- **`--metric lat`**：遍历四种接口形态测下发时延（不含完成等待），见下方"时延路径的接口遍历"。**仅 `-t put` 且单 QP 支持**。
 
 CSV 文件名加 metric 前缀；多 QP 场景追加 QP 数后缀：`output/udma_<metric>_<test_type>_<dtype>[_qpN]_<pe>.csv`。
+
+### 时延路径的接口遍历（`--metric lat`）
+
+`--metric lat` 测量接口下发时延（不含完成等待），**仅支持 `-t put` 且单 QP**。一次测试自动遍历四种接口形态，无需通过 `--batch` 选择：
+
+| 接口形态 | 说明 | CSV 列 |
+|----------|------|--------|
+| `plain` | 普通非聚合接口 `aclshmemx_udma_put_nbi`，逐次调用立即提交 | `PlainLat/us` |
+| `qp` | QP 指定接口 `aclshmemx_udma_qp_put_nbi`（qp_idx=0），逐次调用立即提交 | `QpLat/us` |
+| `defer` | 聚合 defer 接口，攒批不提交 | `DeferLat/us` |
+| `submit` | 聚合 submit 接口，提交攒批 | `SubmitLat/us` |
+
+计时口径（均为摊薄到单次调用的下发时延，quiet 不计时）：
+
+- `plain` / `qp` / `submit`：连续调用 `loop_count` 次，整段计时后除以 `loop_count`。
+- `defer`：窗口内 N 次 defer 整体计时后除以 N，末尾 1 次 submit 补齐提交（不计时）。
+- 各形态独立 warmup；`submit` 的 warmup 逐次使用独立 submit state。
+- `--batch N` 为聚合窗口大小（默认 100）；UB 不足时 `run.sh` 自动上调。
+
+示例：`./run.sh -t put --metric lat` 一次测出四种接口时延；`./run.sh -t put --metric lat --batch 200` 将聚合窗口改为 200。
 
 ### Batch 提交（仅 `--metric bw`）
 
@@ -94,7 +124,7 @@ CSV 文件名加 metric 前缀；多 QP 场景追加 QP 数后缀：`output/udma
 - `--batch 1`：每次普通 NBI 后立刻 `quiet`，等价于同步提交，能反映"提交+完成"的端到端开销。
 - `--batch N`（`N > 1`）：每批前 N-1 个操作使用 `defer`，最后一个使用 `submit`，然后 `quiet`；当 `loop_count` 不能整除 N 时，余数批次按实际操作数提交。
 
-`SHMEMI_PROF_START/END` 仍只取一次（同 `--metric bw` 原本的实现），即窗口内总时间除以 `loop_count` 给出"含 batched quiet 的平均单次耗时"。`--metric lat` 路径不受 `--batch` 影响。
+`SHMEMI_PROF_START/END` 仍只取一次（同 `--metric bw` 原本的实现），即窗口内总时间除以 `loop_count` 给出"含 batched quiet 的平均单次耗时"。`--metric lat` 路径不按 BW 的 batch 语义分组，`--batch` 仅作为聚合窗口（见上方"时延路径的接口遍历"）。
 
 适用范围：`put / bi_put / get / bi_get` 在 `--metric bw` 下的 `batch > 1` 使用聚合 action；`put_signal` 始终使用普通 NBI，但支持按 batch 分组后调用 `quiet`。
 
@@ -104,8 +134,11 @@ CSV 文件名加 metric 前缀；多 QP 场景追加 QP 数后缀：`output/udma
 # 单向 PUT 带宽，float，幂数 8-20
 ./run.sh -t put -d float --exponent-range 8 20 --loop-count 1000
 
-# 单向 PUT 单次下发延时
+# 延迟测试，一次遍历普通/QP/聚合接口（窗口不满足的形态显示 -）
 ./run.sh -t put -d float --exponent-range 8 20 --loop-count 1000 --metric lat
+
+# 延迟测试 + 聚合窗口 200
+./run.sh -t put -d float -e 10 --loop-count 2000 --metric lat --batch 200
 
 # 双向 GET 带宽，int32
 ./run.sh -t bi_get -d int32 --exponent-range 8 20 --loop-count 1000
@@ -146,19 +179,32 @@ CSV 文件名加 metric 前缀；多 QP 场景追加 QP 数后缀：`output/udma
 
 ## CSV 输出
 
-CSV 列与 MTE 版保持一致，便于复用 `examples/utils/perf_data_process.py` 出图：
+CSV 列与 MTE 版保持一致，便于复用 `examples/utils/perf_data_process.py` 出图。两种指标共用前 4 列，后续列不同：
 
-```bash
-DataSize/B, Npus, Blocks, UBsize/KB, Bandwidth/GB/s, CoreMaxTime/us, SingleCoreTime/us
-```
+| 列 | 指标 | 说明 |
+|----|------|------|
+| `DataSize/B` | 通用 | 单个 QP 每次传输的数据量（字节）；多 QP 并行模式总数据量为 `DataSize × qp-count` |
+| `Npus` | 通用 | NPU 数量 |
+| `Blocks` | 通用 | 多 QP 并行模式为 `qp-count`，其他模式为 1；`lat` 恒为 1 |
+| `UBsize/KB` | 通用 | UB 大小（KB） |
+| `Bandwidth/GB/s` | `bw` | 带宽（GB/s，十进制），按所有 QP 总流量统计 |
+| `CoreMaxTime/us` | `bw` | 单次 iteration 耗时（us） |
+| `PlainLat/us` | `lat` | 普通非聚合接口的下发时延（us），窗口不满足时为 `-` |
+| `QpLat/us` | `lat` | QP 指定接口的下发时延（us） |
+| `DeferLat/us` | `lat` | 聚合 defer 接口摊薄到单次调用的下发时延（us） |
+| `SubmitLat/us` | `lat` | 聚合 submit 接口摊薄到单次调用的下发时延（us） |
 
-`put/bi_put/get/bi_get` 的 `Blocks` 列等于 `--block-size`；`put_signal` 保持单 block。**`DataSize/B` 表示单个 QP 每次传输的数据量，也就是 `-e` 指定的 `2^e` 字节；多 QP 时总数据量为 `DataSize × Blocks`**。因此带宽统计会按所有 QP 的总流量计算，可直接与单 QP 结果对比。与 MTE 版的列结构一致：`Bandwidth = DataSize × Blocks / 时间` 表示总流量。跨引擎按同一 `-e` 对比时，应结合 `Blocks` 判断总流量。文件名格式为 `output/udma_<metric>_<test_type>_<dtype>[_qpN]_<pe>.csv`，例如 `udma_bw_put_float_0.csv` 或 `udma_bw_put_float_qp4_0.csv`。`--metric lat` 时 `Bandwidth/GB/s` 列填 0，`CoreMaxTime/SingleCoreTime` 列填测量窗口内单次操作的平均下发耗时。
+`put/bi_put/get/bi_get` 的 `Blocks` 列等于 `--block-size`；`put_signal` 保持单 block。**`DataSize/B` 表示单个 QP 每次传输的数据量，也就是 `-e` 指定的 `2^e` 字节；多 QP 时总数据量为 `DataSize × Blocks`**。因此带宽统计会按所有 QP 的总流量计算，可直接与单 QP 结果对比；跨引擎按同一 `-e` 对比时，应结合 `Blocks` 判断总流量。文件名格式为 `output/udma_<metric>_<test_type>_<dtype>[_qpN]_<pe>.csv`，例如 `udma_bw_put_float_0.csv` 或 `udma_bw_put_float_qp4_0.csv`。
 
 ## 输出示例
 
 ```bash
-[INFO] udma_perftest start, pe=0, t=put, d=float, exp=10-10, loop=100, ub=16KB, metric=bw, batch=100
+[INFO] udma_perftest start, pe=0, t=put, d=float, exp=10-10, loop=100, ub=16KB, metric=lat, batch=100
 pe: 0 size(per QP): 1024B, total: 1024B frame_id: 0
+[LAT][plain] PE0: 0.85 us
+[LAT][qp] PE0: 0.92 us
+[LAT][defer] PE0: 0.31 us
+[LAT][submit] PE0: 1.10 us
 [Verification] put: checking...
 [Verification] SUCCESS
 [SUCCESS] udma_perftest done in pe 0

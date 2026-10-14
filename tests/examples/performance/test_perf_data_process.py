@@ -87,3 +87,46 @@ def test_cli_report_uses_core_time_instead_of_gib_bandwidth(tmp_path):
     columns = [part.strip() for part in table_header.strip("|").split("|")]
     values = [part.strip() for part in table_row.strip("|").split("|")]
     assert float(values[columns.index("CoreMaxTime/us")]) == 16.384
+
+
+LAT_HEADERS = ["DataSize/B", "Npus", "Blocks", "UBsize/KB", "PlainLat/us", "QpLat/us", "DeferLat/us", "SubmitLat/us"]
+
+
+def write_lat_csv(path):
+    rows = [
+        LAT_HEADERS,
+        [1024, 2, 1, 16, 0.85, 0.92, 0.31, 1.10],
+        [4096, 2, 1, 16, 0.86, 0.93, 0.30, 1.12],
+        [16384, 2, 1, 16, 0.88, 0.95, "-", 1.15],
+    ]
+    with path.open("w", encoding="utf-8", newline="") as output:
+        writer = csv.writer(output)
+        writer.writerows(rows)
+
+
+def test_process_csv_lat_schema_keeps_columns_and_na(tmp_path):
+    source = tmp_path / "udma_lat_put_float_0.csv"
+    write_lat_csv(source)
+    images, frame = perf.process_csv(source, tmp_path / "picture", None, None, no_plot=True)
+    assert images == []
+    assert list(frame.columns) == LAT_HEADERS
+    assert frame.iloc[0]["PlainLat/us"] == 0.85
+    assert frame.iloc[2]["DeferLat/us"] != frame.iloc[2]["DeferLat/us"]  # '-' -> NaN
+
+
+def test_cli_report_and_plot_cover_latency_schema(tmp_path):
+    source = tmp_path / "udma_lat_put_float_0.csv"
+    write_lat_csv(source)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--csv-path", str(source)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = (tmp_path / "performance_report.md").read_text(encoding="utf-8")
+    for col in LAT_HEADERS[4:]:
+        assert col in report
+    images = list((tmp_path / "picture").rglob("*latency_curves.png"))
+    assert images, "latency curve chart was not generated"

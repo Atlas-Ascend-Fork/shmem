@@ -101,6 +101,76 @@ def get_subplot_layout(n, default_cols=5):
     rows = ceil(n / cols)
     return rows, cols
 
+LATENCY_COLUMNS = ['PlainLat/us', 'QpLat/us', 'DeferLat/us', 'SubmitLat/us']
+
+def process_lat_csv(csv_file, output_dir, csv_headers, no_plot):
+    """Process a latency-schema CSV (PlainLat/QpLat/DeferLat/SubmitLat columns)."""
+    generated_images = []
+    headers = ['DataSize/B', 'Npus', 'Blocks', 'UBsize/KB'] + [c for c in LATENCY_COLUMNS if c in csv_headers]
+    try:
+        data_rows = []
+        with open(csv_file, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            next(reader, [])  # 跳过表头行，重新打开文件定位到数据行
+            index = {name: i for i, name in enumerate(csv_headers)}
+            for row in reader:
+                data_rows.append([row[index[col]] if index[col] < len(row) else '' for col in headers])
+    except Exception as e:
+        print(f"Error reading CSV file {csv_file}: {e}")
+        return generated_images, None
+
+    df = pd.DataFrame(data_rows, columns=headers)
+    for col in headers:
+        df[col] = pd.to_numeric(df[col], errors='coerce')  # '-' renders as NaN
+    if 'DataSize/B' not in df.columns:
+        print(f"Error: CSV file {csv_file} missing required column: DataSize/B")
+        return generated_images, df
+
+    if no_plot:
+        return generated_images, df
+    images, _ = plot_lat_dataframe(csv_file, output_dir, df)
+    return images, df
+
+def plot_lat_dataframe(csv_file, output_dir, df):
+    """Plot latency-vs-datasize curves for each interface form."""
+    generated_images = []
+    os.makedirs(output_dir, exist_ok=True)
+    csv_basename = os.path.splitext(os.path.basename(csv_file))[0]
+    lat_cols = [c for c in LATENCY_COLUMNS if c in df.columns]
+    if not lat_cols:
+        return generated_images, df
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for col in lat_cols:
+        series = df[['DataSize/B', col]].dropna()
+        if series.empty:
+            continue
+        ax.plot(series['DataSize/B'], series[col], marker='o', label=col.replace('/us', ''))
+    ax.set_xlabel('DataSize')
+    ax.set_ylabel('Latency(us)')
+    ax.set_xscale('log')
+    ax.grid(True)
+    max_val = df['DataSize/B'].max()
+    min_val = df['DataSize/B'].min()
+    ticks = [2 ** i for i in range(int(np.log2(min_val)), int(np.log2(max_val)) + 1)]
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(bytes_to_human_readable))
+    ax.xaxis.set_major_locator(ticker.FixedLocator(ticks))
+    ax.tick_params(axis='x', rotation=45)
+    ax.legend()
+    fig.tight_layout()
+    fig_path = os.path.join(output_dir, f'{csv_basename}_latency_curves.png')
+    fig.savefig(fig_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Generated: {fig_path}")
+    generated_images.append({
+        'name': 'latency_curves',
+        'path': fig_path,
+        'description': '四种接口形态时延曲线（plain/qp/defer/submit）',
+        'subplots': [],
+        'lines': []
+    })
+    return generated_images, df
+
 def process_csv(csv_file, output_dir, ubsize_filter, coresize_filter, no_plot=False):
     """Process a single CSV file and generate charts to the specified output directory"""
     generated_images = []
@@ -115,6 +185,8 @@ def process_csv(csv_file, output_dir, ubsize_filter, coresize_filter, no_plot=Fa
         with open(csv_file, 'r', encoding='utf-8') as f:
             reader = csv.reader(f)
             csv_headers = [name.strip() for name in next(reader, [])]
+            if any(col in csv_headers for col in LATENCY_COLUMNS):
+                return process_lat_csv(csv_file, output_dir, csv_headers, no_plot)
             if 'CoreMaxTime/us' not in csv_headers:
                 print(f"Error: CSV file {csv_file} missing required column: CoreMaxTime/us")
                 return generated_images, df
@@ -424,7 +496,7 @@ def generate_markdown(root_dir, csv_data_dict):
             # 添加表格数据
             df = csv_info['dataframe']
             display_cols = []
-            for col in ['DataSize/B', 'Npus', 'Blocks', 'UBsize/KB', 'Bandwidth/GB/s', 'CoreMaxTime/us', 'Metric']:
+            for col in ['DataSize/B', 'Npus', 'Blocks', 'UBsize/KB', 'Bandwidth/GB/s', 'CoreMaxTime/us', 'Metric'] + LATENCY_COLUMNS:
                 if col in df.columns:
                     display_cols.append(col)
 
