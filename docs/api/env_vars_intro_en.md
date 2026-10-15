@@ -4,14 +4,15 @@
 When the unique ID API is used for initialization, you need to manually configure the environment variable `SHMEM_UID_SESSION_ID` or `SHMEM_UID_SOCK_IFNAME`. If both are configured, only `SHMEM_UID_SESSION_ID` will be read. When specifying `SHMEM_UID_SESSION_ID`, ensure that the IP address is reachable and the port is idle. When specifying `SHMEM_UID_SOCK_IFNAME`, ensure that the network protocol address specified by the network port exists.
 
 * `SHMEM_UID_SESSION_ID`: Directly specifies the IP address and port number of the listening socket of PE 0.
-SHMEM_UID_SESSION_ID configuration example:
-SHMEM_UID_SESSION_ID=127.0.0.1:1234
-SHMEM_UID_SESSION_ID=[6666:6666:6666:6666:6666:6666:6666:6666]:886
+SHMEM_UID_SESSION_ID configuration example (select one):
+export SHMEM_UID_SESSION_ID=127.0.0.1:1234
+export SHMEM_UID_SESSION_ID=[6666:6666:6666:6666:6666:6666:6666:6666]:886
+export SHMEM_UID_SESSION_ID=localhost:8888
 
 * `SHMEM_UID_SOCK_IFNAME`: Specifies the network port name and network layer protocol of the listening socket of PE 0.
-SHMEM_UID_SOCK_IFNAME configuration example:
-SHMEM_UID_SOCK_IFNAME=enpxxxx:inet4 (IPv4)
-SHMEM_UID_SOCK_IFNAME=enpxxxx:inet6 (IPv6)
+SHMEM_UID_SOCK_IFNAME configuration example (select one):
+export SHMEM_UID_SOCK_IFNAME=enpxxxx:inet4  # IPv4
+export SHMEM_UID_SOCK_IFNAME=enpxxxx:inet6  # IPv6
 
 ## Multi-instance Related
 Since each instance has an independent bootstrap, an available port must be provided when each bootstrap is built.

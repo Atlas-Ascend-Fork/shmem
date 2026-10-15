@@ -8,23 +8,23 @@
   - **IPv4字面量**：`ip:port`，如 `SHMEM_UID_SESSION_ID=192.168.1.100:1234`
   - **IPv6字面量**：`[ip]:port`，如 `SHMEM_UID_SESSION_ID=[::1]:886`
   - **主机名**：`hostname:port`，如 `SHMEM_UID_SESSION_ID=my-server:5555`（主机名通过系统名称解析服务（DNS、/etc/hosts 等）解析为实际 IP 地址）
-SHMEM_UID_SESSION_ID配置示例：
+SHMEM_UID_SESSION_ID配置示例（任选一条执行）：
 
 ```bash
-SHMEM_UID_SESSION_ID=127.0.0.1:1234
-SHMEM_UID_SESSION_ID=[6666:6666:6666:6666:6666:6666:6666:6666]:886
-SHMEM_UID_SESSION_ID=localhost:8888
+export SHMEM_UID_SESSION_ID=127.0.0.1:1234
+export SHMEM_UID_SESSION_ID=[6666:6666:6666:6666:6666:6666:6666:6666]:886
+export SHMEM_UID_SESSION_ID=localhost:8888
 ```
 
 * `SHMEM_UID_SOCK_IFNAME`:指定PE 0的监听socket的网口名和网络层协议。支持以下两种格式：
   - **网口名+协议**：`<ifname>:<inet4|inet6>`，显式指定地址族，如 `SHMEM_UID_SOCK_IFNAME=enpxxxx:inet4` 取 IPv4、`SHMEM_UID_SOCK_IFNAME=enpxxxx:inet6` 取 IPv6
   - **仅网口名**：`<ifname>`，不指定协议族时自动探测该网口可用地址族（日志会打印可用的 IPv4/IPv6）；两者都可用时优先 IPv4，仅 IPv6 可用时选 IPv6，都不可用则报错。如 `SHMEM_UID_SOCK_IFNAME=eth0`
-SHMEM_UID_SOCK_IFNAME配置示例：
+SHMEM_UID_SOCK_IFNAME配置示例（任选一条执行）：
 
 ```bash
-SHMEM_UID_SOCK_IFNAME=enpxxxx:inet4  取ipv4
-SHMEM_UID_SOCK_IFNAME=enpxxxx:inet6  取ipv6
-SHMEM_UID_SOCK_IFNAME=eth0          自动探测可用协议（优先ipv4）
+export SHMEM_UID_SOCK_IFNAME=enpxxxx:inet4  # 取 IPv4
+export SHMEM_UID_SOCK_IFNAME=enpxxxx:inet6  # 取 IPv6
+export SHMEM_UID_SOCK_IFNAME=eth0          # 自动探测可用协议（优先 IPv4）
 ```
 
 以上两个环境变量均未配置时自动搜索可用网口（IPv4/IPv6均可，跳过lo/docker/veth/br-/virbr/tun/tap等虚拟网口）。
