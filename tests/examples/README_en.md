@@ -10,10 +10,10 @@ tests/examples/
 ├── utils.py # Common utility functions (for example, dynamic error tolerance calculation)
 ├── np_uniform_generator.py # Uniform distribution random number generator
 ├── np_normal_generator.py # Normal distribution random number generator
-├── <kernel_name>/
+├── <kernel_name>/ # Kernel test directory (reserved for extension; no instance yet, see Section 5)
 │ ├── test_<kernel_name>.py # Pytest script for a specific kernel
 │ └── test_data/ # Persistent cache directory for test data
-├── readme.md # This document
+├── README.md # This document
 └── ... # Other kernel-specific test directories
 ```
 -   `config.py`: defines global configuration for the entire test framework, including tensor shape constraints, distribution parameters, data types, and precision thresholds.
@@ -60,12 +60,12 @@ The execution process of the test script (`test_<kernel_name>.py`) is as follows
         -   For ground truth values with absolute magnitude < `1.0`, perform an **absolute error** check: `|act - gt| <= err`.
 
 ## 4. Running a Test
-1.  **Build the kernel function**: Ensure that the C++ executable file of the target kernel function has been built. For example, for `<kernel_name>`, run the following command first:
+1.  **Build the example executables**: Enable example build via the top-level build script:
     ```bash
-    bash examples/<kernel_name>/scripts/build.sh
+    bash scripts/build.sh -examples
     ```
 2.  **Set the executable file path**: At the top of the `test_<kernel_name>.py` script, ensure that the `EXECUTABLE_PATH` variable points to the correct C++ executable file path.
-3.  **Run pytest**: In the root directory of the project, run the `pytest` command.
+3.  **Run pytest**: In the root directory of the project, run the `pytest` command (`<kernel_name>/` is a test directory created by following Section 5; no instance exists yet):
     ```bash
     export LD_LIBRARY_PATH=<path_to_aclshmem_lib>:$LD_LIBRARY_PATH
     pytest -sv tests/examples/<kernel_name>/

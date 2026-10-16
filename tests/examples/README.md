@@ -12,10 +12,10 @@ tests/examples/
 ├── utils.py # 通用工具函数（动态误差计算等）
 ├── np_uniform_generator.py # 均匀分布随机数生成器
 ├── np_normal_generator.py # 正态分布随机数生成器
-├── <kernel_name>/
+├── <kernel_name>/ # 内核测试目录（扩展预留，当前无实例，创建方式见第 5 节）
 │ ├── test_<kernel_name>.py # 指定内核的 pytest 测试脚本
 │ └── test_data/ # 持久化的测试数据缓存目录
-├── readme.md # 本文档
+├── README.md # 本文档
 └── ... # 其他内核的测试目录
 ```
 
@@ -69,14 +69,14 @@ tests/examples/
 
 ## 4. 如何运行测试
 
-1. **编译核函数**: 确保目标核函数的 C++ 可执行文件已经编译。例如，对于 `<kernel_name>`，需要先执行：
+1. **编译样例可执行文件**: 通过仓库顶层构建脚本开启样例构建：
 
     ```bash
-    bash examples/<kernel_name>/scripts/build.sh
+    bash scripts/build.sh -examples
     ```
 
 2. **设置可执行文件路径**: 在 `test_<kernel_name>.py` 脚本的顶部，确认 `EXECUTABLE_PATH` 变量指向了正确的 C++ 可执行文件路径。
-3. **运行 Pytest**: 在项目根目录下，直接运行 `pytest` 命令。
+3. **运行 Pytest**: 在项目根目录下，直接运行 `pytest` 命令（`<kernel_name>/` 为按第 5 节扩展创建的测试目录，当前仓库暂无实例）：
 
     ```bash
     export LD_LIBRARY_PATH=<path_to_aclshmem_lib>:$LD_LIBRARY_PATH
