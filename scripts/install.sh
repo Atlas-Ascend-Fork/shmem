@@ -20,7 +20,7 @@ VERSION=VERSION_PLACEHOLDER
 
 function print()
 {
-    echo "[${1}] ${2}"
+    echo "[SHMEM] [$(date '+%Y-%m-%d %H:%M:%S')] [${1}]: ${2}"
 }
 
 function chmod_authority()
@@ -203,6 +203,7 @@ function uninstall_process()
     if [ ! -d $1 ]; then
         return 0
     fi
+    print "INFO" "UninstallPath: $1"
     print "INFO" "SHMEM $(basename $1) uninstall start!"
     shmem_dir=$(cd $1/..;pwd)
     delete_latest $1
@@ -261,6 +262,7 @@ function check_path()
 function install_to_path()
 {
     install_dir=${default_install_dir}/${VERSION}
+    print "INFO" "InstallPath: ${install_dir}"
     if [ -d ${install_dir} ]; then
         print "INFO" "The installation directory exists, uninstall first"
     fi
@@ -284,10 +286,10 @@ function install_process()
     local arch_pkg=SHMEMPKGARCH
 
     if [ $( uname -a | grep -c -i "x86_64" ) -ne 0 ]; then
-        echo "it is system of x86_64"
+        print "INFO" "System architecture: x86_64"
         ARCH="x86_64"
     elif [ $( uname -a | grep -c -i "aarch64" ) -ne 0 ]; then
-        echo "it is system of aarch64"
+        print "INFO" "System architecture: aarch64"
         ARCH="aarch64"
     fi
 
@@ -342,7 +344,7 @@ function main()
         check_owner
         install_process
         chmod_authority
-        print "INFO" "SHMEM install success"
+        print "INFO" "SHMEM ${VERSION} install success, InstallPath: ${install_dir}"
     fi
 }
 

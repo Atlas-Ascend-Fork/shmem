@@ -258,7 +258,7 @@ run 包安装前会检查 CANN 环境变量，并确认当前用户与 CANN 安�
 
 `--check` 会输出芯片和设备数量、HDK/CANN 版本、MTE/SDMA/UDMA/RDMA 支持情况及包产物状态。检查项出现 `WARN` 时请根据最终汇总处理；当前命令退出成功不代表所有可选通信能力均满足要求。详细检查项参见 [shmem-config 命令参考](tools/shmem_config_guide.md)。
 
-终端输出 `SHMEM install success` 后，根据执行用户加载环境变量：
+终端输出 `SHMEM {version} install success, InstallPath: {install_dir}` 后，根据执行用户加载环境变量：
 
 ```bash
 # root 用户默认路径

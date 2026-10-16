@@ -13,7 +13,7 @@ CUR_DIR=$(dirname $(readlink -f $0))
 
 function print()
 {
-    echo "[${1}] ${2}"
+    echo "[SHMEM] [$(date '+%Y-%m-%d %H:%M:%S')] [${1}]: ${2}"
 }
 
 function delete_install_files()
@@ -80,6 +80,7 @@ function uninstall_process()
     if [ ! -d $1 ]; then
         return 0
     fi
+    print "INFO" "UninstallPath: $1"
     print "INFO" "SHMEM $(basename $1) uninstall start!"
     shmem_dir=$(cd $1/..;pwd)
     delete_latest $1
