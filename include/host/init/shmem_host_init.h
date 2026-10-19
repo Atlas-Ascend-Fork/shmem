@@ -229,6 +229,38 @@ ACLSHMEM_HOST_API int aclshmemx_get_qp_num(data_op_engine_type_t engine, uint32_
  *        if the self-created attr structure is incorrect, the initialization will fail.
  *        It is recommended to build the attributes by <b>aclshmemx_set_attr_uniqueid_args()</b>.
  *
+ * @note attributes->runtime_config carries process-level runtime configuration.
+ *       - udma_shared_jetty (tri-state, Ascend950 only): controls whether peers resolving to the same
+ *         (local EID, qp slot) share one underlying jetty (one SQ/CQ ring and one queue state) on the UDMA
+ *         engine; with a single QP this reduces to the same local EID.
+ *         ACLSHMEM_CONFIG_DEFAULT means "not specified in this call": it uses the library default
+ *         (disabled) until the first successful initialization, and inherits the frozen process-level
+ *         value afterwards; ENABLED/DISABLED are explicit overrides and must match the frozen value.
+ *         Enabling requires the channel config APIs of the running libhcomm.so; on an older runtime,
+ *         initialization fails with ACLSHMEM_NOT_SUPPORTED instead of silently creating independent queues.
+ *         Keeping it disabled works on old and new runtimes alike. reserved must be all zero
+ *         (ACLSHMEM_INVALID_PARAM otherwise).
+ *       - The attribute layout is selected by attributes->option_attr.version, written by the header's
+ *         default member initializer. Do not overwrite option_attr wholesale. Historical values
+ *         {0, 0x00010018, 0x00010078, 0x000100B8} are interpreted as the legacy 120-byte layout and
+ *         runtime_config is ignored (all DEFAULT); unknown version values are rejected with
+ *         ACLSHMEM_INVALID_PARAM.
+ *       - The runtime configuration is process-wide: the first successful initialization freezes it;
+ *         while any instance is initialized, a later initialization requesting a conflicting explicit
+ *         value fails with ACLSHMEM_NOT_SUPPORTED; after the last instance is finalized it resets to
+ *         the library defaults. The effective mode must be identical on every PE (explicit values must
+ *         match; DEFAULT is always safe because it inherits the frozen mode); shared jetty widens the
+ *         quiet/completion semantics to the whole sharing group, so inconsistent values across PEs
+ *         produce incompatible behavior. Initialization and finalization are serialized by ACLSHMEM
+ *         within a process.
+ * @note Serialization constraint: while shared jetty is enabled, all operations that mutate the queue
+ *       state of one sharing group -- every UDMA submission (put/get/atomic), quiet, and the in-path
+ *       capacity polling, issued from any thread, stream, or core -- must be issued serially by the
+ *       caller; only operations on different jetties may run in parallel. The data path adds no
+ *       concurrency protection to the queue index advance, so intra-group concurrency safety is the
+ *       caller's responsibility. See the shared jetty notes on aclshmemx_udma_quiet() for the matching
+ *       device-side contract.
+ *
  * @param bootstrap_flags   [in] bootstrap_flags for init.
  * @param attributes        [in] Pointer to the user-defined attributes.
  * @return Returns 0 on success or an error code on failure

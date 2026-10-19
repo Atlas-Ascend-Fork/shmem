@@ -27,6 +27,8 @@ static const char* fuc_data_type;
 static const char* fuc_test_type;
 int f_pe = 0;
 int f_npu = 0;
+// UDMA shared jetty switch: 1 enables it through attr.runtime_config.udma_shared_jetty.
+int g_shared_jetty = 0;
 aclshmemx_uniqueid_t default_flag_uid;
 
 static aclshmem_prof_pe_t* out_profs;
@@ -99,6 +101,10 @@ int test_udma_perf_test_impl(
 
     test_set_attr(pe_id, n_pes, local_mem_size, ipport, default_flag_uid, &attributes);
     attributes.option_attr.data_op_engine_type = ACLSHMEM_DATA_OP_UDMA;
+    // Shared jetty must be enabled before initialization and kept identical on every PE.
+    if (g_shared_jetty != 0) {
+        attributes.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED;
+    }
     if (qp_count > 1) {
         PERFTEST_CHECK_GOTO(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, static_cast<uint32_t>(qp_count)), ret, cleanup);
     }
@@ -359,25 +365,18 @@ int main(int argc, char* argv[])
     const char* metric_str = "bw";
     int batch = 0; // BW: 0 => full async; 1 => quiet after each NBI; N > 1 => defer/submit per group
     int qp_count = 1;
+    int shared_jetty = 0; // 0 disables shared jetty (default), 1 enables it
 
     static struct option long_options[] = {
-        {"pes", required_argument, 0, 0},
-        {"pe-id", required_argument, 0, 0},
-        {"ipport", required_argument, 0, 0},
-        {"gnpus", required_argument, 0, 0},
-        {"fpe", required_argument, 0, 0},
-        {"fnpu", required_argument, 0, 0},
-        {"test-type", required_argument, 0, 't'},
-        {"datatype", required_argument, 0, 'd'},
-        {"block-size", required_argument, 0, 'b'},
-        {"block-range", required_argument, 0, 0},
-        {"exponent", required_argument, 0, 'e'},
-        {"exponent-range", required_argument, 0, 0},
-        {"loop-count", required_argument, 0, 0},
-        {"ub-size", required_argument, 0, 0},
-        {"metric", required_argument, 0, 0},
-        {"batch", required_argument, 0, 0},
-        {0, 0, 0, 0}};
+        {"pes", required_argument, 0, 0},          {"pe-id", required_argument, 0, 0},
+        {"ipport", required_argument, 0, 0},       {"gnpus", required_argument, 0, 0},
+        {"fpe", required_argument, 0, 0},          {"fnpu", required_argument, 0, 0},
+        {"test-type", required_argument, 0, 't'},  {"datatype", required_argument, 0, 'd'},
+        {"block-size", required_argument, 0, 'b'}, {"block-range", required_argument, 0, 0},
+        {"exponent", required_argument, 0, 'e'},   {"exponent-range", required_argument, 0, 0},
+        {"loop-count", required_argument, 0, 0},   {"ub-size", required_argument, 0, 0},
+        {"metric", required_argument, 0, 0},       {"batch", required_argument, 0, 0},
+        {"shared-jetty", required_argument, 0, 0}, {0, 0, 0, 0}};
 
     int opt, option_index = 0;
     while ((opt = getopt_long(argc, argv, "t:d:b:e:", long_options, &option_index)) != -1) {
@@ -425,6 +424,8 @@ int main(int argc, char* argv[])
                     metric_str = optarg;
                 else if (strcmp(long_options[option_index].name, "batch") == 0)
                     batch = std::atoi(optarg);
+                else if (strcmp(long_options[option_index].name, "shared-jetty") == 0)
+                    shared_jetty = std::atoi(optarg);
                 break;
             default:
                 std::cerr << "Unknown argument" << std::endl;
@@ -451,6 +452,11 @@ int main(int argc, char* argv[])
         std::cerr << "Error: --batch must be >= 0 (got " << batch << ")" << std::endl;
         return 1;
     }
+    if (shared_jetty != 0 && shared_jetty != 1) {
+        std::cerr << "Error: --shared-jetty must be 0 or 1 (got " << shared_jetty << ")" << std::endl;
+        return 1;
+    }
+    g_shared_jetty = shared_jetty;
     if (qp_count < 1 || qp_count > static_cast<int>(ACLSHMEM_MAX_QP_NUM)) {
         std::cerr << "Error: --block-size must be in [1, " << ACLSHMEM_MAX_QP_NUM << "] (got " << qp_count << ")"
                   << std::endl;
@@ -506,7 +512,8 @@ int main(int argc, char* argv[])
     std::cout << "[INFO] udma_perftest start, pe=" << (pe_id + f_pe) << ", t=" << test_type << ", d=" << fuc_data_type
               << ", exp=" << min_exponent << "-" << max_exponent << ", loop=" << loop_count << ", ub=" << ub_size_kib
               << "KiB"
-              << ", metric=" << metric_str << ", batch=" << batch << ", qp_count=" << qp_count << std::endl;
+              << ", metric=" << metric_str << ", batch=" << batch << ", qp_count=" << qp_count
+              << ", shared_jetty=" << g_shared_jetty << std::endl;
 
     fuc_test_type = test_type;
     perftest::udma_mode_t test_mode = get_udma_mode(test_type);

@@ -32,6 +32,7 @@
 #include "utils/exception/shmem_exception_report.h"
 #include "utils/under_api/dl_api.h"
 #include "utils/under_api/dl_acl_api.h"
+#include "utils/under_api/dl_hcomm_api.h"
 
 #define DEFAULT_MY_PE (-1)
 #define DEFAULT_N_PES (-1)
@@ -190,10 +191,90 @@ bool aclshmemi_parse_port_strict(const std::string& port_str, uint16_t& port)
 }
 } // namespace
 
-int32_t version_compatible()
+// Historical option_attr.version values. All of them decode as the legacy 120-byte layout:
+// runtime_config is absent and every runtime knob behaves as ACLSHMEM_CONFIG_DEFAULT.
+constexpr int32_t LEGACY_VERSION_MEMSET = 0;
+constexpr int32_t LEGACY_VERSION_OPTIONAL_ATTR_SIZE = (1 << 16) + 24;       // old header NSDMI
+constexpr int32_t LEGACY_VERSION_INIT_ATTR_120 = (1 << 16) + 120;           // old helpers, sizeof(attr)
+constexpr int32_t LEGACY_VERSION_STALE_RECOMPILED_HELPER = (1 << 16) + 184; // unfixed helper vs new header
+
+// Classify option_attr.version and decode runtime_config. Legacy versions announce a 120-byte
+// attr, so the tail is never read there (out of bounds); they yield all-DEFAULT.
+static int32_t decode_runtime_config(const aclshmemx_init_attr_t* attributes, aclshmem_runtime_config_t* request)
 {
-    int32_t status = ACLSHMEM_SUCCESS;
-    return status;
+    const int32_t version = attributes->option_attr.version;
+    if (version == ACLSHMEM_INIT_ATTR_VERSION) {
+        const aclshmem_runtime_config_t& config = attributes->runtime_config;
+        if (static_cast<uint32_t>(config.udma_shared_jetty) > static_cast<uint32_t>(ACLSHMEM_CONFIG_ENABLED)) {
+            SHM_LOG_ERROR(
+                "runtime_config.udma_shared_jetty has an invalid tri-state value: "
+                << static_cast<uint32_t>(config.udma_shared_jetty));
+            return ACLSHMEM_INVALID_PARAM;
+        }
+        if (!std::all_of(config.reserved, config.reserved + 15, [](uint32_t value) { return value == 0; })) {
+            SHM_LOG_ERROR("runtime_config.reserved must be all zero for unknown slots.");
+            return ACLSHMEM_INVALID_PARAM;
+        }
+        *request = config;
+        return ACLSHMEM_SUCCESS;
+    }
+    if (version == LEGACY_VERSION_MEMSET || version == LEGACY_VERSION_OPTIONAL_ATTR_SIZE ||
+        version == LEGACY_VERSION_INIT_ATTR_120 || version == LEGACY_VERSION_STALE_RECOMPILED_HELPER) {
+        if (version == LEGACY_VERSION_STALE_RECOMPILED_HELPER) {
+            SHM_LOG_WARN(
+                "option_attr.version " << std::hex << version << std::dec
+                                       << " looks like a stale helper recomputed against the new header; "
+                                          "interpreting the attributes as the legacy 120-byte layout and ignoring "
+                                          "runtime_config. Assign option_attr field-wise so the header's default "
+                                          "version survives.");
+        }
+        *request = aclshmem_runtime_config_t{};
+        return ACLSHMEM_SUCCESS;
+    }
+    SHM_LOG_ERROR(
+        "Unsupported option_attr.version: " << std::hex << version << std::dec << "; expected " << std::hex
+                                            << ACLSHMEM_INIT_ATTR_VERSION << std::dec
+                                            << " or a historical value. Do not overwrite option_attr wholesale; the "
+                                               "version is written by the header's default member initializer.");
+    return ACLSHMEM_INVALID_PARAM;
+}
+
+// Resolve and validate the effective shared-jetty mode for this request, honoring the frozen
+// process-level config. The result is only computed into *effective_enabled; the caller commits
+// it into g_udma_qp_config after initialization succeeds (a failed attempt leaves no trace).
+// Must be called with g_aclshmem_ctx_mutex held.
+static int32_t apply_runtime_config(const aclshmem_runtime_config_t& request, bool& effective_enabled)
+{
+    const aclshmem_config_state_t state = request.udma_shared_jetty;
+    if (g_qp_config_frozen) {
+        const bool frozen_enabled = g_udma_qp_config.sharedJettyEnabled;
+        const bool conflicts = (state == ACLSHMEM_CONFIG_ENABLED && !frozen_enabled) ||
+                               (state == ACLSHMEM_CONFIG_DISABLED && frozen_enabled);
+        SHM_VALIDATE_RETURN(
+            !conflicts,
+            "Runtime configuration conflicts with the frozen process-level shared-jetty mode; it cannot change "
+            "while an ACLSHMEM instance is initialized.",
+            ACLSHMEM_NOT_SUPPORTED);
+        // DEFAULT (never conflicts) or a matching explicit value: keep the frozen mode.
+        effective_enabled = frozen_enabled;
+        return ACLSHMEM_SUCCESS;
+    }
+    bool enabled = g_udma_qp_config.sharedJettyEnabled;
+    if (state == ACLSHMEM_CONFIG_ENABLED) {
+        enabled = true;
+    } else if (state == ACLSHMEM_CONFIG_DISABLED) {
+        enabled = false;
+    }
+    // Fail fast when an effective enable cannot be delivered: load libhcomm on demand (the later
+    // LoadExtendLibrary becomes a no-op) and reject a runtime missing the channel config symbols,
+    // rather than silently degrading to independent queues.
+    if (enabled && (shm::DlHcommApi::LoadLibrary() != ACLSHMEM_SUCCESS || !shm::DlHcommApi::HasChannelConfigApis())) {
+        SHM_LOG_ERROR("Shared jetty requires the channel config APIs which this libhcomm.so does not provide; "
+                      "upgrade the CANN runtime or keep runtime_config.udma_shared_jetty disabled.");
+        return ACLSHMEM_NOT_SUPPORTED;
+    }
+    effective_enabled = enabled;
+    return ACLSHMEM_SUCCESS;
 }
 
 int32_t aclshmemi_state_init_attr(aclshmemx_init_attr_t* attributes, uint64_t heap_size)
@@ -1169,7 +1250,15 @@ static int32_t aclshmemi_init_attr_impl(
     ACLSHMEM_CHECK_RET(
         use_user_buffer_heap ? check_user_buffer_heap_attr(attributes) : check_attr(attributes),
         "An error occurred while checking the initialization attributes. Please check the initialization parameters.");
-    ACLSHMEM_CHECK_RET(version_compatible(), "ACLSHMEM Version mismatch.");
+    aclshmem_runtime_config_t runtime_config_request{};
+    ACLSHMEM_CHECK_RET(
+        decode_runtime_config(attributes, &runtime_config_request),
+        "Failed to decode the initialization attributes (unsupported version or malformed runtime_config).");
+    // Phase 1: compute the effective mode only; phase 2 publishes it at the success tail.
+    bool shared_jetty_effective = false;
+    ACLSHMEM_CHECK_RET(
+        apply_runtime_config(runtime_config_request, shared_jetty_effective),
+        "Failed to apply the runtime configuration from the initialization attributes.");
 
     // init bootstrap
     ACLSHMEM_CHECK_RET(aclshmemi_bootstrap_init(bootstrap_flags, attributes));
@@ -1214,9 +1303,12 @@ static int32_t aclshmemi_init_attr_impl(
         SHM_LOG_INFO("init_manager already exists, skipping creation. ");
     }
 
-    // aclshmem_entity init
+    // aclshmem_entity init. The entity snapshot carries this attempt's effective mode, not the
+    // still-unpublished process default.
+    shm::transport::UdmaQpConfig udma_qp_config_for_entity = g_udma_qp_config;
+    udma_qp_config_for_entity.sharedJettyEnabled = shared_jetty_effective;
     ACLSHMEM_CHECK_RET(init_manager->bind_aclshmem_entity(
-        attributes, &g_state, &g_boot_handle, std::move(user_buffer_heap_input), g_udma_qp_config,
+        attributes, &g_state, &g_boot_handle, std::move(user_buffer_heap_input), udma_qp_config_for_entity,
         g_rdma_qp_config.qpNum, g_sdma_qp_config.qpNum));
     entity_bound = true;
     ACLSHMEM_CHECK_RET(init_manager->init_device_state());
@@ -1258,6 +1350,12 @@ static int32_t aclshmemi_init_attr_impl(
     SHM_LOG_INFO("The ACLSHMEM pe: " << aclshmem_my_pe() << " init success.");
     exception_guard.release();
     init_succeeded = true;
+    // Phase 2: publish the effective mode exactly when the freeze takes effect, so a failed
+    // attempt never leaks its configuration.
+    g_udma_qp_config.sharedJettyEnabled = shared_jetty_effective;
+    SHM_LOG_INFO(
+        "runtime config applied: udma_shared_jetty request="
+        << static_cast<uint32_t>(runtime_config_request.udma_shared_jetty) << ", effective=" << shared_jetty_effective);
     g_qp_config_frozen = true;
     init_abort_guard.release();
     ctx_guard.release();

@@ -314,6 +314,7 @@ def _import_bindings():
         aclshmem_team_get_config, OptionalAttr, aclshmem_global_exit, set_conf_store_tls,
         set_log_level, set_extern_logger, aclshmem_signal_wait_until,
         UniqueId, MemType, InstanceContext, Handle, ProfData,
+        RuntimeConfig, ConfigState,
         ACLSHMEM_TEAM_WORLD, ACLSHMEM_TEAM_INVALID,
     )
 
@@ -387,6 +388,8 @@ __all__ = [
     'InitMode',
     'InitStatus',
     'OpEngineType',
+    'RuntimeConfig',
+    'ConfigState',
     'UniqueId',
     'MemType',
     'InstanceContext',

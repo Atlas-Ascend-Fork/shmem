@@ -83,13 +83,26 @@ ACLSHMEM_DEVICE bool aclshmemi_udma_exception_report_read_wq(
     out->wq.buf_addr = wq->buf_addr;
     out->wq.wqe_size = wq->wqe_size;
     out->wq.depth = wq->depth;
-    out->wq.head = wq->head;
-    out->wq.tail = wq->tail;
+    out->wq.state_addr = wq->state_addr;
     out->wq.db_mode = static_cast<int32_t>(wq->db_mode);
     out->wq.db_addr = wq->db_addr;
     out->wq.sl = wq->sl;
-    out->wq.cqe_cnt = wq->cqe_cnt;
+    // cqe_cnt lives in the shared queue state (see below), so it is reported from there, not here.
     out->wq.amo_addr = wq->amo_addr;
+    // The queue state is a separate buffer, so it needs its own flush before being read. Slots the
+    // host never filled keep state_addr == 0; report zeroed indices for them rather than faulting.
+    __gm__ aclshmemi_udma_queue_state_t* state = (__gm__ aclshmemi_udma_queue_state_t*)wq->state_addr;
+    if (state == nullptr) {
+        out->wq.head = 0;
+        out->wq.tail = 0;
+        out->wq.cqe_cnt = 0;
+        return true;
+    }
+    aclshmemi_udma_exception_report_dcci_cachelines(
+        reinterpret_cast<__gm__ uint8_t*>(state), sizeof(aclshmemi_udma_queue_state_t));
+    out->wq.head = state->sq_head;
+    out->wq.tail = state->sq_tail;
+    out->wq.cqe_cnt = state->cqe_cnt;
     return true;
 }
 
@@ -106,10 +119,19 @@ ACLSHMEM_DEVICE bool aclshmemi_udma_exception_report_read_cq(
     out->cq.buf_addr = cq->buf_addr;
     out->cq.cqe_size = cq->cqe_size;
     out->cq.depth = cq->depth;
-    out->cq.head = cq->head;
-    out->cq.tail = cq->tail;
+    out->cq.state_addr = cq->state_addr;
     out->cq.db_mode = static_cast<int32_t>(cq->db_mode);
     out->cq.db_addr = cq->db_addr;
+    __gm__ aclshmemi_udma_queue_state_t* state = (__gm__ aclshmemi_udma_queue_state_t*)cq->state_addr;
+    if (state == nullptr) {
+        out->cq.head = 0;
+        out->cq.tail = 0;
+        return true;
+    }
+    aclshmemi_udma_exception_report_dcci_cachelines(
+        reinterpret_cast<__gm__ uint8_t*>(state), sizeof(aclshmemi_udma_queue_state_t));
+    out->cq.head = state->cq_head;
+    out->cq.tail = state->cq_tail;
     return true;
 }
 

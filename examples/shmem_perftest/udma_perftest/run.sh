@@ -46,6 +46,8 @@ FIRST_NPU="0"
 FIRST_PE="0"
 # 分析模式: none/plot/md
 ANALYSE_MODE="none"
+# UDMA shared jetty 开关：0 关闭（默认），1 开启（所有 PE 必须一致）
+SHARED_JETTY="0"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -66,6 +68,9 @@ while [[ $# -gt 0 ]]; do
             ;;
         --batch)
             if [ -n "$2" ]; then BATCH="$2"; shift 2; else echo "Error: --batch requires a value."; exit 1; fi
+            ;;
+        -shared_jetty)
+            if [ -n "$2" ]; then SHARED_JETTY="$2"; shift 2; else echo "Error: -shared_jetty requires a value (0|1)."; exit 1; fi
             ;;
         -b|--block-size)
             if [ -n "$2" ]; then
@@ -129,6 +134,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --ub-size <size>                UB size(KiB)，用于低阶 UDMA 入参和 CSV；lat 聚合窗口场景自动上调"
             echo "  --metric <bw|lat>               性能口径 (lat 仅支持 -t put 和单 QP，自动遍历 plain/QP/defer/submit 四种接口形态)"
             echo "  --batch <N>                     BW：0=普通 NBI 全异步，1=每次后 quiet，>1=每批 defer...submit 后 quiet；lat：聚合窗口大小 (默认 100)"
+            echo "  -shared_jetty <0|1>             是否启用 shared jetty（0 关闭默认，1 开启；所有 PE 必须一致）"
             echo "  -pes <size>                     PE 数量"
             echo "  -ipport <ip:port>               通信地址"
             echo "  -gnpus <num>                    NPU 数量"
@@ -164,6 +170,10 @@ fi
 
 if ! [[ "$BATCH" =~ ^[0-9]+$ ]]; then
     echo "错误: --batch 必须是非负整数 (got '$BATCH')"
+    exit 1
+fi
+if ! [[ "$SHARED_JETTY" =~ ^[01]$ ]]; then
+    echo "错误: -shared_jetty 必须是 0 或 1 (got '$SHARED_JETTY')"
     exit 1
 fi
 if ! [[ "$LOOP_COUNT" =~ ^[1-9][0-9]*$ ]]; then
@@ -219,6 +229,7 @@ echo "UB size(KiB): $UB_SIZE"
 echo "Metric: $METRIC"
 echo "Batch: $BATCH"
 echo "Block/QP count: $BLOCK_SIZE_INPUT"
+echo "Shared jetty: $SHARED_JETTY"
 echo "PE_SIZE: $PE_SIZE, GNPU_NUM: $GNPU_NUM"
 echo "FIRST_NPU: $FIRST_NPU, FIRST_PE: $FIRST_PE"
 
@@ -236,7 +247,7 @@ run_test() {
             --fpe "$FIRST_PE" --fnpu "$FIRST_NPU" -t "$test_type" -d "$data_type" \
             --exponent-range "$MIN_EXPONENT" "$MAX_EXPONENT" --loop-count "$LOOP_COUNT" \
             --ub-size "$UB_SIZE" --metric "$METRIC" --batch "$BATCH" \
-            --block-size "$BLOCK_SIZE_INPUT" &
+            --block-size "$BLOCK_SIZE_INPUT" --shared-jetty "$SHARED_JETTY" &
         pids+=("$!")
     done
     local failed=0

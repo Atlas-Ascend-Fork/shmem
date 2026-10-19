@@ -32,6 +32,7 @@ using shm::transport::device::aclshmemi_ubmem_info_t;
 using shm::transport::device::aclshmemi_udma_cq_ctx_t;
 using shm::transport::device::aclshmemi_udma_db_mode_t;
 using shm::transport::device::aclshmemi_udma_qp_table_t;
+using shm::transport::device::aclshmemi_udma_queue_state_t;
 using shm::transport::device::aclshmemi_udma_wq_ctx_t;
 
 constexpr uint32_t ACLSHMEMI_EXCEPTION_REPORT_MAX_QP_NUM = 64;
@@ -243,8 +244,26 @@ int aclshmemi_udma_exception_report_read_cqe(
         ACLSHMEMI_UDMA_EXCEPTION_REPORT_ENTRY_CQE, entry_addr, entry_size, entry, device_entry, "CQE");
 }
 
+// Fetch the standalone queue state a wq_ctx / cq_ctx points at. Unlike the templated helper this
+// treats a null address as "slot never filled" and reports zeroed indices instead of an error, which
+// is the normal case for the self entry, unconnected peers and skipped relay-diagonal slots.
+void aclshmemi_exception_report_copy_queue_state(aclshmemi_udma_queue_state_t& state, uint64_t state_addr)
+{
+    state = aclshmemi_udma_queue_state_t{};
+    if (state_addr == 0) {
+        return;
+    }
+    auto ret = shm::DlAclApi::AclrtMemcpy(
+        &state, sizeof(state), reinterpret_cast<const void*>(static_cast<uintptr_t>(state_addr)), sizeof(state),
+        ACL_MEMCPY_DEVICE_TO_HOST);
+    if (ret != ACLSHMEM_SUCCESS) {
+        SHM_LOG_ERROR("[EXCEPTION][UDMA] copy queue state failed, addr = 0x" << std::hex << state_addr << std::dec);
+    }
+}
+
 int aclshmemi_udma_exception_report_read_wq_ctx(
-    uint64_t entry_addr, aclshmemi_udma_wq_ctx_t& wq, aclshmemi_udma_exception_report_entry_t* device_entry)
+    uint64_t entry_addr, aclshmemi_udma_wq_ctx_t& wq, aclshmemi_udma_queue_state_t& state,
+    aclshmemi_udma_exception_report_entry_t* device_entry)
 {
     aclshmemi_udma_exception_report_entry_t entry{};
     int ret = aclshmemi_udma_exception_report_read_entry(
@@ -257,18 +276,21 @@ int aclshmemi_udma_exception_report_read_wq_ctx(
     wq.buf_addr = entry.wq.buf_addr;
     wq.wqe_size = entry.wq.wqe_size;
     wq.depth = entry.wq.depth;
-    wq.head = entry.wq.head;
-    wq.tail = entry.wq.tail;
+    wq.state_addr = entry.wq.state_addr;
     wq.db_mode = static_cast<aclshmemi_udma_db_mode_t>(entry.wq.db_mode);
     wq.db_addr = entry.wq.db_addr;
     wq.sl = entry.wq.sl;
-    wq.cqe_cnt = entry.wq.cqe_cnt;
+    // cqe_cnt lives in the shared queue state, copied below alongside head / tail.
     wq.amo_addr = entry.wq.amo_addr;
+    state.sq_head = entry.wq.head;
+    state.sq_tail = entry.wq.tail;
+    state.cqe_cnt = entry.wq.cqe_cnt;
     return ACLSHMEM_SUCCESS;
 }
 
 int aclshmemi_udma_exception_report_read_cq_ctx(
-    uint64_t entry_addr, aclshmemi_udma_cq_ctx_t& cq, aclshmemi_udma_exception_report_entry_t* device_entry)
+    uint64_t entry_addr, aclshmemi_udma_cq_ctx_t& cq, aclshmemi_udma_queue_state_t& state,
+    aclshmemi_udma_exception_report_entry_t* device_entry)
 {
     aclshmemi_udma_exception_report_entry_t entry{};
     int ret = aclshmemi_udma_exception_report_read_entry(
@@ -281,10 +303,11 @@ int aclshmemi_udma_exception_report_read_cq_ctx(
     cq.buf_addr = entry.cq.buf_addr;
     cq.cqe_size = entry.cq.cqe_size;
     cq.depth = entry.cq.depth;
-    cq.head = entry.cq.head;
-    cq.tail = entry.cq.tail;
+    cq.state_addr = entry.cq.state_addr;
     cq.db_mode = static_cast<aclshmemi_udma_db_mode_t>(entry.cq.db_mode);
     cq.db_addr = entry.cq.db_addr;
+    state.cq_head = entry.cq.head;
+    state.cq_tail = entry.cq.tail;
     return ACLSHMEM_SUCCESS;
 }
 
@@ -378,24 +401,26 @@ void aclshmemi_exception_report_log_wqe_block(
 
 void aclshmemi_exception_report_log_wqe_unavailable(
     const aclshmemi_exception_report_slot_t& label, uint32_t qp_idx, const char* queue_name,
-    const aclshmemi_udma_wq_ctx_t& wq, const char* reason)
+    const aclshmemi_udma_wq_ctx_t& wq, const aclshmemi_udma_queue_state_t& state, const char* reason)
 {
     SHM_LOG_ERROR(
         "[EXCEPTION][UDMA " << queue_name << " WQE DETAIL] unavailable " << aclshmemi_exception_report_slot_text(label)
-                            << " qp=" << qp_idx << " reason=" << reason << " head=" << wq.head << " tail=" << wq.tail
-                            << " depth=" << wq.depth << " wqeSize=" << wq.wqe_size << " cqeCnt=" << wq.cqe_cnt
-                            << " bufAddr=0x" << std::hex << wq.buf_addr << std::dec);
+                            << " qp=" << qp_idx << " reason=" << reason << " head=" << state.sq_head
+                            << " tail=" << state.sq_tail << " depth=" << wq.depth << " wqeSize=" << wq.wqe_size
+                            << " cqeCnt=" << state.cqe_cnt << " bufAddr=0x" << std::hex << wq.buf_addr
+                            << " stateAddr=0x" << wq.state_addr << std::dec);
 }
 
 bool aclshmemi_exception_report_is_wq_valid(const aclshmemi_udma_wq_ctx_t& wq)
 {
+    // state_addr == 0 means the host never filled this slot, so its queue state is not readable.
     return wq.buf_addr != 0 && wq.depth != 0 && wq.depth <= ACLSHMEMI_EXCEPTION_REPORT_MAX_WQ_DEPTH &&
-           wq.wqe_size != 0 && wq.wqe_size <= ACLSHMEMI_EXCEPTION_REPORT_MAX_WQE_SIZE;
+           wq.wqe_size != 0 && wq.wqe_size <= ACLSHMEMI_EXCEPTION_REPORT_MAX_WQE_SIZE && wq.state_addr != 0;
 }
 
 void aclshmemi_exception_report_dump_cqes(
     const aclshmemi_exception_report_slot_t& label, uint32_t qp_idx, const aclshmemi_udma_cq_ctx_t& cq,
-    aclshmemi_udma_exception_report_entry_t* device_entry)
+    const aclshmemi_udma_queue_state_t& state, aclshmemi_udma_exception_report_entry_t* device_entry)
 {
     if (cq.buf_addr == 0 || cq.depth == 0 || cq.cqe_size == 0) {
         SHM_LOG_ERROR(
@@ -403,16 +428,17 @@ void aclshmemi_exception_report_dump_cqes(
                                      << " has invalid CQ buffer/depth/cqeSize.");
         return;
     }
+    const uint32_t cq_tail = state.cq_tail;
     const uint32_t first_tail =
-        cq.tail >= ACLSHMEMI_EXCEPTION_REPORT_CQE_WINDOW ? cq.tail - ACLSHMEMI_EXCEPTION_REPORT_CQE_WINDOW + 1U : 0U;
-    for (uint32_t tail = first_tail; tail <= cq.tail; ++tail) {
+        cq_tail >= ACLSHMEMI_EXCEPTION_REPORT_CQE_WINDOW ? cq_tail - ACLSHMEMI_EXCEPTION_REPORT_CQE_WINDOW + 1U : 0U;
+    for (uint32_t tail = first_tail; tail <= cq_tail; ++tail) {
         const uint32_t index = tail % cq.depth;
         const uint64_t cqe_addr = cq.buf_addr + static_cast<uint64_t>(index) * cq.cqe_size;
         aclshmemi_udma_exception_report_entry_t entry{};
         if (aclshmemi_udma_exception_report_read_cqe(cqe_addr, cq.cqe_size, entry, device_entry) != ACLSHMEM_SUCCESS) {
             return;
         }
-        aclshmemi_exception_report_log_cqe(label, qp_idx, tail, cq.depth, cq.head, index, cqe_addr, entry.cqe);
+        aclshmemi_exception_report_log_cqe(label, qp_idx, tail, cq.depth, state.cq_head, index, cqe_addr, entry.cqe);
         if (tail == UINT32_MAX) {
             break;
         }
@@ -448,11 +474,12 @@ bool aclshmemi_udma_exception_report_read_wqe_block(
 
 bool aclshmemi_exception_report_dump_wqe_block(
     const aclshmemi_exception_report_slot_t& label, uint32_t qp_idx, const char* queue_name,
-    const aclshmemi_udma_wq_ctx_t& wq, uint32_t base_bb, aclshmemi_udma_exception_report_entry_t* device_entry)
+    const aclshmemi_udma_wq_ctx_t& wq, const aclshmemi_udma_queue_state_t& state, uint32_t base_bb,
+    aclshmemi_udma_exception_report_entry_t* device_entry)
 {
     aclshmemi_exception_report_wqe_block_t block{};
     if (!aclshmemi_udma_exception_report_read_wqe_block(wq, base_bb, block, device_entry)) {
-        aclshmemi_exception_report_log_wqe_unavailable(label, qp_idx, queue_name, wq, "readFailed");
+        aclshmemi_exception_report_log_wqe_unavailable(label, qp_idx, queue_name, wq, state, "readFailed");
         return false;
     }
     aclshmemi_exception_report_log_wqe_block(label, qp_idx, queue_name, block);
@@ -461,29 +488,32 @@ bool aclshmemi_exception_report_dump_wqe_block(
 
 void aclshmemi_exception_report_dump_wqe_window(
     const aclshmemi_exception_report_slot_t& label, uint32_t qp_idx, const char* queue_name,
-    const aclshmemi_udma_wq_ctx_t& wq, uint32_t start_bb, uint32_t block_count,
-    aclshmemi_udma_exception_report_entry_t* device_entry)
+    const aclshmemi_udma_wq_ctx_t& wq, const aclshmemi_udma_queue_state_t& state, uint32_t start_bb,
+    uint32_t block_count, aclshmemi_udma_exception_report_entry_t* device_entry)
 {
     for (uint32_t i = 0; i < block_count; ++i) {
-        (void)aclshmemi_exception_report_dump_wqe_block(label, qp_idx, queue_name, wq, start_bb + i, device_entry);
+        (void)aclshmemi_exception_report_dump_wqe_block(
+            label, qp_idx, queue_name, wq, state, start_bb + i, device_entry);
     }
 }
 
 void aclshmemi_exception_report_dump_wqe(
     const aclshmemi_exception_report_slot_t& label, uint32_t qp_idx, const char* queue_name,
-    const aclshmemi_udma_wq_ctx_t& wq, aclshmemi_udma_exception_report_entry_t* device_entry)
+    const aclshmemi_udma_wq_ctx_t& wq, const aclshmemi_udma_queue_state_t& state,
+    aclshmemi_udma_exception_report_entry_t* device_entry)
 {
     if (!aclshmemi_exception_report_is_wq_valid(wq)) {
-        aclshmemi_exception_report_log_wqe_unavailable(label, qp_idx, queue_name, wq, "invalidWqState");
+        aclshmemi_exception_report_log_wqe_unavailable(label, qp_idx, queue_name, wq, state, "invalidWqState");
         return;
     }
-    if (wq.head == 0) {
-        aclshmemi_exception_report_dump_wqe_window(label, qp_idx, queue_name, wq, 0U, 1U, device_entry);
+    const uint32_t sq_head = state.sq_head;
+    if (sq_head == 0) {
+        aclshmemi_exception_report_dump_wqe_window(label, qp_idx, queue_name, wq, state, 0U, 1U, device_entry);
         return;
     }
-    const uint32_t block_count = std::min(wq.head, ACLSHMEMI_EXCEPTION_REPORT_WQE_WINDOW);
+    const uint32_t block_count = std::min(sq_head, ACLSHMEMI_EXCEPTION_REPORT_WQE_WINDOW);
     aclshmemi_exception_report_dump_wqe_window(
-        label, qp_idx, queue_name, wq, wq.head - block_count, block_count, device_entry);
+        label, qp_idx, queue_name, wq, state, sq_head - block_count, block_count, device_entry);
 }
 
 int aclshmemi_exception_report_load_udma_info(aclshmemi_aiv_udma_info_t& info)
@@ -560,6 +590,14 @@ int aclshmemi_exception_report_dump_udma(bool detail_enabled)
             auto cq = scq[offset];
             auto wq = sq[offset];
             auto rq_wq = detail_enabled ? rq[offset] : aclshmemi_udma_wq_ctx_t{};
+            // The mutable indices live in a standalone buffer now, so they are fetched separately.
+            // SQ and CQ of one slot share a state; RQ carries a copy of the same pointer.
+            aclshmemi_udma_queue_state_t state{};
+            aclshmemi_udma_queue_state_t rq_state{};
+            aclshmemi_exception_report_copy_queue_state(state, wq.state_addr);
+            if (detail_enabled) {
+                aclshmemi_exception_report_copy_queue_state(rq_state, rq_wq.state_addr);
+            }
             bool cq_realtime_read = false;
             bool sq_realtime_read = false;
             bool rq_realtime_read = false;
@@ -572,15 +610,15 @@ int aclshmemi_exception_report_dump_udma(bool detail_enabled)
                     table.rq_ptr + static_cast<uint64_t>(offset) * sizeof(aclshmemi_udma_wq_ctx_t);
                 cq_realtime_read =
                     aclshmemi_udma_exception_report_read_cq_ctx(
-                        scq_ctx_addr, cq, static_cast<aclshmemi_udma_exception_report_entry_t*>(entry_report_device)) ==
-                    ACLSHMEM_SUCCESS;
+                        scq_ctx_addr, cq, state,
+                        static_cast<aclshmemi_udma_exception_report_entry_t*>(entry_report_device)) == ACLSHMEM_SUCCESS;
                 sq_realtime_read =
                     aclshmemi_udma_exception_report_read_wq_ctx(
-                        sq_ctx_addr, wq, static_cast<aclshmemi_udma_exception_report_entry_t*>(entry_report_device)) ==
-                    ACLSHMEM_SUCCESS;
+                        sq_ctx_addr, wq, state,
+                        static_cast<aclshmemi_udma_exception_report_entry_t*>(entry_report_device)) == ACLSHMEM_SUCCESS;
                 rq_realtime_read =
                     aclshmemi_udma_exception_report_read_wq_ctx(
-                        rq_ctx_addr, rq_wq,
+                        rq_ctx_addr, rq_wq, rq_state,
                         static_cast<aclshmemi_udma_exception_report_entry_t*>(entry_report_device)) == ACLSHMEM_SUCCESS;
             }
             if (cq.cqn == 0 && cq.buf_addr == 0) {
@@ -588,8 +626,9 @@ int aclshmemi_exception_report_dump_udma(bool detail_enabled)
             }
             std::ostringstream qp_log;
             qp_log << "[EXCEPTION][UDMA QP] " << aclshmemi_exception_report_slot_text(label) << " qp=" << qp_idx
-                   << " cqPi=" << cq.head << " cqCi=" << cq.tail << " wqPi=" << wq.head << " wqCi=" << wq.tail
-                   << " cqeCnt=" << wq.cqe_cnt;
+                   << " cqPi=" << state.cq_head << " cqCi=" << state.cq_tail << " wqPi=" << state.sq_head
+                   << " wqCi=" << state.sq_tail << " cqeCnt=" << state.cqe_cnt << " stateAddr=0x" << std::hex
+                   << wq.state_addr << std::dec;
             if (detail_enabled) {
                 qp_log << " cqRealtimeRead=" << cq_realtime_read << " sqRealtimeRead=" << sq_realtime_read
                        << " rqRealtimeRead=" << rq_realtime_read;
@@ -601,12 +640,13 @@ int aclshmemi_exception_report_dump_udma(bool detail_enabled)
                                                    << " cqn=" << cq.cqn << " wqn=" << wq.wqn << " depth=" << cq.depth
                                                    << " cqeSize=" << cq.cqe_size);
                 aclshmemi_exception_report_dump_cqes(
-                    label, qp_idx, cq, static_cast<aclshmemi_udma_exception_report_entry_t*>(entry_report_device));
-                aclshmemi_exception_report_dump_wqe(
-                    label, qp_idx, "SQ", wq,
+                    label, qp_idx, cq, state,
                     static_cast<aclshmemi_udma_exception_report_entry_t*>(entry_report_device));
                 aclshmemi_exception_report_dump_wqe(
-                    label, qp_idx, "RQ", rq_wq,
+                    label, qp_idx, "SQ", wq, state,
+                    static_cast<aclshmemi_udma_exception_report_entry_t*>(entry_report_device));
+                aclshmemi_exception_report_dump_wqe(
+                    label, qp_idx, "RQ", rq_wq, rq_state,
                     static_cast<aclshmemi_udma_exception_report_entry_t*>(entry_report_device));
             }
         }

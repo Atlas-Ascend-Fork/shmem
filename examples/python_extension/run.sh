@@ -55,6 +55,9 @@ function run_py_test()
     run_torchrun --nproc-per-node "${NPROC_PER_NODE}" qp_num_test.py
     [[ $? -eq 0 ]] || return 1
 
+    run_torchrun --nproc-per-node "${NPROC_PER_NODE}" runtime_config_test.py
+    [[ $? -eq 0 ]] || return 1
+
     run_torchrun --nproc-per-node "${NPROC_PER_NODE}" tls_test.py
     [[ $? -eq 0 ]] || return 1
 

@@ -71,6 +71,7 @@ bash run.sh -t bi_put -pes 16 -gnpus 8 -fpe 8 -fnpu 0 -ipport tcp://192.168.1.10
 | `--ub-size <size>` | - | UB 工作区大小，单位为 KiB（`1 KiB = 1024 B`）。kernel 使用该值分配本地 UB 工作区；低阶 UDMA 接口接收的是该工作区地址而非本参数值。CSV 中按 KiB 记录。高阶 UDMA RMA 默认 MTE staging 的 UB 配置要求至少 128 B | 16 |
 | `--metric <bw\|lat>` | - | 性能口径：`bw`=带宽，`lat`=接口延迟，一次遍历全部接口形态（详见下方说明） | bw |
 | `--batch <n>` | - | `bw`：连续发起多少次操作后等待完成；`lat`：聚合接口的窗口大小（详见下方说明） | `0` |
+| `-shared_jetty <0\|1>` | - | 是否启用 shared jetty：`0` 关闭（默认），`1` 开启。开启时通过初始化参数 `attr.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED` 设置，必须在初始化前设置且所有 PE 必须一致。shared jetty 会使解析到同一 (本地 EID, qp slot) 的对端 PE 共享底层 jetty（一条 SQ/CQ 环和一个队列状态）；`quiet` 的等待范围扩大到该共享组（普通 `quiet` 只排空 QP0 所属组，逐 QP 排空用 `qp_quiet`）。开启时要求运行环境中的 libhcomm.so 提供 channel config 接口，否则初始化会失败并返回 `ACLSHMEM_NOT_SUPPORTED`；同时在共享组内修改队列状态的操作（put/get/atomic 提交、quiet、容量轮询）均需由调用方串行下发，多 QP 并发提交场景（`-b > 1`）与共享组内串行约束可能冲突，需结合实际拓扑确认 | 0 |
 | `-pes <size>` | - | PE 数量 | 2 |
 | `-ipport <ip:port>` | - | 通信地址 | tcp://127.0.0.1:8768 |
 | `-gnpus <num>` | - | NPU 数量 | 2 |
@@ -166,6 +167,9 @@ CSV 文件名加 metric 前缀；多 QP 场景追加 QP 数后缀：`output/udma
 
 # 4 QP + 聚合提交（每个 QP 的 batch=8）
 ./run.sh -t bi_get -d float -e 16 -b 4 --batch 8
+
+# 启用 shared jetty
+./run.sh -t put -d float -e 16 -shared_jetty 1
 ```
 
 ## put_signal 行为说明

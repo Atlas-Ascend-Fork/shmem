@@ -120,7 +120,7 @@ rank 0: 广播 uid                              // 库不负责广播
 | 步骤 | 源码调用 | 文件 |
 |------|----------|------|
 | 1 多实例 | `aclshmemi_instance_ctx_create` → `aclshmemx_instance_ctx_set_impl` | `shmem_init.cpp` |
-| 2 校验 | `aclshmemx_init_status`（须 `NOT_INITIALIZED`）→ `set_log_level` → `check_attr` → `version_compatible` | `shmem_init.cpp` |
+| 2 校验 | `aclshmemx_init_status`（须 `NOT_INITIALIZED`）→ `set_log_level` → `check_attr` → `decode_runtime_config` + `apply_runtime_config` | `shmem_init.cpp` |
 | 3 Bootstrap | `aclshmemi_bootstrap_init` | `shmemi_bootstrap.cpp` |
 | 4 State | `aclshmemi_state_init_attr` | `shmem_init.cpp` |
 | 5 Backend | `new aclshmemi_init_backend()`（`g_init_manager_count++`） | `shmem_init.cpp` |
@@ -177,10 +177,13 @@ UID 的 `addr` 来自 `SHMEM_UID_SESSION_ID` 或 `SHMEM_UID_SOCK_IFNAME`；`magi
 | `ip_port` | Default：`tcp://host:port` 或 `tcp6://[host]:port`，端口 > 1024 |
 | `comm_args` | Default/UID：`aclshmemx_uniqueid_t*`；MPI：`MPI_Comm*` |
 | `instance_id` | 多 instance 标识，默认 0 |
+| `option_attr.version` | 属性布局判别（头文件默认成员初始化写入 `0x000200B8`，格式 2 / 184 字节；勿整体覆盖 `option_attr`，见 §3.3.2） |
 | `option_attr.data_op_engine_type` | 传输通路位或（见下表） |
 | `option_attr.shm_init_timeout` | 传入 `CreateStore` 的 `connMaxRetry`（实现为重试次数，见 [config_store_bootstrap.md §10.1](config_store_bootstrap.md#101-超时汇总)） |
 | `option_attr.control_operation_timeout` | 转为 `SmemGroupOption.timeoutMs` |
 | `option_attr.sockFd` | rank 0 预绑定 socket |
+| `runtime_config.udma_shared_jetty` | UDMA shared jetty 三态开关（`ACLSHMEM_CONFIG_DEFAULT/DISABLED/ENABLED`），进程级配置，见 §3.3.2 |
+| `runtime_config.reserved` | 预留槽，必须全零 |
 
 **传输通路标志**
 
@@ -227,7 +230,8 @@ rank 0 `CreateStore(..., isServer=true)` 监听；各 PE client 的 `connMaxRetr
 - `aclshmemx_init_status()` 须为 `ACLSHMEM_STATUS_NOT_INITIALIZED`（`is_aclshmem_created == false`），禁止重复 init
 - `aclshmemx_set_log_level(ERROR_LEVEL)`；`SHMEM_LOG_LEVEL` 可覆盖
 - `check_attr`：PE 范围、`local_mem_size`、超时非 0、`data_op_engine_type` bitmask
-- `version_compatible`
+- `decode_runtime_config`：按 `option_attr.version` 判别属性布局——历史值 {0, 0x00010018, 0x00010078, 0x000100B8} 按 120 字节旧前缀解释（runtime_config 视为全 DEFAULT），`0x000200B8` 读 184 字节布局并校验三态枚举与 reserved 全零，其余拒绝（`INVALID_PARAM`）
+- `apply_runtime_config`：三态合并进 `g_udma_qp_config.sharedJettyEnabled`（冻结期显式冲突返回 `NOT_SUPPORTED`，DEFAULT 采纳冻结值）；生效开启时按需加载 libhcomm 并校验 channel config API，缺失则 `NOT_SUPPORTED`
 
 #### 3.3.3 Bootstrap 加载
 

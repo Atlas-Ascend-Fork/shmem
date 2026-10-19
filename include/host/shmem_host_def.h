@@ -12,6 +12,7 @@
 #ifndef SHMEM_HOST_DEF_H
 #define SHMEM_HOST_DEF_H
 #include <climits>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "host_device/shmem_common_types.h"
@@ -163,6 +164,39 @@ typedef struct {
 #define shmem_init_optional_attr_t aclshmem_init_optional_attr_t
 
 /**
+ * @brief Tri-state of a runtime configuration knob carried in aclshmemx_init_attr_t::runtime_config.
+ *
+ * DEFAULT means "not specified in this call": it uses the library default until the first successful
+ * initialization and inherits the frozen process-level value afterwards; DISABLED/ENABLED are
+ * explicit overrides and must match the frozen value while any instance is initialized. The
+ * distinction is reserved for the future configuration-file priority system: explicit attr value >
+ * file default > library default.
+ */
+typedef enum : uint32_t {
+    ACLSHMEM_CONFIG_DEFAULT = 0,  ///< Not specified in this call.
+    ACLSHMEM_CONFIG_DISABLED = 1, ///< Explicitly disabled.
+    ACLSHMEM_CONFIG_ENABLED = 2,  ///< Explicitly enabled.
+} aclshmem_config_state_t;
+#define shmem_config_state_t aclshmem_config_state_t
+
+/**
+ * @struct aclshmem_runtime_config_t
+ * @brief Process-level runtime configuration appended to aclshmemx_init_attr_t.
+ *
+ * - aclshmem_config_state_t udma_shared_jetty: shared-jetty mode of the UDMA engine (Ascend950
+ *   only). DEFAULT means "not specified" (library default until the first successful
+ *   initialization, the frozen value afterwards); ENABLED requires the channel config APIs of the
+ *   running libhcomm.so (otherwise initialization fails with ACLSHMEM_NOT_SUPPORTED).
+ * - uint32_t reserved[15]: reserved for future ABI-compatible extensions. New consumers take slots
+ *   in order, an all-zero word means "not specified", and unknown non-zero words are rejected.
+ */
+typedef struct aclshmem_runtime_config {
+    aclshmem_config_state_t udma_shared_jetty = ACLSHMEM_CONFIG_DEFAULT;
+    uint32_t reserved[15] = {};
+} aclshmem_runtime_config_t;
+#define shmem_runtime_config_t aclshmem_runtime_config_t
+
+/**
  * @struct aclshmemx_init_attr_t
  * @brief Mandatory parameter for attributes used for initialization.
  *
@@ -177,23 +211,32 @@ typedef struct {
  * - aclshmem_init_optional_attr_t option_attr: Optional Parameters.
  * - void *comm_args: Parameters required for communication during the bootstrap phase when initializing different
  * flags.
+ * - aclshmem_runtime_config_t runtime_config: Process-level runtime configuration; see aclshmem_runtime_config_t.
+ *   The attribute layout (whether runtime_config is read) is selected by option_attr.version, so callers must not
+ *   overwrite option_attr wholesale and clobber the version written by the default member initializer.
  */
 typedef struct aclshmemx_init_attr_t {
     int my_pe;
     int n_pes;
     char ip_port[ACLSHMEM_MAX_IP_PORT_LEN] = {};
     uint64_t local_mem_size;
-    aclshmem_init_optional_attr_t option_attr = {
-        (1 << 16) + sizeof(aclshmem_init_optional_attr_t),
-        ACLSHMEM_DATA_OP_MTE,
-        DEFAULT_TIMEOUT,
-        DEFAULT_TIMEOUT,
-        DEFAULT_TIMEOUT,
-        0};
+    aclshmem_init_optional_attr_t option_attr = {(2 << 16) + sizeof(aclshmemx_init_attr_t),
+                                                 ACLSHMEM_DATA_OP_MTE,
+                                                 DEFAULT_TIMEOUT,
+                                                 DEFAULT_TIMEOUT,
+                                                 DEFAULT_TIMEOUT,
+                                                 0};
     void* comm_args = nullptr;
     uint64_t instance_id = 0;
+    aclshmem_runtime_config_t runtime_config = {};
 } aclshmemx_init_attr_t;
 #define shmem_init_attr_t aclshmemx_init_attr_t
+
+/// \brief Format-2 marker written by the default member initializer of
+/// aclshmemx_init_attr_t::option_attr.version (high 16 bits: format number, low 16 bits: total
+/// attribute byte size). Historical values {0, (1<<16)+24, (1<<16)+120, (1<<16)+184} are decoded
+/// as the legacy 120-byte layout without runtime_config.
+constexpr int32_t ACLSHMEM_INIT_ATTR_VERSION = (2 << 16) + sizeof(aclshmemx_init_attr_t);
 
 /**
  * @struct aclshmemx_uniqueid_t

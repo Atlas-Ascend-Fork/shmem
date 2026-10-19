@@ -180,7 +180,8 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_udma_poll_cq(uint32_t slot, uint32_t qp_idx, 
         (__gm__ aclshmemi_udma_cq_ctx_t*)(tbl->scq_ptr + (slot * qp_num + qp_idx) * sizeof(aclshmemi_udma_cq_ctx_t));
     auto cq_base_addr = cq_ctx_entry->buf_addr;
     auto cqe_size = cq_ctx_entry->cqe_size;
-    uint32_t cur_tail = cq_ctx_entry->tail;
+    __gm__ aclshmemi_udma_queue_state_t* state = (__gm__ aclshmemi_udma_queue_state_t*)cq_ctx_entry->state_addr;
+    uint32_t cur_tail = state->cq_tail;
     uint32_t last_entry_idx = 0;
     bool has_polled_cqe = false;
     while (cur_tail != idx) {
@@ -215,24 +216,23 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_udma_poll_cq(uint32_t slot, uint32_t qp_idx, 
     }
 
     // Update CQ tail
-    cq_ctx_entry->tail = cur_tail;
-    __gm__ aclshmemi_udma_wq_ctx_t* wq_ctx_entry =
-        (__gm__ aclshmemi_udma_wq_ctx_t*)(tbl->sq_ptr + (slot * qp_num + qp_idx) * sizeof(aclshmemi_udma_wq_ctx_t));
-    aclshmemi_udma_poll_cq_update_info(cur_tail, last_entry_idx, cq_ctx_entry, wq_ctx_entry);
+    state->cq_tail = cur_tail;
+    aclshmemi_udma_poll_cq_update_info(cur_tail, last_entry_idx, cq_ctx_entry, state);
     return 0;
 }
 
 ACLSHMEM_DEVICE void aclshmemi_udma_poll_cq_update_info(
     uint32_t cur_tail, uint32_t entry_idx, __gm__ aclshmemi_udma_cq_ctx_t* cq_ctx_entry,
-    __gm__ aclshmemi_udma_wq_ctx_t* wq_ctx_entry)
+    __gm__ aclshmemi_udma_queue_state_t* state)
 {
     // Ring CQ Doorbell (reference URMA implementation)
     auto cq_db_addr = cq_ctx_entry->db_addr;
     // For JFC, we write the consumer index (cur_tail) directly
     __gm__ uint32_t* db_addr = (__gm__ uint32_t*)cq_ctx_entry->db_addr;
     st_dev((uint32_t)(cur_tail & 0xFFFFFF), db_addr, 0);
-    // Update WQ tail
-    wq_ctx_entry->tail = aclshmemi_udma_unwrap_wq_tail(wq_ctx_entry->tail, entry_idx);
+    // Update WQ tail: unwrap the 16-bit CQE entry_idx into the monotonic tail. The state is shared
+    // per jetty group, so this stays coherent for slots landing on the same physical queue.
+    state->sq_tail = aclshmemi_udma_unwrap_wq_tail(state->sq_tail, entry_idx);
 }
 
 ACLSHMEM_DEVICE void aclshmemi_dump_sqe_ctx(__gm__ aclshmemi_sqe_ctx_t* sqe_ctx)
@@ -457,47 +457,52 @@ ACLSHMEM_DEVICE void assert_remote_jetty_type_valid(__gm__ aclshmemi_ubmem_info_
     }
 }
 
-ACLSHMEM_DEVICE bool aclshmemi_udma_sq_has_credit(__gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, uint32_t wqe_bb_cnt)
+// Credit is computed against the shared queue state: slots on one jetty consume one SQ. Callers
+// resolve state from qp_ctx_entry->state_addr once and pass it in, keeping the GM load off the
+// per-post hot path.
+ACLSHMEM_DEVICE bool aclshmemi_udma_sq_has_credit(__gm__ aclshmemi_udma_queue_state_t* state, uint32_t wqe_bb_cnt)
 {
-    uint32_t used_after_post = qp_ctx_entry->head + wqe_bb_cnt - qp_ctx_entry->tail;
+    uint32_t used_after_post = state->sq_head + wqe_bb_cnt - state->sq_tail;
     return used_after_post + ACLSHMEM_UDMA_AGGREGATE_CREDIT_GUARD < shm::UDMA_SQ_BASKBLK_CNT;
 }
 
-ACLSHMEM_DEVICE bool aclshmemi_udma_sq_has_capacity(__gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, uint32_t wqe_bb_cnt)
+ACLSHMEM_DEVICE bool aclshmemi_udma_sq_has_capacity(__gm__ aclshmemi_udma_queue_state_t* state, uint32_t wqe_bb_cnt)
 {
-    return qp_ctx_entry->head + wqe_bb_cnt - qp_ctx_entry->tail < shm::UDMA_SQ_BASKBLK_CNT;
+    return state->sq_head + wqe_bb_cnt - state->sq_tail < shm::UDMA_SQ_BASKBLK_CNT;
 }
 
+// Poll CQ if the send queue lacks credit after this post. head / tail / cqe_cnt live in the shared
+// queue state, so the credit check and the poll target go through state, not wq_ctx fields.
 ACLSHMEM_DEVICE void aclshmemi_udma_poll_cq_when_sq_overflow(
-    __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, uint32_t slot, uint32_t qp_idx, uint32_t wqe_bb_cnt)
+    __gm__ aclshmemi_udma_queue_state_t* state, uint32_t slot, uint32_t qp_idx, uint32_t wqe_bb_cnt)
 {
-    if (!aclshmemi_udma_sq_has_credit(qp_ctx_entry, wqe_bb_cnt)) {
-        (void)aclshmemi_udma_poll_cq(slot, qp_idx, qp_ctx_entry->cqe_cnt);
+    if (!aclshmemi_udma_sq_has_credit(state, wqe_bb_cnt)) {
+        (void)aclshmemi_udma_poll_cq(slot, qp_idx, state->cqe_cnt);
     }
 }
 
 ACLSHMEM_DEVICE void aclshmemi_udma_debug_ensure_sq_credit(
-    __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, uint32_t slot, uint32_t qp_idx, uint32_t wqe_bb_cnt)
+    __gm__ aclshmemi_udma_queue_state_t* state, uint32_t slot, uint32_t qp_idx, uint32_t wqe_bb_cnt)
 {
-    if (aclshmemi_udma_sq_has_credit(qp_ctx_entry, wqe_bb_cnt)) {
+    if (aclshmemi_udma_sq_has_credit(state, wqe_bb_cnt)) {
         return;
     }
 
     aclshmemi_kernel_abort(
         "UDMA SQ lacks credit: slot=%u qp_idx=%u need=%u head=%u tail=%u cqe_cnt=%u\n", slot, qp_idx, wqe_bb_cnt,
-        qp_ctx_entry->head, qp_ctx_entry->tail, qp_ctx_entry->cqe_cnt);
+        state->sq_head, state->sq_tail, state->cqe_cnt);
 }
 
 ACLSHMEM_DEVICE void aclshmemi_udma_debug_ensure_sq_capacity(
-    __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, uint32_t slot, uint32_t qp_idx, uint32_t wqe_bb_cnt)
+    __gm__ aclshmemi_udma_queue_state_t* state, uint32_t slot, uint32_t qp_idx, uint32_t wqe_bb_cnt)
 {
-    if (aclshmemi_udma_sq_has_capacity(qp_ctx_entry, wqe_bb_cnt)) {
+    if (aclshmemi_udma_sq_has_capacity(state, wqe_bb_cnt)) {
         return;
     }
 
     aclshmemi_kernel_abort(
         "UDMA SQ lacks capacity: slot=%u qp_idx=%u need=%u head=%u tail=%u cqe_cnt=%u\n", slot, qp_idx, wqe_bb_cnt,
-        qp_ctx_entry->head, qp_ctx_entry->tail, qp_ctx_entry->cqe_cnt);
+        state->sq_head, state->sq_tail, state->cqe_cnt);
 }
 
 ACLSHMEM_DEVICE void aclshmemi_udma_debug_check_aggregate_batch_size(uint32_t pending_wqe_cnt)
@@ -879,39 +884,46 @@ ACLSHMEM_DEVICE void aclshmemi_udma_post_send(
     // which compute_slot ignores while returning pe.
     uint32_t slot = aclshmemi_udma_compute_slot(pe, relay_pe);
     __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry = aclshmemi_udma_get_qp_ctx(udma_info, slot, qp_idx);
+    // Slots sharing a jetty share one state, keeping the producer index unique across the group.
+    // Resolve the state pointer once; every helper below takes it as an argument instead of
+    // re-loading qp_ctx_entry->state_addr.
+    __gm__ aclshmemi_udma_queue_state_t* state = (__gm__ aclshmemi_udma_queue_state_t*)qp_ctx_entry->state_addr;
     auto wqe_size = qp_ctx_entry->wqe_size;
     ACLSHMEM_DEBUG_FUNC(assert_qp_params_valid, qp_ctx_entry);
     constexpr uint32_t WQE_BB_CNT = get_wqe_bb_cnt<OP_CODE>();
-    aclshmemi_udma_poll_cq_when_sq_overflow(qp_ctx_entry, slot, qp_idx, WQE_BB_CNT);
-    ACLSHMEM_DEBUG_FUNC(aclshmemi_udma_debug_ensure_sq_credit, qp_ctx_entry, slot, qp_idx, WQE_BB_CNT);
-    uint32_t cur_head = qp_ctx_entry->head;
-    uint32_t cqe_cnt = qp_ctx_entry->cqe_cnt;
+    aclshmemi_udma_poll_cq_when_sq_overflow(state, slot, qp_idx, WQE_BB_CNT);
+    ACLSHMEM_DEBUG_FUNC(aclshmemi_udma_debug_ensure_sq_credit, state, slot, qp_idx, WQE_BB_CNT);
+    uint32_t cur_head = state->sq_head;
+    uint32_t cqe_cnt = state->cqe_cnt;
     __gm__ aclshmemi_ubmem_info_t* remote_mem_info = aclshmemi_udma_get_mem_info(udma_info, slot, qp_idx);
     // Write SQE to HBM
     uint32_t posted_head = cur_head;
     aclshmemi_udma_fill_post_send_wqe<T, OP_CODE, CONFIG>(
         qp_ctx_entry, remote_mem_info, remote_addr, local_addr, cur_head, wqe_size, message_len, params);
     cur_head += WQE_BB_CNT;
-    aclshmemi_udma_post_send_update_info(cur_head, qp_ctx_entry);
+    aclshmemi_udma_post_send_update_info(cur_head, qp_ctx_entry, state);
+    // Only advance the group-wide CQE counter when this op actually requests a CQE.
     if constexpr (CONFIG.cqe != 0) {
         cqe_cnt++;
     }
-    qp_ctx_entry->cqe_cnt = cqe_cnt;
+    state->cqe_cnt = cqe_cnt;
     if constexpr (ACLSHMEM_RELAY_SUPPORTED) {
-        dcci_cachelines((__gm__ uint8_t*)qp_ctx_entry, sizeof(aclshmemi_udma_wq_ctx_t));
+        // wq_ctx is read-only static data now; only the mutable queue state needs flushing.
+        dcci_cachelines((__gm__ uint8_t*)state, sizeof(aclshmemi_udma_queue_state_t));
     }
     ACLSHMEM_DEBUG_FUNC(aclshmemi_dump_sq_wqe, qp_ctx_entry, posted_head, wqe_size, (uint32_t)sizeof(T));
 }
 
+// Rings the SQ doorbell and records the new producer index in the shared queue state. Callers
+// resolve state once; the doorbell address still comes from the wq_ctx, so both are passed in.
 ACLSHMEM_DEVICE void aclshmemi_udma_post_send_update_info(
-    uint32_t cur_head, __gm__ aclshmemi_udma_wq_ctx_t*& qp_ctx_entry)
+    uint32_t cur_head, __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, __gm__ aclshmemi_udma_queue_state_t* state)
 {
     // Ring SQ Doorbell (reference udma_update_sq_db in UDMA)
     // Note: db address is 64-bit, but we only update 32-bit value
     __gm__ uint32_t* door_bell_addr = (__gm__ uint32_t*)qp_ctx_entry->db_addr;
     st_dev(cur_head, door_bell_addr, 0);
-    qp_ctx_entry->head = cur_head;
-    return;
+    state->sq_head = cur_head;
 }
 
 ACLSHMEM_DEVICE void aclshmemi_udma_copy_wqe_from_ub(
@@ -960,11 +972,11 @@ static_assert(
 static_assert(ACLSHMEM_UDMA_DATA_MOVER_WQE_SIZE == 64, "UDMA aggregate data mover WQE must be one 64B WQEBB");
 
 ACLSHMEM_DEVICE void aclshmemi_udma_poll_before_aggregate_flush(
-    __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, uint32_t slot, uint32_t qp_idx, uint32_t staged_bb_cnt)
+    __gm__ aclshmemi_udma_queue_state_t* state, uint32_t slot, uint32_t qp_idx, uint32_t staged_bb_cnt)
 {
-    uint32_t used_after_flush = qp_ctx_entry->head + staged_bb_cnt - qp_ctx_entry->tail;
+    uint32_t used_after_flush = state->sq_head + staged_bb_cnt - state->sq_tail;
     if (used_after_flush + ACLSHMEM_UDMA_AGGREGATE_CREDIT_GUARD >= shm::UDMA_SQ_BASKBLK_CNT) {
-        (void)aclshmemi_udma_poll_cq(slot, qp_idx, qp_ctx_entry->cqe_cnt);
+        (void)aclshmemi_udma_poll_cq(slot, qp_idx, state->cqe_cnt);
     }
 }
 
@@ -979,8 +991,9 @@ ACLSHMEM_DEVICE void aclshmemi_udma_flush_aggregate_wqes(
 
     constexpr uint32_t depth = shm::UDMA_SQ_BASKBLK_CNT;
     constexpr uint32_t max_copy_wqe_cnt = depth - ACLSHMEM_UDMA_AGGREGATE_CREDIT_GUARD;
+    __gm__ aclshmemi_udma_queue_state_t* state = (__gm__ aclshmemi_udma_queue_state_t*)qp_ctx_entry->state_addr;
     ACLSHMEM_DEBUG_FUNC(aclshmemi_udma_debug_check_aggregate_batch_size, pending_wqe_cnt);
-    uint32_t cur_head = qp_ctx_entry->head;
+    uint32_t cur_head = state->sq_head;
     uint32_t ub_slot = 0;
     while (remaining_wqe_cnt != 0) {
         uint32_t sq_slot = cur_head % depth;
@@ -991,8 +1004,8 @@ ACLSHMEM_DEVICE void aclshmemi_udma_flush_aggregate_wqes(
         if (copy_wqe_cnt > max_copy_wqe_cnt) {
             copy_wqe_cnt = max_copy_wqe_cnt;
         }
-        aclshmemi_udma_poll_before_aggregate_flush(qp_ctx_entry, pe, qp_idx, copy_wqe_cnt);
-        ACLSHMEM_DEBUG_FUNC(aclshmemi_udma_debug_ensure_sq_capacity, qp_ctx_entry, pe, qp_idx, copy_wqe_cnt);
+        aclshmemi_udma_poll_before_aggregate_flush(state, pe, qp_idx, copy_wqe_cnt);
+        ACLSHMEM_DEBUG_FUNC(aclshmemi_udma_debug_ensure_sq_capacity, state, pe, qp_idx, copy_wqe_cnt);
 
         __gm__ uint8_t* sq_addr = (__gm__ uint8_t*)(qp_ctx_entry->buf_addr + sq_slot * wqe_size);
         __ubuf__ uint8_t* ub_wqe = ub_wqe_base + ub_slot * wqe_size;
@@ -1004,9 +1017,12 @@ ACLSHMEM_DEVICE void aclshmemi_udma_flush_aggregate_wqes(
         cur_head += copy_wqe_cnt;
         ub_slot += copy_wqe_cnt;
         remaining_wqe_cnt -= copy_wqe_cnt;
-        aclshmemi_udma_post_send_update_info(cur_head, qp_ctx_entry);
+        aclshmemi_udma_post_send_update_info(cur_head, qp_ctx_entry, state);
     }
-    qp_ctx_entry->cqe_cnt++;
+    // One CQE per flushed aggregate batch (submit ops always request a CQE, checked by
+    // aclshmemi_udma_require_submit_cqe). The counter lives in the shared state so the
+    // group-wide poll target stays monotonic.
+    state->cqe_cnt++;
 }
 
 template <
@@ -1085,13 +1101,17 @@ ACLSHMEM_DEVICE void aclshmemi_udma_post_send_mte3(
     // which compute_slot ignores while returning pe.
     uint32_t slot = aclshmemi_udma_compute_slot(pe, relay_pe);
     __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry = aclshmemi_udma_get_qp_ctx(udma_info, slot, qp_idx);
+    // Slots sharing a jetty share one state, keeping the producer index unique across the group.
+    // Resolve the state pointer once; every helper below takes it as an argument instead of
+    // re-loading qp_ctx_entry->state_addr.
+    __gm__ aclshmemi_udma_queue_state_t* state = (__gm__ aclshmemi_udma_queue_state_t*)qp_ctx_entry->state_addr;
     auto wqe_size = qp_ctx_entry->wqe_size;
     ACLSHMEM_DEBUG_FUNC(assert_qp_params_valid, qp_ctx_entry);
     constexpr uint32_t WQE_BB_CNT = get_wqe_bb_cnt<OP_CODE>();
-    aclshmemi_udma_poll_cq_when_sq_overflow(qp_ctx_entry, slot, qp_idx, WQE_BB_CNT);
-    ACLSHMEM_DEBUG_FUNC(aclshmemi_udma_debug_ensure_sq_credit, qp_ctx_entry, slot, qp_idx, WQE_BB_CNT);
-    uint32_t cur_head = qp_ctx_entry->head;
-    uint32_t cqe_cnt = qp_ctx_entry->cqe_cnt;
+    aclshmemi_udma_poll_cq_when_sq_overflow(state, slot, qp_idx, WQE_BB_CNT);
+    ACLSHMEM_DEBUG_FUNC(aclshmemi_udma_debug_ensure_sq_credit, state, slot, qp_idx, WQE_BB_CNT);
+    uint32_t cur_head = state->sq_head;
+    uint32_t cqe_cnt = state->cqe_cnt;
 
     __gm__ aclshmemi_ubmem_info_t* remote_mem_info = aclshmemi_udma_get_mem_info(udma_info, slot, qp_idx);
 
@@ -1115,13 +1135,15 @@ ACLSHMEM_DEVICE void aclshmemi_udma_post_send_mte3(
     aclshmemi_udma_copy_wqe_from_ub_to_sq<WQE_BB_CNT>(qp_ctx_entry, cur_head, ub_scratch, wqe_size, sync_id);
 
     cur_head += WQE_BB_CNT;
-    aclshmemi_udma_post_send_update_info(cur_head, qp_ctx_entry);
+    aclshmemi_udma_post_send_update_info(cur_head, qp_ctx_entry, state);
+    // Only advance the group-wide CQE counter when this op actually requests a CQE.
     if constexpr (CONFIG.cqe != 0) {
         cqe_cnt++;
     }
-    qp_ctx_entry->cqe_cnt = cqe_cnt;
+    state->cqe_cnt = cqe_cnt;
     if constexpr (ACLSHMEM_RELAY_SUPPORTED) {
-        dcci_cachelines((__gm__ uint8_t*)qp_ctx_entry, sizeof(aclshmemi_udma_wq_ctx_t));
+        // wq_ctx is read-only static data now; only the mutable queue state needs flushing.
+        dcci_cachelines((__gm__ uint8_t*)state, sizeof(aclshmemi_udma_queue_state_t));
     }
     ACLSHMEM_DEBUG_FUNC(aclshmemi_dump_sq_wqe, qp_ctx_entry, posted_head, wqe_size, (uint32_t)sizeof(T));
 }
@@ -1179,6 +1201,20 @@ ACLSHMEM_DEVICE void aclshmemi_udma_read(
         qp_idx, message_len, {}, relay_pe);
 }
 
+// Debug-only: a null state means quiet was called on the self PE or an unconnected slot. Release
+// builds trust the caller, as in post_send/poll_cq.
+ACLSHMEM_DEVICE void aclshmemi_udma_debug_check_state_bound(
+    __gm__ aclshmemi_udma_queue_state_t* state, uint32_t slot, uint32_t qp_idx)
+{
+    if (state == nullptr) {
+        aclshmemi_kernel_abort(
+            "UDMA queue state unbound: slot=%u qp_idx=%u (quiet on self PE or slot without a channel)\n", slot, qp_idx);
+    }
+}
+
+// Waits for all submitted UDMA WQEs targeting `pe`. See the @note blocks on the declaration in
+// include/device/gm2gm/engine/shmem_device_udma.h for the shared-jetty semantics: quiet(any pe)
+// waits for the whole group, and intra-group post_send must be serialized by the caller.
 ACLSHMEM_DEVICE void aclshmemx_udma_quiet(int pe)
 {
     __gm__ aclshmemi_aiv_udma_info_t* udma_info = aclshmemi_udma_qp_info_fetch();
@@ -1197,7 +1233,9 @@ ACLSHMEM_DEVICE void aclshmemx_udma_quiet(int pe)
             uint32_t slot = actual_pe * rank_count + relay_pe;
             __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry =
                 (__gm__ aclshmemi_udma_wq_ctx_t*)(tbl->sq_ptr + (slot * qp_num + 0) * sizeof(aclshmemi_udma_wq_ctx_t));
-            uint32_t cqe_cnt = qp_ctx_entry->cqe_cnt;
+            __gm__ aclshmemi_udma_queue_state_t* state = (__gm__ aclshmemi_udma_queue_state_t*)qp_ctx_entry->state_addr;
+            ACLSHMEM_DEBUG_FUNC(aclshmemi_udma_debug_check_state_bound, state, slot, 0U);
+            uint32_t cqe_cnt = state->cqe_cnt;
             if (cqe_cnt == 0) {
                 continue;
             }
@@ -1207,7 +1245,10 @@ ACLSHMEM_DEVICE void aclshmemx_udma_quiet(int pe)
         // Original direct path: poll only the single slot == pe. Does not read rankCount.
         __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry =
             (__gm__ aclshmemi_udma_wq_ctx_t*)(tbl->sq_ptr + (actual_pe * qp_num + 0) * sizeof(aclshmemi_udma_wq_ctx_t));
-        aclshmemi_udma_poll_cq(actual_pe, 0, qp_ctx_entry->cqe_cnt);
+        // Under sharing cqe_cnt is the group's total, so the wait widens to the whole group.
+        __gm__ aclshmemi_udma_queue_state_t* state = (__gm__ aclshmemi_udma_queue_state_t*)qp_ctx_entry->state_addr;
+        ACLSHMEM_DEBUG_FUNC(aclshmemi_udma_debug_check_state_bound, state, actual_pe, 0U);
+        aclshmemi_udma_poll_cq(actual_pe, 0, state->cqe_cnt);
     }
 }
 
@@ -1233,7 +1274,9 @@ ACLSHMEM_DEVICE void aclshmemx_udma_qp_quiet(int pe, uint32_t qp_idx)
         __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry =
             (__gm__ aclshmemi_udma_wq_ctx_t*)(tbl->sq_ptr + (actual_pe * udma_info->qp_num + qp_idx) *
                                                                 sizeof(aclshmemi_udma_wq_ctx_t));
-        aclshmemi_udma_poll_cq(actual_pe, qp_idx, qp_ctx_entry->cqe_cnt);
+        __gm__ aclshmemi_udma_queue_state_t* state = (__gm__ aclshmemi_udma_queue_state_t*)qp_ctx_entry->state_addr;
+        ACLSHMEM_DEBUG_FUNC(aclshmemi_udma_debug_check_state_bound, state, actual_pe, qp_idx);
+        aclshmemi_udma_poll_cq(actual_pe, qp_idx, state->cqe_cnt);
     }
 }
 

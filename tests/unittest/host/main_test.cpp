@@ -50,12 +50,18 @@ int32_t test_set_attr(
         SHM_LOG_WARN("init with my_pe:" << my_pe << " ip_port is nullptr!");
     }
 
-    int attr_version = (1 << 16) + sizeof(aclshmemx_init_attr_t);
+    // Field-wise assignment only: never overwrite option_attr wholesale — that clobbers the
+    // version written by the header's default member initializer, silently dropping
+    // runtime_config (legacy-layout decode). version stays untouched (0 from a memset-zeroed
+    // attr is a valid legacy value; the NSDMI 0x200B8 survives on normally-declared attrs).
     attributes->my_pe = my_pe;
     attributes->n_pes = n_pes;
     attributes->ip_port[ip_len] = '\0';
     attributes->local_mem_size = local_mem_size;
-    attributes->option_attr = {attr_version, ACLSHMEM_DATA_OP_MTE, DEFAULT_TIMEOUT, DEFAULT_TIMEOUT, DEFAULT_TIMEOUT};
+    attributes->option_attr.data_op_engine_type = ACLSHMEM_DATA_OP_MTE;
+    attributes->option_attr.shm_init_timeout = DEFAULT_TIMEOUT;
+    attributes->option_attr.shm_create_timeout = DEFAULT_TIMEOUT;
+    attributes->option_attr.control_operation_timeout = DEFAULT_TIMEOUT;
     attributes->comm_args = reinterpret_cast<void*>(&default_flag_uid);
     aclshmemx_uniqueid_t* uid_args = (aclshmemx_uniqueid_t*)(attributes->comm_args);
 

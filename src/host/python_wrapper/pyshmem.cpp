@@ -242,6 +242,31 @@ void DefineShmemAttr(py::module_& m)
         .value("ROCE", ACLSHMEM_DATA_OP_ROCE)
         .value("UDMA", ACLSHMEM_DATA_OP_UDMA);
 
+    py::enum_<aclshmem_config_state_t>(m, "ConfigState")
+        .value("DEFAULT", ACLSHMEM_CONFIG_DEFAULT)
+        .value("DISABLED", ACLSHMEM_CONFIG_DISABLED)
+        .value("ENABLED", ACLSHMEM_CONFIG_ENABLED);
+
+    py::class_<aclshmem_runtime_config_t>(m, "RuntimeConfig", R"(
+Process-level runtime configuration carried by InitAttr.runtime_config.
+
+udma_shared_jetty (ConfigState, Ascend950 only) controls whether peers resolving to the same
+(local EID, qp slot) share one underlying jetty; with a single QP this reduces to the same local
+EID. DEFAULT means "not specified in this call": it uses the library default (disabled) until the
+first successful initialization and inherits the frozen process-level value afterwards; ENABLED
+requires the channel config APIs of the running libhcomm.so -- on an older runtime, initialization
+fails with ACLSHMEM_NOT_SUPPORTED. The configuration is process-wide: the first successful
+initialization freezes it, conflicting explicit values in later initializations fail with
+ACLSHMEM_NOT_SUPPORTED, and it resets after the last instance is finalized. The effective mode must
+be identical on every PE (explicit values must match; DEFAULT is always safe).
+
+While shared jetty is enabled, all operations that mutate the queue state of one sharing group --
+every UDMA submission (put/get/atomic), quiet, and the in-path capacity polling -- must be issued
+serially by the caller; only operations on different jetties may run in parallel. The data path adds
+no concurrency protection to the queue index advance.)")
+        .def(py::init([]() { return new aclshmem_runtime_config_t{}; }))
+        .def_readwrite("udma_shared_jetty", &aclshmem_runtime_config_t::udma_shared_jetty);
+
     py::enum_<aclshmemx_net_layer_t>(m, "NetLayer")
         .value("LAYER_0", ACLSHMEM_NET_LAYER_0)
         .value("LAYER_1", ACLSHMEM_NET_LAYER_1)
@@ -251,10 +276,12 @@ void DefineShmemAttr(py::module_& m)
 
     py::class_<aclshmem_init_optional_attr_t>(m, "OptionalAttr")
         .def(py::init([]() {
-            auto optional_attr = new (std::nothrow) aclshmem_init_optional_attr_t;
-            optional_attr->shm_init_timeout = DEFAULT_TIMEOUT;
-            optional_attr->shm_create_timeout = DEFAULT_TIMEOUT;
-            optional_attr->control_operation_timeout = DEFAULT_TIMEOUT;
+            // Value-initialize first, then mirror the header defaults. Copying the
+            // option_attr of a value-initialized aclshmemx_init_attr_t keeps the version in
+            // sync with the header's default member initializer automatically; a raw new
+            // would leave version/data_op_engine_type indeterminate.
+            auto* optional_attr = new aclshmem_init_optional_attr_t{};
+            *optional_attr = aclshmemx_init_attr_t{}.option_attr;
             optional_attr->sockFd = -1;
             return optional_attr;
         }))
@@ -299,7 +326,14 @@ void DefineShmemAttr(py::module_& m)
             "instance_id", [](const shm::InitAttrWrapper& self) { return self.native().instance_id; },
             [](shm::InitAttrWrapper& self, const py::object& value) {
                 self.native().instance_id = shm::ValidateInstanceId(value);
-            });
+            })
+        .def_property(
+            "runtime_config",
+            [](shm::InitAttrWrapper& self) -> aclshmem_runtime_config_t& { return self.native().runtime_config; },
+            [](shm::InitAttrWrapper& self, const aclshmem_runtime_config_t& value) {
+                self.native().runtime_config = value;
+            },
+            py::return_value_policy::reference_internal);
 
     py::class_<aclshmem_team_config_t>(m, "TeamConfig")
         .def(py::init<>())

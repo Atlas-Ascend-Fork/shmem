@@ -8,6 +8,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <csignal>
 #include <fcntl.h>
@@ -25,6 +26,7 @@
 #include <gtest/gtest.h>
 #include "shmemi_host_common.h"
 #include "utils/exception/shmem_exception_report.h"
+#include "utils/under_api/dl_hcomm_api.h"
 #include "host/init/shmem_host_init.h"
 #include "host/shmem_host_def.h"
 #include "init/shmemi_init.h"
@@ -41,6 +43,8 @@ void exception_report_test_callback(void* exception_info) { (void)exception_info
 } // namespace shm
 
 static_assert(sizeof(aclshmem_init_optional_attr_t) == 24, "Unexpected init optional attr ABI change");
+static_assert(sizeof(aclshmem_runtime_config_t) == 64, "Unexpected runtime config ABI change");
+static_assert(sizeof(aclshmemx_init_attr_t) == 184, "Unexpected init attr ABI change");
 static_assert(sizeof(aclshmemx_net_layer_t) == sizeof(uint32_t), "Unexpected netLayer ABI width");
 
 void test_aclshmem_init(int rank_id, int n_ranks, uint64_t local_mem_size)
@@ -611,6 +615,262 @@ TEST(TestInitAPI, TestSetUdmaQpNumBeforeInit)
     EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 0), ACLSHMEM_INVALID_VALUE);
     EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, ACLSHMEM_MAX_QP_NUM + 1), ACLSHMEM_INVALID_VALUE);
     EXPECT_EQ(aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, 1), ACLSHMEM_SUCCESS);
+}
+
+// =============================== runtime_config UT ===============================
+
+// 纯布局回归：值初始化的 attr 自动带格式 2 version 与全 DEFAULT runtime_config。
+TEST(TestInitAPI, TestRuntimeConfigAttrVersionDefault)
+{
+    aclshmemx_init_attr_t attr{};
+    EXPECT_EQ(attr.option_attr.version, (2 << 16) + 184);
+    EXPECT_EQ(attr.runtime_config.udma_shared_jetty, ACLSHMEM_CONFIG_DEFAULT);
+    EXPECT_TRUE(std::all_of(
+        attr.runtime_config.reserved, attr.runtime_config.reserved + 15, [](uint32_t value) { return value == 0; }));
+}
+
+// 解码拒绝：未知 version（格式号 >2、格式 2 但尺寸不符、负数、垃圾值）。校验发生在 bootstrap
+// 之前，回环地址不会被触碰；设备操作放在 fork 子进程中按公式选卡，避免主进程执行 aclrt 接口
+// 后毒害后续子进程的 setdevice（issue #276）。
+void test_runtime_config_rejects_unknown_version(int rank_id, int /*n_ranks*/, uint64_t local_mem_size)
+{
+    uint32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    EXPECT_EQ(aclInit(nullptr), 0);
+    EXPECT_EQ(aclrtSetDevice(device_id), 0);
+    aclshmemx_set_conf_store_tls(false, nullptr, 0);
+
+    for (int32_t bad_version : {0x00030000, (2 << 16) + 24, -1, 0x7FFFFFFF}) {
+        aclshmemx_init_attr_t attr{};
+        test_set_attr(rank_id, 1, local_mem_size, "tcp://127.0.0.1:0", &attr);
+        attr.option_attr.version = bad_version;
+        EXPECT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr), ACLSHMEM_INVALID_PARAM)
+            << "version=" << bad_version;
+        EXPECT_EQ(aclshmemx_init_status(), ACLSHMEM_STATUS_NOT_INITIALIZED) << "version=" << bad_version;
+    }
+
+    EXPECT_EQ(aclrtResetDevice(device_id), 0);
+    EXPECT_EQ(aclFinalize(), 0);
+}
+
+TEST(TestInitAPI, TestRuntimeConfigRejectsUnknownVersion)
+{
+    const int process_count = 1;
+    uint64_t local_mem_size = 1024UL * 1024UL * 1024;
+    test_mutil_task(test_runtime_config_rejects_unknown_version, local_mem_size, process_count);
+}
+
+// 解码拒绝：格式 2 下 reserved 必须全零。
+void test_runtime_config_rejects_non_zero_reserved(int rank_id, int /*n_ranks*/, uint64_t local_mem_size)
+{
+    uint32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    EXPECT_EQ(aclInit(nullptr), 0);
+    EXPECT_EQ(aclrtSetDevice(device_id), 0);
+    aclshmemx_set_conf_store_tls(false, nullptr, 0);
+
+    for (int slot : {0, 14}) {
+        aclshmemx_init_attr_t attr{};
+        test_set_attr(rank_id, 1, local_mem_size, "tcp://127.0.0.1:0", &attr);
+        attr.runtime_config.reserved[slot] = 1;
+        EXPECT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr), ACLSHMEM_INVALID_PARAM)
+            << "reserved slot=" << slot;
+        EXPECT_EQ(aclshmemx_init_status(), ACLSHMEM_STATUS_NOT_INITIALIZED) << "reserved slot=" << slot;
+    }
+
+    EXPECT_EQ(aclrtResetDevice(device_id), 0);
+    EXPECT_EQ(aclFinalize(), 0);
+}
+
+TEST(TestInitAPI, TestRuntimeConfigRejectsNonZeroReserved)
+{
+    const int process_count = 1;
+    uint64_t local_mem_size = 1024UL * 1024UL * 1024;
+    test_mutil_task(test_runtime_config_rejects_non_zero_reserved, local_mem_size, process_count);
+}
+
+// 解码拒绝：三态枚举取值必须在 {0,1,2} 内。
+void test_runtime_config_rejects_invalid_state_value(int rank_id, int /*n_ranks*/, uint64_t local_mem_size)
+{
+    uint32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    EXPECT_EQ(aclInit(nullptr), 0);
+    EXPECT_EQ(aclrtSetDevice(device_id), 0);
+    aclshmemx_set_conf_store_tls(false, nullptr, 0);
+
+    aclshmemx_init_attr_t attr{};
+    test_set_attr(rank_id, 1, local_mem_size, "tcp://127.0.0.1:0", &attr);
+    attr.runtime_config.udma_shared_jetty = static_cast<aclshmem_config_state_t>(7);
+    EXPECT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr), ACLSHMEM_INVALID_PARAM);
+    EXPECT_EQ(aclshmemx_init_status(), ACLSHMEM_STATUS_NOT_INITIALIZED);
+
+    EXPECT_EQ(aclrtResetDevice(device_id), 0);
+    EXPECT_EQ(aclFinalize(), 0);
+}
+
+TEST(TestInitAPI, TestRuntimeConfigRejectsInvalidStateValue)
+{
+    const int process_count = 1;
+    uint64_t local_mem_size = 1024UL * 1024UL * 1024;
+    test_mutil_task(test_runtime_config_rejects_invalid_state_value, local_mem_size, process_count);
+}
+
+// 历史值集合（memset-0 / 旧头 NSDMI / 旧 helper / 未修 helper 对新头重编译）均按 120 字节
+// 旧前缀解释，runtime_config 视为全 DEFAULT，init 应成功（MTE 引擎，无需 UDMA 数据面）。
+void test_runtime_config_legacy_versions_init(int rank_id, int /*n_ranks*/, uint64_t local_mem_size)
+{
+    uint32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    EXPECT_EQ(aclInit(nullptr), 0);
+    EXPECT_EQ(aclrtSetDevice(device_id), 0);
+    aclshmemx_set_conf_store_tls(false, nullptr, 0);
+
+    for (int32_t legacy_version : {0, (1 << 16) + 24, (1 << 16) + 120, (1 << 16) + 184}) {
+        aclshmemx_init_attr_t attr{};
+        test_set_attr(rank_id, 1, local_mem_size, test_global_ipport, &attr);
+        attr.option_attr.version = legacy_version;
+        EXPECT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr), ACLSHMEM_SUCCESS)
+            << "legacy version=" << legacy_version;
+        EXPECT_EQ(aclshmemx_init_status(), ACLSHMEM_STATUS_IS_INITIALIZED);
+        EXPECT_EQ(aclshmem_finalize(), ACLSHMEM_SUCCESS);
+    }
+
+    EXPECT_EQ(aclrtResetDevice(device_id), 0);
+    EXPECT_EQ(aclFinalize(), 0);
+}
+
+TEST(TestInitAPI, TestRuntimeConfigLegacyVersionsInitAsDefault)
+{
+    const int process_count = 1;
+    uint64_t local_mem_size = 1024UL * 1024UL * 1024;
+    test_mutil_task(test_runtime_config_legacy_versions_init, local_mem_size, process_count);
+}
+
+// 格式 2 + 显式 DISABLED：格式 2 接受路径（DEFAULT 全链路由存量 UT 隐式覆盖）。
+void test_runtime_config_explicit_disabled_init(int rank_id, int /*n_ranks*/, uint64_t local_mem_size)
+{
+    uint32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    EXPECT_EQ(aclInit(nullptr), 0);
+    EXPECT_EQ(aclrtSetDevice(device_id), 0);
+    aclshmemx_set_conf_store_tls(false, nullptr, 0);
+
+    aclshmemx_init_attr_t attr{};
+    test_set_attr(rank_id, 1, local_mem_size, test_global_ipport, &attr);
+    attr.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_DISABLED;
+    EXPECT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(aclshmem_finalize(), ACLSHMEM_SUCCESS);
+
+    EXPECT_EQ(aclrtResetDevice(device_id), 0);
+    EXPECT_EQ(aclFinalize(), 0);
+}
+
+TEST(TestInitAPI, TestRuntimeConfigExplicitDisabledInit)
+{
+    const int process_count = 1;
+    uint64_t local_mem_size = 1024UL * 1024UL * 1024;
+    test_mutil_task(test_runtime_config_explicit_disabled_init, local_mem_size, process_count);
+}
+
+// 显式 ENABLED 的能力校验：缺 channel config API 时 init 应失败为 NOT_SUPPORTED 且不污染
+// 进程配置（后续 DISABLED init 应成功）；有 API 时两个方向均成功。初始化前库尚未加载，
+// 因此先按需 LoadLibrary 再探符号（与库内 apply_runtime_config 相同口径）。
+void test_runtime_config_enabled_capability(int rank_id, int /*n_ranks*/, uint64_t local_mem_size)
+{
+    uint32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    EXPECT_EQ(aclInit(nullptr), 0);
+    EXPECT_EQ(aclrtSetDevice(device_id), 0);
+    aclshmemx_set_conf_store_tls(false, nullptr, 0);
+
+    const bool apis_available =
+        (shm::DlHcommApi::LoadLibrary() == ACLSHMEM_SUCCESS) && shm::DlHcommApi::HasChannelConfigApis();
+
+    aclshmemx_init_attr_t attr{};
+    test_set_attr(rank_id, 1, local_mem_size, test_global_ipport, &attr);
+    attr.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED;
+    if (!apis_available) {
+        EXPECT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr), ACLSHMEM_NOT_SUPPORTED);
+        EXPECT_EQ(aclshmemx_init_status(), ACLSHMEM_STATUS_NOT_INITIALIZED);
+
+        // 失败路径不提交配置：显式 DISABLED 仍可成功 init。
+        aclshmemx_init_attr_t disabled_attr{};
+        test_set_attr(rank_id, 1, local_mem_size, test_global_ipport, &disabled_attr);
+        disabled_attr.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_DISABLED;
+        EXPECT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &disabled_attr), ACLSHMEM_SUCCESS);
+        EXPECT_EQ(aclshmem_finalize(), ACLSHMEM_SUCCESS);
+    } else {
+        EXPECT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr), ACLSHMEM_SUCCESS);
+        EXPECT_EQ(aclshmem_finalize(), ACLSHMEM_SUCCESS);
+    }
+
+    EXPECT_EQ(aclrtResetDevice(device_id), 0);
+    EXPECT_EQ(aclFinalize(), 0);
+}
+
+TEST(TestInitAPI, TestRuntimeConfigEnabledWithoutApisRejected)
+{
+    const int process_count = 1;
+    uint64_t local_mem_size = 1024UL * 1024UL * 1024;
+    test_mutil_task(test_runtime_config_enabled_capability, local_mem_size, process_count);
+}
+
+// 冻结语义：实例1 显式 ENABLED 成功后，实例2 显式 DISABLED 因冲突失败（DISABLED 不触发
+// 能力校验，NOT_SUPPORTED 只能来自冻结分支）；改 ENABLED 重试成功；全部 finalize 后配置
+// 复位，单实例 DISABLED 重新可用。
+void test_runtime_config_frozen_across_instances(int rank_id, int /*n_ranks*/, uint64_t local_mem_size)
+{
+    uint32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    EXPECT_EQ(aclInit(nullptr), 0);
+    EXPECT_EQ(aclrtSetDevice(device_id), 0);
+    aclshmemx_set_conf_store_tls(false, nullptr, 0);
+
+    if (shm::DlHcommApi::LoadLibrary() != ACLSHMEM_SUCCESS || !shm::DlHcommApi::HasChannelConfigApis()) {
+        // 缺 channel config API 的运行库无法进入"已冻结的开启态"，冻结冲突场景不可达。
+        GTEST_SKIP() << "requires the libhcomm channel config APIs";
+    }
+
+    // 实例 1：显式 ENABLED。
+    aclshmemx_init_attr_t attr1{};
+    test_set_attr(rank_id, 1, local_mem_size, "tcp://127.0.0.1:0", &attr1);
+    attr1.instance_id = 1;
+    attr1.comm_args = nullptr;
+    attr1.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED;
+    EXPECT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr1), ACLSHMEM_SUCCESS);
+
+    // 实例 2：显式 DISABLED 与冻结值冲突。
+    aclshmemx_init_attr_t attr2{};
+    test_set_attr(rank_id, 1, local_mem_size, "tcp://127.0.0.1:0", &attr2);
+    attr2.instance_id = 2;
+    attr2.comm_args = nullptr;
+    attr2.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_DISABLED;
+    EXPECT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr2), ACLSHMEM_NOT_SUPPORTED);
+    EXPECT_EQ(aclshmemx_init_status(), ACLSHMEM_STATUS_NOT_INITIALIZED);
+
+    // 实例 2 重试：匹配的 ENABLED（或 DEFAULT）成功。用全新 attr：上次 init 把 ip_port 原地
+    // 改写成了实例端口，复用会因非零端口报 INVALID_VALUE。
+    aclshmemx_init_attr_t attr2_retry{};
+    test_set_attr(rank_id, 1, local_mem_size, "tcp://127.0.0.1:0", &attr2_retry);
+    attr2_retry.instance_id = 2;
+    attr2_retry.comm_args = nullptr;
+    attr2_retry.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED;
+    EXPECT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr2_retry), ACLSHMEM_SUCCESS);
+
+    EXPECT_EQ(aclshmemx_finalize(2), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(aclshmemx_finalize(1), ACLSHMEM_SUCCESS);
+
+    // 最后一个实例 finalize 后配置复位：单实例显式 DISABLED 重新可用。
+    aclshmemx_init_attr_t attr3{};
+    test_set_attr(rank_id, 1, local_mem_size, test_global_ipport, &attr3);
+    attr3.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_DISABLED;
+    EXPECT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr3), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(aclshmem_finalize(), ACLSHMEM_SUCCESS);
+
+    EXPECT_EQ(aclrtResetDevice(device_id), 0);
+    EXPECT_EQ(aclFinalize(), 0);
+}
+
+TEST(TestInitAPI, TestRuntimeConfigFrozenAcrossInstances)
+{
+    ScopedEnv env_port("SHMEM_INSTANCE_PORT_RANGE", get_multi_instance_port_range().c_str());
+
+    const int process_count = 1;
+    uint64_t local_mem_size = 1024UL * 1024UL * 1024;
+    test_mutil_task(test_runtime_config_frozen_across_instances, local_mem_size, process_count);
 }
 
 TEST(TestInitAPI, TestSetQpNetLayerAndGetQpNumBeforeInit)

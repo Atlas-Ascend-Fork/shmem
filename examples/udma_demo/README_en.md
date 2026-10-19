@@ -34,6 +34,7 @@ bash scripts/build.sh -examples -soc_type Ascend950
 ```bash
 bash examples/udma_demo/run.sh 0 # AllGather test
 bash examples/udma_demo/run.sh 1 # put signal test
+bash examples/udma_demo/run.sh 0 -shared_jetty 1 # AllGather test with shared jetty enabled
 ```
 By default, the script launches with 8 devices on a single server, sequentially starting `PE 0` to `PE 7`, and waits for all processes to exit.
 
@@ -43,11 +44,13 @@ The UDMA advanced RMA APIs use `PIPE_MTE3` to submit WQEs by default, which requ
 
 3. Command-line parameters of the run.sh script
 
-The script parses parameters by position. All parameters are optional, and default values are used if they are not specified.
+The script supports one optional named flag, which may appear anywhere on the command line; the remaining parameters are positional and all optional, with default values used if they are not specified.
+
 ```bash
-bash examples/udma_demo/run.sh <test_type> <n_pes> <g_npus> <ipport> <f_pe> <local_pes> <f_npu>
+bash examples/udma_demo/run.sh [-shared_jetty 0|1] <test_type> <n_pes> <g_npus> <ipport> <f_pe> <local_pes> <f_npu>
 ```
 
+- -shared_jetty: optional named flag. Value `1` enables shared jetty; value `0` (the default when the flag is absent) disables it. When enabled, it is set through the initialization parameter `attr.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED`; the configuration must be set before initialization and must be identical on every PE. Shared jetty makes peers resolving to the same local EID share one underlying jetty (one SQ/CQ ring and one queue state). Enabling it requires the channel config APIs of the running libhcomm.so; otherwise initialization fails with `ACLSHMEM_NOT_SUPPORTED`. In addition, send operations within one sharing group must be issued serially by the caller.
 - test_type: test type. Value 0 (default) indicates the all-gather test, and value 1 indicates the put signal test.
 - n_pes: total number of global PEs across all servers (default 8).
 - g_npus: number of NPU devices used on the local server (default 8).
@@ -63,6 +66,7 @@ bash examples/udma_demo/run.sh 0 16 8 192.168.1.10:8899 0 8 0
 # node1: f_pe=8, starting global PEs 8 to 15
 bash examples/udma_demo/run.sh 0 16 8 192.168.1.10:8899 8 8 0
 ```
+To enable shared jetty in a multi-server launch, append `-shared_jetty 1` on every node (the value must be identical on all nodes).
 
 ### mssanitizer Check
 
@@ -81,7 +85,7 @@ mssanitizer -- bash examples/udma_demo/run.sh 1
 
 4. Command-line parameters of the underlying binary
 ```bash
-./udma_demo <n_pes> <pe_id> <ipport> <g_npus> <f_pe> <f_npu> [test_type]
+./udma_demo <n_pes> <pe_id> <ipport> <g_npus> <f_pe> <f_npu> [test_type] [shared_jetty]
 ```
 
 - n_pes: number of global PEs.
@@ -91,3 +95,4 @@ mssanitizer -- bash examples/udma_demo/run.sh 1
 - f_pe: ID of the first PE used on the current server.
 - f_npu: ID of the first NPU used to run this sample on the current server.
 - test_type: test type (optional). Value 0 (default) indicates the all-gather test, and value 1 indicates the put signal test.
+- shared_jetty: whether to enable shared jetty (optional). Value 0 (default) disables it and value 1 enables it; the value must be identical on every PE.

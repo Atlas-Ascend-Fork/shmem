@@ -28,6 +28,23 @@ using HcommChannelCreateFunc = HcommResult (*)(EndpointHandle, CommEngine, Hcomm
 using HcommChannelDestroyFunc = HcommResult (*)(const ChannelHandle*, uint32_t);
 using HcommChannelGetStatusFunc = HcommResult (*)(const ChannelHandle*, uint32_t, int32_t*);
 
+// HCOM's channel config handle is an opaque pointer (`typedef void *HcommChannelConfig`) and the
+// config type is an enum whose underlying type is int32_t. Both are mirrored here in project scope
+// so the declarations stay independent of the CANN header spelling: these symbols are resolved with
+// dlsym and older CANN packages do not ship the channel config declarations at all.
+using HcommChannelConfig = void*;
+using HcommChannelConfigType = int32_t;
+inline constexpr HcommChannelConfigType HCOMM_CHANNEL_CONFIG_TYPE_IS_SHARED_QUEUE = 0;
+
+// Returned by the channel config wrappers when the symbol is not available (matches HCCL_E_PTR).
+inline constexpr HcommResult HCOMM_RESULT_SYMBOL_UNAVAILABLE = 2;
+
+using HcommChannelConfigCreateFunc = HcommResult (*)(HcommChannelConfig*);
+using HcommChannelConfigDestroyFunc = HcommResult (*)(HcommChannelConfig);
+using HcommChannelConfigSetIntFunc = HcommResult (*)(HcommChannelConfig, HcommChannelConfigType, uint32_t);
+using HcommChannelCreateWithConfigFunc =
+    HcommResult (*)(EndpointHandle, CommEngine, HcommChannelDesc*, uint32_t, HcommChannelConfig, ChannelHandle*);
+
 class DlHcommApi {
 public:
     static Result LoadLibrary();
@@ -77,6 +94,45 @@ public:
         return gHcommChannelGetStatus(channelList, listNum, statusList);
     }
 
+    // True only when all four channel-config symbols were resolved. Callers must check this before
+    // using the wrappers below and fall back to HcommChannelCreate when it returns false.
+    static bool HasChannelConfigApis();
+
+    static inline HcommResult HcommChannelConfigCreate(HcommChannelConfig* config)
+    {
+        if (gHcommChannelConfigCreate == nullptr) {
+            return HCOMM_RESULT_SYMBOL_UNAVAILABLE;
+        }
+        return gHcommChannelConfigCreate(config);
+    }
+
+    static inline HcommResult HcommChannelConfigDestroy(HcommChannelConfig config)
+    {
+        if (gHcommChannelConfigDestroy == nullptr) {
+            return HCOMM_RESULT_SYMBOL_UNAVAILABLE;
+        }
+        return gHcommChannelConfigDestroy(config);
+    }
+
+    static inline HcommResult HcommChannelConfigSetInt(
+        HcommChannelConfig config, HcommChannelConfigType type, uint32_t value)
+    {
+        if (gHcommChannelConfigSetInt == nullptr) {
+            return HCOMM_RESULT_SYMBOL_UNAVAILABLE;
+        }
+        return gHcommChannelConfigSetInt(config, type, value);
+    }
+
+    static inline HcommResult HcommChannelCreateWithConfig(
+        EndpointHandle endpointHandle, CommEngine engine, HcommChannelDesc* channelDescs, uint32_t channelNum,
+        HcommChannelConfig config, ChannelHandle* channels)
+    {
+        if (gHcommChannelCreateWithConfig == nullptr) {
+            return HCOMM_RESULT_SYMBOL_UNAVAILABLE;
+        }
+        return gHcommChannelCreateWithConfig(endpointHandle, engine, channelDescs, channelNum, config, channels);
+    }
+
 private:
     static std::mutex gMutex;
     static bool gLoaded;
@@ -91,6 +147,12 @@ private:
     static HcommChannelCreateFunc gHcommChannelCreate;
     static HcommChannelDestroyFunc gHcommChannelDestroy;
     static HcommChannelGetStatusFunc gHcommChannelGetStatus;
+
+    // Soft-loaded symbols: absent on older libhcomm.so, so they stay nullptr instead of failing load.
+    static HcommChannelConfigCreateFunc gHcommChannelConfigCreate;
+    static HcommChannelConfigDestroyFunc gHcommChannelConfigDestroy;
+    static HcommChannelConfigSetIntFunc gHcommChannelConfigSetInt;
+    static HcommChannelCreateWithConfigFunc gHcommChannelCreateWithConfig;
 };
 
 } // namespace shm

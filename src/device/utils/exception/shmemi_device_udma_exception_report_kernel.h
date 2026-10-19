@@ -36,11 +36,16 @@ struct aclshmemi_udma_exception_report_cqe_t {
     uint32_t rmt_eid[4];
 };
 
+// Reported snapshot of a queue context. head / tail / cqe_cnt are no longer inline in wq_ctx / cq_ctx:
+// they live in the aclshmemi_udma_queue_state_t that state_addr points at, and the kernel dereferences
+// it to fill them here. state_addr is reported too, since slots sharing a jetty share one state and
+// equal state_addr values are what identify such a group in the dump.
 struct aclshmemi_udma_exception_report_wq_t {
     uint32_t wqn;
     uint64_t buf_addr;
     uint32_t wqe_size;
     uint32_t depth;
+    uint64_t state_addr;
     uint32_t head;
     uint32_t tail;
     int32_t db_mode;
@@ -55,6 +60,7 @@ struct aclshmemi_udma_exception_report_cq_t {
     uint64_t buf_addr;
     uint32_t cqe_size;
     uint32_t depth;
+    uint64_t state_addr;
     uint32_t head;
     uint32_t tail;
     int32_t db_mode;

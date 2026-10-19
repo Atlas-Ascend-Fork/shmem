@@ -38,6 +38,19 @@ TEST(UdmaTransportManagerTest, RejectsMultipleQpsInRelayModeBeforeOpeningDevice)
 
     EXPECT_EQ(manager.OpenDevice(options), ACLSHMEM_NOT_SUPPORTED);
 }
+
+TEST(UdmaTransportManagerTest, RejectsSharedJettyInRelayModeBeforeOpeningDevice)
+{
+    // Relay routing resolves one jetty per (actual_pe, relay_pe) slot and cannot honor the
+    // group-wide queue-state semantics shared jetty implies, so the combination is rejected
+    // before any resource is opened (qpNum stays at the relay-supported 1).
+    UdmaTransportManager manager;
+    TransportOptions options{};
+    options.udmaQpConfig.qpNum = 1;
+    options.udmaQpConfig.sharedJettyEnabled = true;
+
+    EXPECT_EQ(manager.OpenDevice(options), ACLSHMEM_NOT_SUPPORTED);
+}
 #endif
 
 } // namespace device

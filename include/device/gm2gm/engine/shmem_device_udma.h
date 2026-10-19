@@ -1011,6 +1011,24 @@ ACLSHMEM_DEVICE void aclshmemx_udma_qp_put_signal_nbi(
  * @brief UDMA Quiet function. This synchronous function ensures all previous UDMA WQEs are completed
  * (data has arrived at the destination PE).
  *
+ * @note  Shared jetty (runtime configuration, OFF by default): enable it on every PE via
+ *        aclshmemx_init_attr_t::runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED before
+ *        initialization. On the direct-connect UDMA path, the peers resolved to the same
+ *        (local eid_index, qp slot) share one underlying jetty, that is one SQ/CQ ring and one
+ *        mutable queue state; with a single QP (or sharing disabled) this reduces to the same local
+ *        eid_index. Peers outside the group land on different jetties and share nothing.
+ * @note  This function drains only the QP 0 sharing group that @p pe belongs to: it waits for every
+ *        submitted operation of that group, so quiet(any pe of the group) is equivalent to
+ *        quiet(the whole group) and the wait range is wider than in the non-shared build. QP 1..N-1
+ *        must be drained separately via aclshmemx_udma_qp_quiet(pe, qp_idx). Waiting longer is
+ *        always safe, but do not enable shared jetty when exact per-PE completion semantics are
+ *        required; use a per-PE signal/notify wait protocol instead.
+ * @note  Serialization constraint: all operations that mutate the queue state of one sharing group
+ *        -- every UDMA submission (put/get/atomic), quiet, and the in-path capacity polling -- must
+ *        be issued serially by the caller. Different jetties may be driven in parallel. The data
+ *        path adds no concurrency protection to the queue index advance, so intra-group
+ *        concurrency safety is the caller's responsibility.
+ *
  * @param pe                [in] PE number of the remote PE.
  */
 ACLSHMEM_DEVICE void aclshmemx_udma_quiet(int pe);
