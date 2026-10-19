@@ -15,7 +15,7 @@ SHMEM日志相关的几个环境变量：
 ![image](images/log/0.png)
 
 接下来通过一个初始化两个pe再去初始化的例子简单介绍如何看懂SHMEM日志。此样例日志都是info级别，主要关注日志信息。前面的，时间、日志级别、进程号等信息不做专门截取解释。
-初始化阶段会先报出bootstrap使用的flag（如图中的ACLSHMEMX_INIT_WITH_DEFAULT）。然后会开始boostrap初始化，并检测环境变量的设置情况（如图中SHMEM_UID_SESSION_ID未设置）。
+初始化阶段会先报出bootstrap使用的flag（如图中的ACLSHMEMX_INIT_WITH_DEFAULT）。然后会开始bootstrap初始化，并检测环境变量的设置情况（如图中SHMEM_UID_SESSION_ID未设置）。
 
 ![image](images/log/1.png)
 
