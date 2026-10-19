@@ -30,7 +30,7 @@ MIN_EXPONENT="3"
 MAX_EXPONENT="17"
 # 默认循环次数
 LOOP_COUNT="1000"
-# 默认UB size(KB)
+# 默认 UB size (KiB)
 UB_SIZE="16"
 # 默认 metric: bw|lat (lat 仅支持 -t put)
 METRIC="bw"
@@ -126,7 +126,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -e|--exponent <exponent>        单个 QP 的数据量幂数"
             echo "  --exponent-range <min> <max>    单个 QP 的数据量幂数范围"
             echo "  --loop-count <count>            循环次数 (默认 1000)"
-            echo "  --ub-size <size>                UB size(KB)，用于低阶 UDMA 入参和 CSV；lat 聚合窗口场景自动上调"
+            echo "  --ub-size <size>                UB size(KiB)，用于低阶 UDMA 入参和 CSV；lat 聚合窗口场景自动上调"
             echo "  --metric <bw|lat>               性能口径 (lat 仅支持 -t put 和单 QP，自动遍历 plain/QP/defer/submit 四种接口形态)"
             echo "  --batch <N>                     BW：0=普通 NBI 全异步，1=每次后 quiet，>1=每批 defer...submit 后 quiet；lat：聚合窗口大小 (默认 100)"
             echo "  -pes <size>                     PE 数量"
@@ -187,14 +187,14 @@ if [[ "$METRIC" == "lat" ]]; then
     if [[ "$AGG_WQE_COUNT" -lt 100 ]]; then
         AGG_WQE_COUNT=100
     fi
-    REQUIRED_UB_KB=$(((AGG_WQE_COUNT * 64 + 1023) / 1024))
-    if [[ "$REQUIRED_UB_KB" -gt 248 ]]; then
-        echo "错误: 时延窗口 $BATCH 所需 UB ${REQUIRED_UB_KB}KB 超过 Ascend950 可用上限 248KB，请减小 --batch"
+    REQUIRED_UB_KIB=$(((AGG_WQE_COUNT * 64 + 1023) / 1024))
+    if [[ "$REQUIRED_UB_KIB" -gt 248 ]]; then
+        echo "错误: 时延窗口 $BATCH 所需 UB ${REQUIRED_UB_KIB}KiB 超过 Ascend950 可用上限 248KiB，请减小 --batch"
         exit 1
     fi
-    if [[ "$UB_SIZE" -lt "$REQUIRED_UB_KB" ]]; then
-        echo "警告: 聚合时延场景要求 --ub-size >= ${REQUIRED_UB_KB}KB，当前为 ${UB_SIZE}KB，已自动修正"
-        UB_SIZE="$REQUIRED_UB_KB"
+    if [[ "$UB_SIZE" -lt "$REQUIRED_UB_KIB" ]]; then
+        echo "警告: 聚合时延场景要求 --ub-size >= ${REQUIRED_UB_KIB}KiB，当前为 ${UB_SIZE}KiB，已自动修正"
+        UB_SIZE="$REQUIRED_UB_KIB"
     fi
 fi
 
@@ -215,7 +215,7 @@ echo "测试类型: $TEST_TYPE"
 echo "数据类型: $DATA_TYPE"
 echo "幂数范围: $MIN_EXPONENT-$MAX_EXPONENT"
 echo "循环次数: $LOOP_COUNT"
-echo "UB size(KB): $UB_SIZE"
+echo "UB size(KiB): $UB_SIZE"
 echo "Metric: $METRIC"
 echo "Batch: $BATCH"
 echo "Block/QP count: $BLOCK_SIZE_INPUT"

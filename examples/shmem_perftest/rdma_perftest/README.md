@@ -199,7 +199,7 @@ CSV 文件输出到 `output/` 目录，命名格式为 `rdma_<metric>_<test_type
 | `DataSize/B` | 通用 | 单个 QP 每次传输的数据量（字节）；多 QP 并行模式总数据量为 `DataSize × qp-count` |
 | `Npus` | 通用 | NPU 数量 |
 | `Blocks` | 通用 | 多 QP 并行模式为 `qp-count`，其他模式为 1 |
-| `UBsize/KB` | 通用 | UB 大小（KB） |
+| `UBsize/KiB` | 通用 | UB 大小（KiB） |
 | `Bandwidth/GB/s` | `bw` | 带宽（GB/s，十进制） |
 | `Bandwidth/GiB/s` | `bw` | 带宽（GiB/s，二进制） |
 | `CoreMaxTime/us` | `bw` | 单次 iteration 耗时（us） |

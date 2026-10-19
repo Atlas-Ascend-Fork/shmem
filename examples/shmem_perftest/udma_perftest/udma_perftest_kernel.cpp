@@ -228,10 +228,10 @@ __aicore__ inline int64_t udma_perf_lat_time_submit(
 template <typename T>
 __aicore__ inline void udma_perf_lat_run_ifaces(
     __gm__ T* dst_gm, __gm__ T* src_gm, __ubuf__ T* ub_ptr, uint32_t elements, uint32_t peer_pe, int loop_test,
-    int batch_size, int warmup, int ub_size_kb, int32_t frame_id, __gm__ int64_t* timing_out)
+    int batch_size, int warmup, int ub_size_kib, int32_t frame_id, __gm__ int64_t* timing_out)
 {
     // UB staging 内可同时暂存的 WQE 数（每个 64B）；defer 窗口 N + 1 条 submit 需落在限额内
-    const int ub_wqe_limit = ub_size_kb > 0 ? ub_size_kb * 1024 / 64 : 1;
+    const int ub_wqe_limit = ub_size_kib > 0 ? ub_size_kib * 1024 / 64 : 1;
     int agg_window = batch_size > 1 ? batch_size : 2;
     if (agg_window > ub_wqe_limit - 1) {
         agg_window = ub_wqe_limit - 1;
@@ -289,7 +289,7 @@ __aicore__ inline void udma_perf_lat_run_ifaces(
 
 template <typename T, bool USE_QP>
 __aicore__ inline void udma_perf_test_put_impl(
-    GM_ADDR dst_gva, GM_ADDR src_gva, int elements, int32_t frame_id, perftest::udma_mode_t test_mode, int ub_size_kb,
+    GM_ADDR dst_gva, GM_ADDR src_gva, int elements, int32_t frame_id, perftest::udma_mode_t test_mode, int ub_size_kib,
     int64_t prof_pe_val, int loop_count, int metric, int batch, GM_ADDR timing_out_gva)
 {
     const int64_t pe = aclshmem_my_pe();
@@ -303,8 +303,8 @@ __aicore__ inline void udma_perf_test_put_impl(
 
     AscendC::TPipe pipe;
     AscendC::TBuf<AscendC::TPosition::VECOUT> buf;
-    pipe.InitBuffer(buf, ub_size_kb * 1024);
-    AscendC::LocalTensor<uint8_t> ub_local = buf.GetWithOffset<uint8_t>(ub_size_kb * 1024, 0);
+    pipe.InitBuffer(buf, ub_size_kib * 1024);
+    AscendC::LocalTensor<uint8_t> ub_local = buf.GetWithOffset<uint8_t>(ub_size_kib * 1024, 0);
     __ubuf__ T* ub_ptr = reinterpret_cast<__ubuf__ T*>(ub_local.GetPhyAddr());
     const uint64_t qp_offset = static_cast<uint64_t>(qp_idx) * static_cast<uint64_t>(elements);
     __gm__ T* dst_gm = reinterpret_cast<__gm__ T*>(dst_gva) + qp_offset;
@@ -317,7 +317,7 @@ __aicore__ inline void udma_perf_test_put_impl(
 
     if (metric == static_cast<int>(perftest::PERF_METRIC_LAT)) {
         udma_perf_lat_run_ifaces<T>(
-            dst_gm, src_gm, ub_ptr, static_cast<uint32_t>(elements), peer_pe, loop_test, batch, warmup, ub_size_kb,
+            dst_gm, src_gm, ub_ptr, static_cast<uint32_t>(elements), peer_pe, loop_test, batch, warmup, ub_size_kib,
             frame_id, reinterpret_cast<__gm__ int64_t*>(timing_out_gva));
         aclshmemx_sync_vec_all();
         return;
@@ -346,7 +346,7 @@ __aicore__ inline void udma_perf_test_put_impl(
 
 template <typename T, bool USE_QP>
 __aicore__ inline void udma_perf_test_get_impl(
-    GM_ADDR dst_gva, GM_ADDR src_gva, int elements, int32_t frame_id, perftest::udma_mode_t test_mode, int ub_size_kb,
+    GM_ADDR dst_gva, GM_ADDR src_gva, int elements, int32_t frame_id, perftest::udma_mode_t test_mode, int ub_size_kib,
     int64_t prof_pe_val, int loop_count, int batch)
 {
     const int64_t pe = aclshmem_my_pe();
@@ -360,8 +360,8 @@ __aicore__ inline void udma_perf_test_get_impl(
 
     AscendC::TPipe pipe;
     AscendC::TBuf<AscendC::TPosition::VECOUT> buf;
-    pipe.InitBuffer(buf, ub_size_kb * 1024);
-    AscendC::LocalTensor<uint8_t> ub_local = buf.GetWithOffset<uint8_t>(ub_size_kb * 1024, 0);
+    pipe.InitBuffer(buf, ub_size_kib * 1024);
+    AscendC::LocalTensor<uint8_t> ub_local = buf.GetWithOffset<uint8_t>(ub_size_kib * 1024, 0);
     __ubuf__ T* ub_ptr = reinterpret_cast<__ubuf__ T*>(ub_local.GetPhyAddr());
     const uint64_t qp_offset = static_cast<uint64_t>(qp_idx) * static_cast<uint64_t>(elements);
     __gm__ T* dst_gm = reinterpret_cast<__gm__ T*>(dst_gva) + qp_offset;
@@ -441,41 +441,41 @@ __aicore__ inline void udma_perf_test_put_signal_impl(
     aclshmemx_sync_vec_all();
 }
 
-#define DEFINE_UDMA_PERF_KERNEL_FOR_TYPE(type_name, cpp_type)                                                         \
-    extern "C" __global__ __vector__ void udma_perf_test_##type_name##_put(                                           \
-        GM_ADDR dst_gva, GM_ADDR src_gva, int elements, int32_t frame_id, perftest::udma_mode_t test_mode,            \
-        int ub_size_kb, int64_t prof_pe_val, int loop_count, int metric, int batch, int qp_count, GM_ADDR timing_gva) \
-    {                                                                                                                 \
-        if (qp_count > 1) {                                                                                           \
-            udma_perf_test_put_impl<cpp_type, true>(                                                                  \
-                dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kb, prof_pe_val, loop_count, metric, batch,  \
-                timing_gva);                                                                                          \
-        } else {                                                                                                      \
-            udma_perf_test_put_impl<cpp_type, false>(                                                                 \
-                dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kb, prof_pe_val, loop_count, metric, batch,  \
-                timing_gva);                                                                                          \
-        }                                                                                                             \
-    }                                                                                                                 \
-    extern "C" __global__ __vector__ void udma_perf_test_##type_name##_get(                                           \
-        GM_ADDR dst_gva, GM_ADDR src_gva, int elements, int32_t frame_id, perftest::udma_mode_t test_mode,            \
-        int ub_size_kb, int64_t prof_pe_val, int loop_count, int batch, int qp_count, GM_ADDR timing_gva)             \
-    {                                                                                                                 \
-        (void)timing_gva;                                                                                             \
-        if (qp_count > 1) {                                                                                           \
-            udma_perf_test_get_impl<cpp_type, true>(                                                                  \
-                dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kb, prof_pe_val, loop_count, batch);         \
-        } else {                                                                                                      \
-            udma_perf_test_get_impl<cpp_type, false>(                                                                 \
-                dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kb, prof_pe_val, loop_count, batch);         \
-        }                                                                                                             \
-    }                                                                                                                 \
-    extern "C" __global__ __vector__ void udma_perf_test_##type_name##_put_signal(                                    \
-        GM_ADDR dst_gva, GM_ADDR src_gva, GM_ADDR sig_gva, int elements, int32_t frame_id, int64_t prof_pe_val,       \
-        int loop_count, uint64_t signal_base, int batch, GM_ADDR timing_gva)                                          \
-    {                                                                                                                 \
-        (void)timing_gva;                                                                                             \
-        udma_perf_test_put_signal_impl<cpp_type>(                                                                     \
-            dst_gva, src_gva, sig_gva, elements, frame_id, prof_pe_val, loop_count, signal_base, batch);              \
+#define DEFINE_UDMA_PERF_KERNEL_FOR_TYPE(type_name, cpp_type)                                                          \
+    extern "C" __global__ __vector__ void udma_perf_test_##type_name##_put(                                            \
+        GM_ADDR dst_gva, GM_ADDR src_gva, int elements, int32_t frame_id, perftest::udma_mode_t test_mode,             \
+        int ub_size_kib, int64_t prof_pe_val, int loop_count, int metric, int batch, int qp_count, GM_ADDR timing_gva) \
+    {                                                                                                                  \
+        if (qp_count > 1) {                                                                                            \
+            udma_perf_test_put_impl<cpp_type, true>(                                                                   \
+                dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kib, prof_pe_val, loop_count, metric, batch,  \
+                timing_gva);                                                                                           \
+        } else {                                                                                                       \
+            udma_perf_test_put_impl<cpp_type, false>(                                                                  \
+                dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kib, prof_pe_val, loop_count, metric, batch,  \
+                timing_gva);                                                                                           \
+        }                                                                                                              \
+    }                                                                                                                  \
+    extern "C" __global__ __vector__ void udma_perf_test_##type_name##_get(                                            \
+        GM_ADDR dst_gva, GM_ADDR src_gva, int elements, int32_t frame_id, perftest::udma_mode_t test_mode,             \
+        int ub_size_kib, int64_t prof_pe_val, int loop_count, int batch, int qp_count, GM_ADDR timing_gva)             \
+    {                                                                                                                  \
+        (void)timing_gva;                                                                                              \
+        if (qp_count > 1) {                                                                                            \
+            udma_perf_test_get_impl<cpp_type, true>(                                                                   \
+                dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kib, prof_pe_val, loop_count, batch);         \
+        } else {                                                                                                       \
+            udma_perf_test_get_impl<cpp_type, false>(                                                                  \
+                dst_gva, src_gva, elements, frame_id, test_mode, ub_size_kib, prof_pe_val, loop_count, batch);         \
+        }                                                                                                              \
+    }                                                                                                                  \
+    extern "C" __global__ __vector__ void udma_perf_test_##type_name##_put_signal(                                     \
+        GM_ADDR dst_gva, GM_ADDR src_gva, GM_ADDR sig_gva, int elements, int32_t frame_id, int64_t prof_pe_val,        \
+        int loop_count, uint64_t signal_base, int batch, GM_ADDR timing_gva)                                           \
+    {                                                                                                                  \
+        (void)timing_gva;                                                                                              \
+        udma_perf_test_put_signal_impl<cpp_type>(                                                                      \
+            dst_gva, src_gva, sig_gva, elements, frame_id, prof_pe_val, loop_count, signal_base, batch);               \
     }
 
 DEFINE_UDMA_PERF_KERNEL_FOR_TYPE(float, float)
@@ -489,14 +489,14 @@ DEFINE_UDMA_PERF_KERNEL_FOR_TYPE(uint32, uint32_t)
 DEFINE_UDMA_PERF_KERNEL_FOR_TYPE(uint64, uint64_t)
 DEFINE_UDMA_PERF_KERNEL_FOR_TYPE(char, char)
 
-#define DISPATCH_UDMA_PERF_PUT(type_name, cpp_type)                                                                 \
-    udma_perf_test_##type_name##_put<<<block_dim, nullptr, stream>>>(                                               \
-        dst_gva, src_gva, elements, frame_id, t_mode, ub_size_kb, prof_pe_val, loop_count, metric, batch, qp_count, \
+#define DISPATCH_UDMA_PERF_PUT(type_name, cpp_type)                                                                  \
+    udma_perf_test_##type_name##_put<<<block_dim, nullptr, stream>>>(                                                \
+        dst_gva, src_gva, elements, frame_id, t_mode, ub_size_kib, prof_pe_val, loop_count, metric, batch, qp_count, \
         timing_gva)
 
-#define DISPATCH_UDMA_PERF_GET(type_name, cpp_type)                                                         \
-    udma_perf_test_##type_name##_get<<<block_dim, nullptr, stream>>>(                                       \
-        dst_gva, src_gva, elements, frame_id, t_mode, ub_size_kb, prof_pe_val, loop_count, batch, qp_count, \
+#define DISPATCH_UDMA_PERF_GET(type_name, cpp_type)                                                          \
+    udma_perf_test_##type_name##_get<<<block_dim, nullptr, stream>>>(                                        \
+        dst_gva, src_gva, elements, frame_id, t_mode, ub_size_kib, prof_pe_val, loop_count, batch, qp_count, \
         timing_gva)
 
 #define DISPATCH_UDMA_PERF_PUT_SIGNAL(type_name, cpp_type)                   \
@@ -542,7 +542,7 @@ DEFINE_UDMA_PERF_KERNEL_FOR_TYPE(char, char)
 
 extern "C" void launch_udma_perf_kernel(
     uint32_t block_dim, void* stream, uint8_t* dst_gva, uint8_t* src_gva, uint8_t* sig_gva, int elements,
-    int32_t frame_id, int test_mode, int data_type, int ub_size_kb, int64_t prof_pe_val, int loop_count,
+    int32_t frame_id, int test_mode, int data_type, int ub_size_kib, int64_t prof_pe_val, int loop_count,
     uint64_t signal_base, int metric, int batch, int qp_count, uint8_t* timing_gva)
 {
     perftest::udma_mode_t t_mode = static_cast<perftest::udma_mode_t>(test_mode);

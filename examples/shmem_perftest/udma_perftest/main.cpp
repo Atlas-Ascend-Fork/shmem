@@ -36,7 +36,7 @@ constexpr int LAT_IFACE_COUNT = 4;
 
 extern "C" void launch_udma_perf_kernel(
     uint32_t block_dim, void* stream, uint8_t* dst_gva, uint8_t* src_gva, uint8_t* sig_gva, int elements,
-    int32_t frame_id, int test_mode, int data_type, int ub_size_kb, int64_t prof_pe_val, int loop_count,
+    int32_t frame_id, int test_mode, int data_type, int ub_size_kib, int64_t prof_pe_val, int loop_count,
     uint64_t signal_base, int metric, int batch, int qp_count, uint8_t* timing_gva);
 
 static perftest::udma_mode_t get_udma_mode(const char* test_type_str)
@@ -64,7 +64,7 @@ static perftest::perf_metric_t get_perf_metric(const char* metric_str)
 template <typename T>
 int test_udma_perf_test_impl(
     int pe_id, int n_pes, uint64_t local_mem_size, int min_exponent, int max_exponent, int loop_count,
-    perftest::udma_mode_t test_mode, perftest::perf_data_type_t data_type_enum, int prof_pe, int ub_size_kb,
+    perftest::udma_mode_t test_mode, perftest::perf_data_type_t data_type_enum, int prof_pe, int ub_size_kib,
     perftest::perf_metric_t metric, int batch, int qp_count, std::vector<std::vector<std::string>>& csv_data)
 {
     static const char* kFunc = "test_udma_perf_test_impl";
@@ -172,8 +172,8 @@ int test_udma_perf_test_impl(
         uint64_t signal_base = static_cast<uint64_t>(frame_id) * 1000000ULL + 1;
         launch_udma_perf_kernel(
             block_dim, stream, (uint8_t*)dst_ptr, (uint8_t*)src_ptr, (uint8_t*)sig_ptr, elements, frame_id,
-            static_cast<int>(test_mode), static_cast<int>(data_type_enum), ub_size_kb, prof_pe, loop_count, signal_base,
-            static_cast<int>(metric), batch, qp_count, (uint8_t*)timing_ptr);
+            static_cast<int>(test_mode), static_cast<int>(data_type_enum), ub_size_kib, prof_pe, loop_count,
+            signal_base, static_cast<int>(metric), batch, qp_count, (uint8_t*)timing_ptr);
         PERFTEST_CHECK_GOTO(aclrtSynchronizeStream(stream), ret, cleanup);
 
         bool verify_success = true;
@@ -288,11 +288,11 @@ int test_udma_perf_test_impl(
             }
             csv_data.push_back(
                 {uint64_to_string(datasize), int_to_string(g_npus), int_to_string(static_cast<int>(block_dim)),
-                 double_to_string(ub_size_kb), lat_cell[0], lat_cell[1], lat_cell[2], lat_cell[3]});
+                 double_to_string(ub_size_kib), lat_cell[0], lat_cell[1], lat_cell[2], lat_cell[3]});
         } else {
             aclshmemx_get_prof(&out_profs, false);
             collect_prof_data_to_csv_v2(
-                out_profs, frame_id, datasize, qp_count, g_npus, ub_size_kb, loop_count,
+                out_profs, frame_id, datasize, qp_count, g_npus, ub_size_kib, loop_count,
                 metric == perftest::PERF_METRIC_BW, csv_data);
         }
 
@@ -355,7 +355,7 @@ int main(int argc, char* argv[])
     int min_exponent = 3;
     int max_exponent = 17;
     int loop_count = 1000;
-    int ub_size_kb = 16;
+    int ub_size_kib = 16;
     const char* metric_str = "bw";
     int batch = 0; // BW: 0 => full async; 1 => quiet after each NBI; N > 1 => defer/submit per group
     int qp_count = 1;
@@ -420,7 +420,7 @@ int main(int argc, char* argv[])
                 } else if (strcmp(long_options[option_index].name, "loop-count") == 0)
                     loop_count = std::atoi(optarg);
                 else if (strcmp(long_options[option_index].name, "ub-size") == 0)
-                    ub_size_kb = std::atoi(optarg);
+                    ub_size_kib = std::atoi(optarg);
                 else if (strcmp(long_options[option_index].name, "metric") == 0)
                     metric_str = optarg;
                 else if (strcmp(long_options[option_index].name, "batch") == 0)
@@ -475,7 +475,7 @@ int main(int argc, char* argv[])
         constexpr uint64_t UDMA_SQ_RING_DEPTH = 32768;  // UDMA SQ ring capacity in 64B WQEBBs (8192 WQEs x 4 BB).
         constexpr uint64_t UDMA_WQE_STAGING_BYTES = 64; // One staged data-mover WQE.
         const uint64_t effective_batch = static_cast<uint64_t>(batch > loop_count ? loop_count : batch);
-        const uint64_t ub_bytes = ub_size_kb > 0 ? static_cast<uint64_t>(ub_size_kb) * 1024ULL : 0ULL;
+        const uint64_t ub_bytes = ub_size_kib > 0 ? static_cast<uint64_t>(ub_size_kib) * 1024ULL : 0ULL;
         if (effective_batch >= UDMA_SQ_RING_DEPTH || effective_batch * UDMA_WQE_STAGING_BYTES > ub_bytes) {
             std::cerr << "Error: --batch must fit UDMA aggregate limits: batch < " << UDMA_SQ_RING_DEPTH
                       << " and batch * " << UDMA_WQE_STAGING_BYTES << " <= --ub-size * 1024" << std::endl;
@@ -490,10 +490,11 @@ int main(int argc, char* argv[])
         if (batch > loop_count) {
             batch = loop_count;
         }
-        const uint64_t ub_bytes = ub_size_kb > 0 ? static_cast<uint64_t>(ub_size_kb) * 1024ULL : 0ULL;
+        const uint64_t ub_bytes = ub_size_kib > 0 ? static_cast<uint64_t>(ub_size_kib) * 1024ULL : 0ULL;
         if (static_cast<uint64_t>(batch + 1) * 64ULL > ub_bytes) {
             std::cerr << "Error: --batch " << batch << " window needs " << ((batch + 1) * 64)
-                      << "B UB staging (defer window + submit), exceeds --ub-size " << ub_size_kb << " KB" << std::endl;
+                      << "B UB staging (defer window + submit), exceeds --ub-size " << ub_size_kib << " KiB"
+                      << std::endl;
             return 1;
         }
     }
@@ -503,8 +504,8 @@ int main(int argc, char* argv[])
         return 1;
     }
     std::cout << "[INFO] udma_perftest start, pe=" << (pe_id + f_pe) << ", t=" << test_type << ", d=" << fuc_data_type
-              << ", exp=" << min_exponent << "-" << max_exponent << ", loop=" << loop_count << ", ub=" << ub_size_kb
-              << "KB"
+              << ", exp=" << min_exponent << "-" << max_exponent << ", loop=" << loop_count << ", ub=" << ub_size_kib
+              << "KiB"
               << ", metric=" << metric_str << ", batch=" << batch << ", qp_count=" << qp_count << std::endl;
 
     fuc_test_type = test_type;
@@ -538,10 +539,10 @@ int main(int argc, char* argv[])
     std::vector<std::vector<std::string>> csv_data;
     if (metric == perftest::PERF_METRIC_LAT) {
         csv_data = {
-            {"DataSize/B", "Npus", "Blocks", "UBsize/KB", "PlainLat/us", "QpLat/us", "DeferLat/us", "SubmitLat/us"}};
+            {"DataSize/B", "Npus", "Blocks", "UBsize/KiB", "PlainLat/us", "QpLat/us", "DeferLat/us", "SubmitLat/us"}};
     } else {
         csv_data = {
-            {"DataSize/B", "Npus", "Blocks", "UBsize/KB", "Bandwidth/GB/s(1000)", "Bandwidth/GiB/s(1024)",
+            {"DataSize/B", "Npus", "Blocks", "UBsize/KiB", "Bandwidth/GB/s(1000)", "Bandwidth/GiB/s(1024)",
              "CoreMaxTime/us", "SingleCoreTime/us"}};
     }
 
@@ -549,7 +550,7 @@ int main(int argc, char* argv[])
 #define UDMA_TEST_IMPL_OP(type)                                                                                   \
     status = test_udma_perf_test_impl<type>(                                                                      \
         pe_id, n_pes, local_mem_size, min_exponent, max_exponent, loop_count, test_mode, data_type_enum, prof_pe, \
-        ub_size_kb, metric, batch, qp_count, csv_data)
+        ub_size_kib, metric, batch, qp_count, csv_data)
     DISPATCH_BY_TYPE(fuc_data_type, UDMA_TEST_IMPL_OP);
 #undef UDMA_TEST_IMPL_OP
 

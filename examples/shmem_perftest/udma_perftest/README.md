@@ -2,7 +2,7 @@
 
 ## 示例概述
 
-`udma_perftest` 是用于**测试 shmem UDMA 低阶接口性能**的参数化测试示例，平行于同目录下的 `mte_perftest`（针对 MTE 引擎）。该示例通过 [SHMEMI_PROF_START/END](../../../src/device/utils/prof/shmemi_prof.h) 宏采集性能数据，覆盖 `aclshmemx_udma_put_nbi` / `aclshmemx_udma_get_nbi` / `aclshmemx_udma_put_signal_nbi` 三个低阶接口，并支持不同数据量、batch 提交和 QP 配置。**该脚本测试结果仅做参考，性能以实际场景为准**。
+`udma_perftest` 是用于**测试 shmem UDMA 低阶接口性能**的参数化测试示例，平行于同目录下的 `mte_perftest`（针对 MTE 引擎）。该示例通过内置性能采集机制获取性能数据，覆盖 `aclshmemx_udma_put_nbi` / `aclshmemx_udma_get_nbi` / `aclshmemx_udma_put_signal_nbi` 三个低阶接口，并支持不同数据量、batch 提交和 QP 配置。**该脚本测试结果仅做参考，性能以实际场景为准**。
 
 ## 测试目的
 
@@ -68,7 +68,7 @@ bash run.sh -t bi_put -pes 16 -gnpus 8 -fpe 8 -fnpu 0 -ipport tcp://192.168.1.10
 | `--exponent <exponent>` | `-e <exponent>` | 单个 QP 的数据量幂数 (2^exponent 字节)；多 QP 时总数据量为该值乘 QP 数 | - |
 | `--exponent-range <min> <max>` | - | 单个 QP 的数据量幂数范围 | 3 17 |
 | `--loop-count <count>` | - | 循环次数 | 1000 |
-| `--ub-size <size>` | - | UB size (KB)；本 perftest 传给低阶 UDMA 接口并写入 CSV。高阶 UDMA RMA 默认 MTE staging 的 UB 配置要求至少 128 B | 16 |
+| `--ub-size <size>` | - | UB 工作区大小，单位为 KiB（`1 KiB = 1024 B`）。kernel 使用该值分配本地 UB 工作区；低阶 UDMA 接口接收的是该工作区地址而非本参数值。CSV 中按 KiB 记录。高阶 UDMA RMA 默认 MTE staging 的 UB 配置要求至少 128 B | 16 |
 | `--metric <bw\|lat>` | - | 性能口径：`bw`=带宽，`lat`=接口延迟，一次遍历全部接口形态（详见下方说明） | bw |
 | `--batch <n>` | - | `bw`：连续发起多少次操作后等待完成；`lat`：聚合接口的窗口大小（详见下方说明） | `0` |
 | `-pes <size>` | - | PE 数量 | 2 |
@@ -86,7 +86,7 @@ bash run.sh -t bi_put -pes 16 -gnpus 8 -fpe 8 -fnpu 0 -ipport tcp://192.168.1.10
 
 ### Metric 口径说明
 
-UDMA 是异步 NBI 接口，benchmark 把 `put_nbi/get_nbi` 提交与 `quiet` 等待分开计时。两种 metric 都是**单窗口覆盖 `loop_count` 次提交**（`SHMEMI_PROF_START/END` 自带 `pipe_barrier` 开销，每次循环打点会把测量本身的开销叠到延时数字上，所以打点放循环外、对总耗时除以 `loop_count`），区别只在 `quiet` 是否在窗口内：
+UDMA 是异步 NBI 接口，benchmark 把 `put_nbi/get_nbi` 提交与 `quiet` 等待分开计时。两种 metric 都是**单窗口覆盖 `loop_count` 次提交**（内置性能采集机制包含 `pipe_barrier` 开销；每次循环采集会将测量开销叠加到延时数字上，因此在循环外采集总耗时并除以 `loop_count`），区别只在 `quiet` 是否在窗口内：
 
 - **`--metric bw`（默认）**：`prof_start → loop(put_nbi) → quiet → prof_end`，窗口包含 `quiet`。
   - `Bandwidth/GB/s` = `datasize × qp_count / (window_us / loop_count)`；`datasize` 是单个 QP 的数据量
@@ -124,7 +124,7 @@ CSV 文件名加 metric 前缀；多 QP 场景追加 QP 数后缀：`output/udma
 - `--batch 1`：每次普通 NBI 后立刻 `quiet`，等价于同步提交，能反映"提交+完成"的端到端开销。
 - `--batch N`（`N > 1`）：每批前 N-1 个操作使用 `defer`，最后一个使用 `submit`，然后 `quiet`；当 `loop_count` 不能整除 N 时，余数批次按实际操作数提交。
 
-`SHMEMI_PROF_START/END` 仍只取一次（同 `--metric bw` 原本的实现），即窗口内总时间除以 `loop_count` 给出"含 batched quiet 的平均单次耗时"。`--metric lat` 路径不按 BW 的 batch 语义分组，`--batch` 仅作为聚合窗口（见上方"时延路径的接口遍历"）。
+性能采集窗口仍只取一次（同 `--metric bw` 原本的实现），即窗口内总时间除以 `loop_count` 给出"含 batched quiet 的平均单次耗时"。`--metric lat` 路径不按 BW 的 batch 语义分组，`--batch` 仅作为聚合窗口（见上方"时延路径的接口遍历"）。
 
 适用范围：`put / bi_put / get / bi_get` 在 `--metric bw` 下的 `batch > 1` 使用聚合 action；`put_signal` 始终使用普通 NBI，但支持按 batch 分组后调用 `quiet`。
 
@@ -186,7 +186,7 @@ CSV 列与 MTE 版保持一致，便于复用 `examples/utils/perf_data_process.
 | `DataSize/B` | 通用 | 单个 QP 每次传输的数据量（字节）；多 QP 并行模式总数据量为 `DataSize × qp-count` |
 | `Npus` | 通用 | NPU 数量 |
 | `Blocks` | 通用 | 多 QP 并行模式为 `qp-count`，其他模式为 1；`lat` 恒为 1 |
-| `UBsize/KB` | 通用 | UB 大小（KB） |
+| `UBsize/KiB` | 通用 | UB 大小（KiB） |
 | `Bandwidth/GB/s` | `bw` | 带宽（GB/s，十进制），按所有 QP 总流量统计 |
 | `CoreMaxTime/us` | `bw` | 单次 iteration 耗时（us） |
 | `PlainLat/us` | `lat` | 普通非聚合接口的下发时延（us），窗口不满足时为 `-` |
@@ -199,7 +199,7 @@ CSV 列与 MTE 版保持一致，便于复用 `examples/utils/perf_data_process.
 ## 输出示例
 
 ```bash
-[INFO] udma_perftest start, pe=0, t=put, d=float, exp=10-10, loop=100, ub=16KB, metric=lat, batch=100
+[INFO] udma_perftest start, pe=0, t=put, d=float, exp=10-10, loop=100, ub=16KiB, metric=lat, batch=100
 pe: 0 size(per QP): 1024B, total: 1024B frame_id: 0
 [LAT][plain] PE0: 0.85 us
 [LAT][qp] PE0: 0.92 us
@@ -213,8 +213,8 @@ pe: 0 size(per QP): 1024B, total: 1024B frame_id: 0
 ## 已知约束
 
 1. UDMA 头文件 `include/device/gm2gm/engine/shmem_device_udma.h` 注明：concurrent RMA/AMO operations to the same PE are not supported。单 QP 模式保持 `block_dim=1`；多 QP 模式由每个 block 独占一个显式 QP，避免多个 block 争用同一个 SQ。
-2. UDMA 聚合 action 要求 `PIPE_MTE3`。当 `batch > 1` 时，每批 WQE 数必须小于 4096（UB 上限 256 KB，每 WQE 占 64 B），UB scratch 至少需要 `64 * batch` 字节；多 QP 依赖的 QP 专有接口要求 `ACLSHMEM_RELAY_SUPPORT=OFF`，仅直连 UDMA build 支持。
-3. UDMA 仅在 Ascend950 编译期使能；在其他 SOC 上 kernel 会通过 `aclshmemi_kernel_abort` 报错退出。
+2. UDMA 聚合 action 要求 `PIPE_MTE3`。当 `batch > 1` 时，每批 WQE 数必须小于 4096（UB 上限 256 KiB，每 WQE 占 64 B），UB scratch 至少需要 `64 * batch` 字节；多 QP 依赖的 QP 专有接口要求 `ACLSHMEM_RELAY_SUPPORT=OFF`，仅直连 UDMA build 支持。
+3. UDMA 仅在 Ascend950 编译期使能；在其他 SOC 上 kernel 会报错退出。
 4. **不支持 D2H / `HOST_SIDE` (DRAM)**：UDMA 引擎当前未对 Host 侧 DRAM 提供 RMA 路径，仅测 HBM。
 5. 原子操作 (`aclshmemx_udma_atomic_add` 等) 不在本 perftest 范围。
 6. 高阶 UDMA RMA 接口默认通过 `PIPE_MTE3` staging 下发 WQE，默认 UB 配置为 `offset = 189 * 1024`、`ub_size = 128` 字节、`sync_id = 0`。如果调用 `aclshmemx_set_udma_config` 修改配置，`ub_size` 必须不小于 128 字节。本 perftest 的低阶接口路径仍按显式入参使用本地 UB。

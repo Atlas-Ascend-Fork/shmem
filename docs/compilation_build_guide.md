@@ -48,6 +48,8 @@ SHMEM的基本编译命令是`bash build.sh`，默认构建模式下生成版本
 - `-soc_type`：如果SOC是Ascend950类别，需要增加`-soc_type Ascend950`参数，可以通过`npu-smi info`命令查看，其他SOC可不加该参数。
 - `-enable_simt`：使能simt编程模式接口。
 - `-enable_relay`：构建并启用 UDMA relay（绕路/detour）能力。relay 构建在 UDMA 之上，仅 Ascend950 提供 UDMA，因此该选项**必须配合 `-soc_type Ascend950`** 使用；在多 SOC 的 wheel/包构建（`-python_extension` / `-package` / `-full`）中也可使用，此时 relay 仅应用于 950 后端。详见下文[Relay参数使用说明](#relay参数使用说明)。
+- `-multi_link`：构建并启用 UDMA 多链路能力，支持按 QP 配置网络层路由策略。仅支持 Ascend950 的直连 UDMA，不能与 `-enable_relay` 同时使用。详见下文[Multi-link参数使用说明](#multi-link参数使用说明)。
+- `-clean`：构建前删除已有 `build` 目录，用于避免 CMake 缓存和历史构建产物影响本次配置。
 - `-full`：编译 package + python_extension + uttests + examples。SHMEM自动编译脚本，会自动完成依赖库的下载，工程编译，UT用例编译，库打包。
 
 ### RDMA参数使用说明
@@ -154,6 +156,53 @@ bash scripts/build.sh -examples -enable_relay
 ```
 
 > 说明：tailcut 等依赖 relay 的样例功能，必须在启用 `-enable_relay` 的前提下编译，详见 `examples/tp_allreduce_udma/README.md`。
+
+### Multi-link参数使用说明
+
+Multi-link 用于为同一对端 PE 的不同 UDMA QP 选择网络层路由。启用后，应用可以通过
+`aclshmemx_set_qp_net_layer` 为指定 QP 设置显式网络层策略；未设置策略的 QP 使用默认路由选择。
+当前仅支持 UDMA 的 layer 0 和 layer 1。实际可用链路由运行时 rootinfo 和拓扑决定：同一 layer-0
+网络实例内可选择 MESH 或 CLOS；跨实例对端只会从可达的 CLOS 路由中选择。
+
+启用 `-multi_link` 后，CMake 会自动添加 `ACLSHMEM_MULTI_LINK_SUPPORT` 编译宏，用户无需手动定义。
+
+**参数依赖与限制：**
+
+- `-multi_link` **必须**配合 `-soc_type Ascend950` 使用。
+- multi-link 使用直连 UDMA，**不能**与 `-enable_relay` 同时使用。
+- multi-link 不依赖 `-enable_rdma` 或 `-rdma_backend`；后两者用于 RoCE/RDMA 后端配置。
+- 构建启用 multi-link 后，仍需由运行环境提供可用的 UDMA 通道和 rootinfo/拓扑信息；编译成功不表示所有 PE
+  或所有网络层均可建立路由。
+- 使用 `aclshmemx_set_qp_num` 和 `aclshmemx_set_qp_net_layer` 时，必须在 SHMEM 初始化前调用；所有参与 PE
+  必须配置相同的 QP 数和相同的显式 QP 网络层策略。最后一个 SHMEM 实例析构后，这些配置会恢复默认值。
+- 显式策略只对同一 layer-0 网络实例内的对端生效；跨实例通信会忽略显式 MESH/layer 策略并选择可达的 CLOS
+  路由。因此，同一个 QP 面向不同对端最终使用的网络层可能不同。
+
+**有效命令示例：**
+
+```shell
+# 编译 Ascend950 多链路 UDMA 能力及示例
+bash scripts/build.sh -examples -soc_type Ascend950 -multi_link
+
+# 可与 RDMA 后端能力一同构建；仅限配备 XSCALE 网卡的 Ascend950 环境，multi-link 本身不依赖 RDMA
+bash scripts/build.sh -examples -soc_type Ascend950 -multi_link -enable_rdma -rdma_backend XSCALE
+```
+
+**无效命令示例：**
+
+```shell
+# 错误：multi-link 仅支持 Ascend950
+bash scripts/build.sh -examples -multi_link
+# 将报错：ACLSHMEM_MULTI_LINK_SUPPORT requires SOC_TYPE=Ascend950.
+
+# 错误：multi-link 要求直连 UDMA，不能与 relay 同时启用
+bash scripts/build.sh -examples -soc_type Ascend950 -multi_link -enable_relay
+# 将报错：ACLSHMEM_MULTI_LINK_SUPPORT currently requires direct UDMA; disable relay support.
+```
+
+运行时 QP 配置和多链路验证示例请参考 `examples/udma_qp_demo/README.md`；该样例支持通过
+`-qp_net_layers qp_idx:netLayer[,qp_idx:netLayer...]` 指定 QP 策略，并可使用
+`aclshmemx_get_qp_net_layer` 查询已建立路由的实际网络层。
 
 ## SHMEM关键文件介绍
 

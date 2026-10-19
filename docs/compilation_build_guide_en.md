@@ -41,6 +41,8 @@ The basic SHMEM build command is `bash build.sh`. The default build mode generat
 - `-soc_type`: If the SoC is Ascend 950, add the `-soc_type Ascend950` parameter. You can run the `npu-smi info` command to view the parameter. For other SoCs, you do not need to add this parameter.
 - `-enable_simt`: enables the SIMT programming mode.
 - `-enable_relay`: builds and enables the UDMA relay (detour) capability. Relay is built on top of UDMA, which is available only on Ascend 950, so this option **must be used together with `-soc_type Ascend950`**. It is also allowed in multi-SOC wheel/package builds (`-python_extension` / `-package` / `-full`), where relay is applied only to the 950 backend. For details, see [Relay Parameters](#relay-parameters) below.
+- `-multi_link`: builds and enables UDMA multi-link routing, which supports per-QP network-layer route policies. It requires direct UDMA on Ascend 950 and cannot be used with `-enable_relay`. For details, see [Multi-link Parameters](#multi-link-parameters) below.
+- `-clean`: removes the existing `build` directory before building to prevent CMake cache and previous build artifacts from affecting the current configuration.
 - `-full`: compiles the package, Python extension, UT tests, and examples. The SHMEM automatic compilation script automatically downloads the dependency libraries, compiles the project and UT test cases, and packages the libraries.
 
 ### RDMA Parameters
@@ -140,6 +142,57 @@ bash scripts/build.sh -examples -enable_relay
 ```
 
 > Note: Sample features that depend on relay, such as tailcut, must be compiled with `-enable_relay` enabled. For details, see `examples/tp_allreduce_udma/README.md`.
+
+### Multi-link Parameters
+
+Multi-link selects network-layer routes for different UDMA QPs targeting the same remote PE. When enabled, an
+application can use `aclshmemx_set_qp_net_layer` to configure an explicit network-layer policy for an individual QP;
+QPs without an explicit policy use default route selection. The current implementation supports UDMA layer 0 and
+layer 1 only. The available routes are determined by runtime rootinfo and topology: peers in the same layer-0 network
+instance can use MESH or CLOS, while peers in different instances select only reachable CLOS routes.
+
+When `-multi_link` is enabled, CMake automatically adds the `ACLSHMEM_MULTI_LINK_SUPPORT` compilation macro. You do
+not need to define it manually.
+
+**Dependencies and limitations**:
+
+- `-multi_link` **must** be used with `-soc_type Ascend950`.
+- Multi-link uses direct UDMA and **cannot** be used with `-enable_relay`.
+- Multi-link does not depend on `-enable_rdma` or `-rdma_backend`; those options configure the RoCE/RDMA backend.
+- A multi-link build still requires available UDMA channels and rootinfo/topology at runtime. A successful build does
+  not guarantee that every PE or network layer can establish a route.
+- Call `aclshmemx_set_qp_num` and `aclshmemx_set_qp_net_layer` before SHMEM initialization. All participating PEs
+  must use the same QP count and the same explicit per-QP network-layer policy. These settings return to defaults
+  after the last SHMEM instance is finalized.
+- Explicit policies apply only to peers in the same layer-0 network instance. Communication across instances ignores
+  explicit layer policies and selects reachable CLOS routes. Therefore, the same QP can resolve to different actual
+  network layers for different peers.
+
+**Valid command examples**:
+
+```shell
+# Build Ascend 950 multi-link UDMA capability and examples
+bash scripts/build.sh -examples -soc_type Ascend950 -multi_link
+
+# RDMA backend capability can be built together only on Ascend 950 systems with an XSCALE NIC; multi-link itself does not depend on RDMA
+bash scripts/build.sh -examples -soc_type Ascend950 -multi_link -enable_rdma -rdma_backend XSCALE
+```
+
+**Invalid command examples**:
+
+```shell
+# Error: multi-link is supported only on Ascend 950
+bash scripts/build.sh -examples -multi_link
+# Error message: "ACLSHMEM_MULTI_LINK_SUPPORT requires SOC_TYPE=Ascend950."
+
+# Error: multi-link requires direct UDMA and cannot be used with relay
+bash scripts/build.sh -examples -soc_type Ascend950 -multi_link -enable_relay
+# Error message: "ACLSHMEM_MULTI_LINK_SUPPORT currently requires direct UDMA; disable relay support."
+```
+
+For runtime QP configuration and multi-link validation, see `examples/udma_qp_demo/README.md`. The sample accepts
+`-qp_net_layers qp_idx:netLayer[,qp_idx:netLayer...]` to set QP policies and uses `aclshmemx_get_qp_net_layer` to
+query the actual network layer of an established route.
 
 ## Key SHMEM Files
 ### `scripts` Directory

@@ -19,7 +19,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "examples/utils/perf_data_process.py"
-HEADERS = ["DataSize/B", "Npus", "Blocks", "UBsize/KB", "Bandwidth/GB/s", "CoreMaxTime/us"]
+HEADERS = ["DataSize/B", "Npus", "Blocks", "UBsize/KiB", "Bandwidth/GB/s", "CoreMaxTime/us"]
 MOE_HEADERS = HEADERS + [
     "Metric", "GlobalDataSize/B", "PerPeBandwidth/GB/s", "BS", "H", "TopK",
     "ExpertPerPe", "Dtype", "Warmup", "Loops", "ProfPe", "CaseId", "SingleCoreTime/us",

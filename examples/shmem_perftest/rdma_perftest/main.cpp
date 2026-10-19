@@ -640,10 +640,10 @@ int main(int argc, char* argv[])
     std::vector<std::vector<std::string>> csv_data;
     if (metric == perftest::PERF_METRIC_LAT) {
         csv_data = {
-            {"DataSize/B", "Npus", "Blocks", "UBsize/KB", "PlainLat/us", "QpLat/us", "DeferLat/us", "SubmitLat/us"}};
+            {"DataSize/B", "Npus", "Blocks", "UBsize/KiB", "PlainLat/us", "QpLat/us", "DeferLat/us", "SubmitLat/us"}};
     } else {
         csv_data = {
-            {"DataSize/B", "Npus", "Blocks", "UBsize/KB", "Bandwidth/GB/s", "Bandwidth/GiB/s", "CoreMaxTime/us"}};
+            {"DataSize/B", "Npus", "Blocks", "UBsize/KiB", "Bandwidth/GB/s", "Bandwidth/GiB/s", "CoreMaxTime/us"}};
     }
 
     int status = 0;

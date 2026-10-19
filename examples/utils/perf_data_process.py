@@ -106,7 +106,7 @@ LATENCY_COLUMNS = ['PlainLat/us', 'QpLat/us', 'DeferLat/us', 'SubmitLat/us']
 def process_lat_csv(csv_file, output_dir, csv_headers, no_plot):
     """Process a latency-schema CSV (PlainLat/QpLat/DeferLat/SubmitLat columns)."""
     generated_images = []
-    headers = ['DataSize/B', 'Npus', 'Blocks', 'UBsize/KB'] + [c for c in LATENCY_COLUMNS if c in csv_headers]
+    headers = ['DataSize/B', 'Npus', 'Blocks', 'UBsize/KiB'] + [c for c in LATENCY_COLUMNS if c in csv_headers]
     try:
         data_rows = []
         with open(csv_file, 'r', encoding='utf-8') as f:
@@ -177,7 +177,7 @@ def process_csv(csv_file, output_dir, ubsize_filter, coresize_filter, no_plot=Fa
     df = None
 
     # 定义表头
-    headers = ['DataSize/B', 'Npus', 'Blocks', 'UBsize/KB', 'Bandwidth/GB/s', 'CoreMaxTime/us']
+    headers = ['DataSize/B', 'Npus', 'Blocks', 'UBsize/KiB', 'Bandwidth/GB/s', 'CoreMaxTime/us']
 
     try:
         # 保留前5列参数和带宽，按表头定位最大核时间。
@@ -185,6 +185,7 @@ def process_csv(csv_file, output_dir, ubsize_filter, coresize_filter, no_plot=Fa
         with open(csv_file, 'r', encoding='utf-8') as f:
             reader = csv.reader(f)
             csv_headers = [name.strip() for name in next(reader, [])]
+            csv_headers = ['UBsize/KiB' if name == 'UBsize/KB' else name for name in csv_headers]
             if any(col in csv_headers for col in LATENCY_COLUMNS):
                 return process_lat_csv(csv_file, output_dir, csv_headers, no_plot)
             if 'CoreMaxTime/us' not in csv_headers:
@@ -215,7 +216,7 @@ def process_csv(csv_file, output_dir, ubsize_filter, coresize_filter, no_plot=Fa
         except Exception as e:
             print(f"Failed to convert column '{col}' to numeric type: {e}")
 
-    required_cols = ['DataSize/B', 'Blocks', 'UBsize/KB', 'Bandwidth/GB/s']
+    required_cols = ['DataSize/B', 'Blocks', 'UBsize/KiB', 'Bandwidth/GB/s']
     for col in required_cols:
         if col not in df.columns:
             print(f"Error: CSV file {csv_file} missing required column: {col}")
@@ -275,7 +276,7 @@ def plot_dataframe(csv_file, output_dir, df, ubsize_filter, coresize_filter, met
                 break
             ax = axs[i]
             subset = df[df['Blocks'] == blocks]
-            for ubsize, group in subset.groupby('UBsize/KB'):
+            for ubsize, group in subset.groupby('UBsize/KiB'):
                 if ubsize_filter is not None and ubsize not in ubsize_filter:
                     continue
                 ax.plot(group['DataSize/B'], group['y'], label=f'UBsize={ubsize}')
@@ -310,13 +311,13 @@ def plot_dataframe(csv_file, output_dir, df, ubsize_filter, coresize_filter, met
             'path': fig1_path,
             'description': '按 Blocks 分组的 UBsize 对比图',
             'subplots': [f'Blocks={v}' for v in blocks_values],
-            'lines': [f'UBsize={v}' for v in sorted(df['UBsize/KB'].unique())]
+            'lines': [f'UBsize={v}' for v in sorted(df['UBsize/KiB'].unique())]
         })
     else:
         print(f"WARN: {csv_file} - No eligible Blocks values found, skipping UBsize_compare chart")
 
     # -------------------------- Figure 2: Core_compare (UBsize subplots) --------------------------
-    ubsize_values = sorted(df['UBsize/KB'].unique())
+    ubsize_values = sorted(df['UBsize/KiB'].unique())
     if ubsize_filter is not None:
         ubsize_values = [v for v in ubsize_values if v in ubsize_filter]
 
@@ -343,7 +344,7 @@ def plot_dataframe(csv_file, output_dir, df, ubsize_filter, coresize_filter, met
             if i >= len(axs):
                 break
             ax = axs[i]
-            subset = df[df['UBsize/KB'] == ubsize]
+            subset = df[df['UBsize/KiB'] == ubsize]
             for blocks, group in subset.groupby('Blocks'):
                 if coresize_filter is not None and blocks not in coresize_filter:
                     continue
@@ -387,7 +388,7 @@ def plot_dataframe(csv_file, output_dir, df, ubsize_filter, coresize_filter, met
     # -------------------------- Heatmaps (Filtered Data) --------------------------
     heatmap_df = df.copy()
     if ubsize_filter is not None:
-        heatmap_df = heatmap_df[heatmap_df['UBsize/KB'].isin(ubsize_filter)]
+        heatmap_df = heatmap_df[heatmap_df['UBsize/KiB'].isin(ubsize_filter)]
     if coresize_filter is not None:
         heatmap_df = heatmap_df[heatmap_df['Blocks'].isin(coresize_filter)]
 
@@ -396,10 +397,10 @@ def plot_dataframe(csv_file, output_dir, df, ubsize_filter, coresize_filter, met
         return generated_images, df
 
     # -------------------------- Heatmap 1: Max Bandwidth --------------------------
-    max_values = heatmap_df.groupby(['Blocks', 'UBsize/KB'])['y'].max().reset_index()
+    max_values = heatmap_df.groupby(['Blocks', 'UBsize/KiB'])['y'].max().reset_index()
     heatmap1_path = None
     if not max_values.empty:
-        max_values_pivot = max_values.pivot(index='UBsize/KB', columns='Blocks', values='y')
+        max_values_pivot = max_values.pivot(index='UBsize/KiB', columns='Blocks', values='y')
 
         # 动态计算图的大小和字体大小
         num_rows = len(max_values_pivot)
@@ -416,7 +417,7 @@ def plot_dataframe(csv_file, output_dir, df, ubsize_filter, coresize_filter, met
         ax.invert_yaxis()
         plt.title('Bandwidth Max (GB/s)', fontsize=14, pad=20)
         plt.xlabel('Blocks', fontsize=12)
-        plt.ylabel('UBsize/KB', fontsize=12)
+        plt.ylabel('UBsize/KiB', fontsize=12)
         plt.xticks(rotation=45 if num_cols > 8 else 0, ha='right')
         plt.yticks(rotation=0)
         plt.tight_layout()
@@ -435,10 +436,10 @@ def plot_dataframe(csv_file, output_dir, df, ubsize_filter, coresize_filter, met
         print(f"WARN: {csv_file} - No max bandwidth data available, skipping max heatmap")
 
     # -------------------------- Heatmap 2: Mean Bandwidth (>1MB) --------------------------
-    filtered_data = heatmap_df[heatmap_df['DataSize/B'] >= 1048576].groupby(['Blocks', 'UBsize/KB'])['y'].mean().reset_index()
+    filtered_data = heatmap_df[heatmap_df['DataSize/B'] >= 1048576].groupby(['Blocks', 'UBsize/KiB'])['y'].mean().reset_index()
     heatmap2_path = None
     if not filtered_data.empty:
-        filtered_data_pivot = filtered_data.pivot(index='UBsize/KB', columns='Blocks', values='y')
+        filtered_data_pivot = filtered_data.pivot(index='UBsize/KiB', columns='Blocks', values='y')
 
         # 动态计算图的大小和字体大小
         num_rows = len(filtered_data_pivot)
@@ -455,7 +456,7 @@ def plot_dataframe(csv_file, output_dir, df, ubsize_filter, coresize_filter, met
         ax.invert_yaxis()
         plt.title('Bandwidth Mean (DataSize > 1MB) (GB/s)', fontsize=14, pad=20)
         plt.xlabel('Blocks', fontsize=12)
-        plt.ylabel('UBsize/KB', fontsize=12)
+        plt.ylabel('UBsize/KiB', fontsize=12)
         plt.xticks(rotation=45 if num_cols > 8 else 0, ha='right')
         plt.yticks(rotation=0)
         plt.tight_layout()
@@ -496,7 +497,7 @@ def generate_markdown(root_dir, csv_data_dict):
             # 添加表格数据
             df = csv_info['dataframe']
             display_cols = []
-            for col in ['DataSize/B', 'Npus', 'Blocks', 'UBsize/KB', 'Bandwidth/GB/s', 'CoreMaxTime/us', 'Metric'] + LATENCY_COLUMNS:
+            for col in ['DataSize/B', 'Npus', 'Blocks', 'UBsize/KiB', 'Bandwidth/GB/s', 'CoreMaxTime/us', 'Metric'] + LATENCY_COLUMNS:
                 if col in df.columns:
                     display_cols.append(col)
 

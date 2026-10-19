@@ -18,7 +18,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "examples/utils/perf_data_process.py"
-HEADERS = ["DataSize/B", "Npus", "Blocks", "UBsize/KB", "Bandwidth/GB/s", "CoreMaxTime/us"]
+HEADERS = ["DataSize/B", "Npus", "Blocks", "UBsize/KiB", "Bandwidth/GB/s", "CoreMaxTime/us"]
 VALUES = [1048576, 2, 8, 16, 512, 16.384]
 spec = importlib.util.spec_from_file_location("perf_data_process", SCRIPT)
 perf = importlib.util.module_from_spec(spec)
@@ -89,12 +89,15 @@ def test_cli_report_uses_core_time_instead_of_gib_bandwidth(tmp_path):
     assert float(values[columns.index("CoreMaxTime/us")]) == 16.384
 
 
-LAT_HEADERS = ["DataSize/B", "Npus", "Blocks", "UBsize/KB", "PlainLat/us", "QpLat/us", "DeferLat/us", "SubmitLat/us"]
+LAT_HEADERS = ["DataSize/B", "Npus", "Blocks", "UBsize/KiB", "PlainLat/us", "QpLat/us", "DeferLat/us", "SubmitLat/us"]
+RDMA_LAT_HEADERS = ["DataSize/B", "Npus", "Blocks", "UBsize/KB", "PlainLat/us", "QpLat/us", "DeferLat/us", "SubmitLat/us"]
 
 
-def write_lat_csv(path):
+def write_lat_csv(path, headers=None):
+    if headers is None:
+        headers = LAT_HEADERS
     rows = [
-        LAT_HEADERS,
+        headers,
         [1024, 2, 1, 16, 0.85, 0.92, 0.31, 1.10],
         [4096, 2, 1, 16, 0.86, 0.93, 0.30, 1.12],
         [16384, 2, 1, 16, 0.88, 0.95, "-", 1.15],
@@ -112,6 +115,15 @@ def test_process_csv_lat_schema_keeps_columns_and_na(tmp_path):
     assert list(frame.columns) == LAT_HEADERS
     assert frame.iloc[0]["PlainLat/us"] == 0.85
     assert frame.iloc[2]["DeferLat/us"] != frame.iloc[2]["DeferLat/us"]  # '-' -> NaN
+
+
+def test_process_csv_accepts_rdma_latency_legacy_ubsize_header(tmp_path):
+    source = tmp_path / "rdma_lat_put_float_0.csv"
+    write_lat_csv(source, RDMA_LAT_HEADERS)
+    images, frame = perf.process_csv(source, tmp_path / "picture", None, None, no_plot=True)
+    assert images == []
+    assert list(frame.columns) == LAT_HEADERS
+    assert frame.iloc[0]["UBsize/KiB"] == 16
 
 
 def test_cli_report_and_plot_cover_latency_schema(tmp_path):
