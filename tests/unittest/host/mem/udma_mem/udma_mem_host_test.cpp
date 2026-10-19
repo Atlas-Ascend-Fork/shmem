@@ -7,6 +7,7 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -107,8 +108,12 @@ static void verify_highlevel_put_signal_data(uint32_t* outHost, uint32_t rank_si
 }
 
 static void test_udma_highlevel_put_signal_split_case(
-    aclrtStream stream, uint8_t* gva, uint32_t rank_id, uint32_t rank_size, size_t message_size, int32_t signal)
+    aclrtStream stream, uint8_t* gva, uint32_t rank_id, uint32_t rank_size, size_t message_size, int32_t signal,
+    uint32_t family, bool nbi, bool use_tensor)
 {
+    SCOPED_TRACE(
+        ::testing::Message() << "family=" << family << " nbi=" << nbi << " tensor=" << use_tensor
+                             << " message_size=" << message_size);
     constexpr uint8_t rank_offset = 10;
     constexpr size_t boundary_offsets[] = {0, 256UL * 1024UL * 1024UL - 1};
     for (size_t offset : boundary_offsets) {
@@ -135,7 +140,7 @@ static void test_udma_highlevel_put_signal_split_case(
     auto* sig_addr = static_cast<uint8_t*>(aclshmem_malloc(rank_size * sizeof(int32_t)));
     ASSERT_NE(sig_addr, nullptr);
     aclshmemi_control_barrier_all();
-    test_udma_highlevel_put_signal_split(1, stream, gva, sig_addr, message_size, signal);
+    test_udma_highlevel_put_signal_split(1, stream, gva, sig_addr, message_size, signal, family, nbi, use_tensor);
     ASSERT_EQ(aclrtSynchronizeStream(stream), 0);
     aclshmemi_control_barrier_all();
 
@@ -179,6 +184,70 @@ static void test_udma_highlevel_put_signal_split_case(
         }
     }
     aclshmem_free(sig_addr);
+}
+
+static uint8_t udma_signal_source_byte(uint32_t rank, uint32_t slot, size_t offset)
+{
+    // Avoid the guard value so missing writes cannot accidentally match.
+    return static_cast<uint8_t>((rank * 31 + slot * 13 + offset * 7) % 127);
+}
+
+static void test_udma_signal_overload_matrix(
+    aclrtStream stream, uint32_t rank_id, uint32_t rank_size, uint8_t* gva, bool use_add)
+{
+    const size_t slots = static_cast<size_t>(rank_size) * UDMA_SIGNAL_SLOT_COUNT;
+    const size_t bank_bytes = slots * UDMA_SIGNAL_SLOT_BYTES;
+    const size_t signal_entries = slots + rank_size;
+    const size_t signal_bytes = signal_entries * sizeof(int32_t);
+    auto* data = gva;
+    auto* signals = gva + 2 * bank_bytes;
+    std::vector<uint8_t> input(2 * bank_bytes, UDMA_SIGNAL_GUARD);
+    std::vector<uint8_t> output(2 * bank_bytes);
+    std::vector<int32_t> signal_values(signal_entries, UDMA_SIGNAL_INITIAL);
+    std::fill(signal_values.begin() + slots, signal_values.end(), 0);
+    for (uint32_t slot = 0; slot < UDMA_SIGNAL_SLOT_COUNT; ++slot) {
+        const size_t base = (static_cast<size_t>(rank_id) * UDMA_SIGNAL_SLOT_COUNT + slot) * UDMA_SIGNAL_SLOT_BYTES;
+        for (size_t byte = 0; byte < UDMA_SIGNAL_SLOT_BYTES; ++byte) {
+            input[base + byte] = udma_signal_source_byte(rank_id, slot, byte);
+        }
+    }
+    ASSERT_EQ(aclrtMemcpy(data, input.size(), input.data(), input.size(), ACL_MEMCPY_HOST_TO_DEVICE), 0);
+    ASSERT_EQ(aclrtMemcpy(signals, signal_bytes, signal_values.data(), signal_bytes, ACL_MEMCPY_HOST_TO_DEVICE), 0);
+    aclshmemi_control_barrier_all();
+    test_udma_highlevel_put_signal_overloads(1, stream, data, signals, use_add);
+    ASSERT_EQ(aclrtSynchronizeStream(stream), 0);
+    aclshmemi_control_barrier_all();
+    ASSERT_EQ(aclrtMemcpy(output.data(), output.size(), data, output.size(), ACL_MEMCPY_DEVICE_TO_HOST), 0);
+    ASSERT_EQ(aclrtMemcpy(signal_values.data(), signal_bytes, signals, signal_bytes, ACL_MEMCPY_DEVICE_TO_HOST), 0);
+    for (uint32_t rank = 0; rank < rank_size; ++rank) {
+        ASSERT_EQ(signal_values[slots + rank], 0)
+            << "contiguous put-with-signal data was not visible when its signal was observed; bitmask identifies "
+               "the failing slot";
+    }
+    for (size_t byte = 0; byte < bank_bytes; ++byte) {
+        ASSERT_EQ(output[byte], input[byte]) << "source bank modified at byte=" << byte;
+    }
+    for (uint32_t rank = 0; rank < rank_size; ++rank) {
+        for (uint32_t slot = 0; slot < UDMA_SIGNAL_SLOT_COUNT; ++slot) {
+            const size_t index = static_cast<size_t>(rank) * UDMA_SIGNAL_SLOT_COUNT + slot;
+            const int32_t expected_signal = rank == rank_id ?
+                                                UDMA_SIGNAL_INITIAL :
+                                                100 + static_cast<int32_t>(slot) + (use_add ? UDMA_SIGNAL_INITIAL : 0);
+            ASSERT_EQ(signal_values[index], expected_signal) << "rank=" << rank << " slot=" << slot;
+            for (size_t byte = 0; byte < UDMA_SIGNAL_SLOT_BYTES; ++byte) {
+                uint8_t expected = UDMA_SIGNAL_GUARD;
+                if (rank != rank_id && byte >= UDMA_SIGNAL_PREFIX_BYTES) {
+                    const size_t relative = byte - UDMA_SIGNAL_PREFIX_BYTES;
+                    if (relative < UDMA_SIGNAL_COPY_BYTES) {
+                        expected = udma_signal_source_byte(rank, slot, UDMA_SIGNAL_PREFIX_BYTES + relative);
+                    }
+                }
+                ASSERT_EQ(output[bank_bytes + index * UDMA_SIGNAL_SLOT_BYTES + byte], expected)
+                    << "destination byte=" << byte;
+            }
+        }
+    }
+    aclshmemi_control_barrier_all();
 }
 
 static void test_udma_put_get(aclrtStream stream, uint8_t* gva, uint32_t rank_id, uint32_t rank_size)
@@ -383,6 +452,120 @@ TEST(TestMemApi, TestShmemUDMAMem)
     // test_mutil_task(test_aclshmem_udma_mem, local_mem_size, processCount);
 }
 
+void test_aclshmem_udma_signal_overload(int rank_id, int n_ranks, uint64_t local_mem_size)
+{
+    int32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    aclrtStream stream = nullptr;
+    ASSERT_EQ(test_udma_init(rank_id, n_ranks, local_mem_size, &stream), 0);
+    ASSERT_NE(stream, nullptr);
+
+    const size_t slots = static_cast<size_t>(n_ranks) * UDMA_SIGNAL_SLOT_COUNT;
+    const size_t bank_bytes = slots * UDMA_SIGNAL_SLOT_BYTES;
+    const size_t gva_size = 2 * bank_bytes + (slots + n_ranks) * sizeof(int32_t);
+    auto* gva = static_cast<uint8_t*>(aclshmem_malloc(gva_size));
+    ASSERT_NE(gva, nullptr);
+    test_udma_signal_overload_matrix(stream, rank_id, n_ranks, gva, false);
+    test_udma_signal_overload_matrix(stream, rank_id, n_ranks, gva, true);
+    aclshmem_free(gva);
+    test_finalize(stream, device_id);
+}
+
+static uint8_t noncontiguous_tensor_source_byte(uint32_t rank, uint32_t slot, size_t row, size_t byte)
+{
+    return static_cast<uint8_t>((rank * 17 + slot * 29 + row * 7 + byte * 3) % 127);
+}
+
+void test_aclshmem_noncontiguous_tensor_signal(int rank_id, int n_ranks, uint64_t local_mem_size)
+{
+    const int32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    aclrtStream stream = nullptr;
+    ASSERT_EQ(test_udma_init(rank_id, n_ranks, local_mem_size, &stream), 0);
+    ASSERT_NE(stream, nullptr);
+    const size_t slots = static_cast<size_t>(n_ranks) * UDMA_SIGNAL_NONCONTIG_SLOT_COUNT;
+    const size_t bank_bytes = slots * UDMA_SIGNAL_NONCONTIG_SLOT_BYTES;
+    const size_t signal_bytes = slots * sizeof(int32_t);
+    const size_t gva_size = 2 * bank_bytes + signal_bytes;
+    auto* gva = static_cast<uint8_t*>(aclshmem_malloc(gva_size));
+    ASSERT_NE(gva, nullptr);
+    auto* signals = gva + 2 * bank_bytes;
+    std::vector<uint8_t> input(2 * bank_bytes, UDMA_SIGNAL_GUARD);
+    std::vector<uint8_t> output(2 * bank_bytes, UDMA_SIGNAL_GUARD);
+    std::vector<int32_t> signal_values(slots, UDMA_SIGNAL_INITIAL);
+    for (uint32_t slot = 0; slot < UDMA_SIGNAL_NONCONTIG_SLOT_COUNT; ++slot) {
+        const size_t base = (static_cast<size_t>(rank_id) * UDMA_SIGNAL_NONCONTIG_SLOT_COUNT + slot) *
+                                UDMA_SIGNAL_NONCONTIG_SLOT_BYTES +
+                            UDMA_SIGNAL_NONCONTIG_PREFIX_BYTES;
+        for (uint32_t row = 0; row < UDMA_SIGNAL_NONCONTIG_REPEAT; ++row) {
+            for (uint32_t byte = 0; byte < UDMA_SIGNAL_NONCONTIG_LENGTH; ++byte) {
+                input[base + row * UDMA_SIGNAL_NONCONTIG_LD + byte] =
+                    noncontiguous_tensor_source_byte(rank_id, slot, row, byte);
+            }
+        }
+    }
+    ASSERT_EQ(aclrtMemcpy(gva, input.size(), input.data(), input.size(), ACL_MEMCPY_HOST_TO_DEVICE), 0);
+    ASSERT_EQ(aclrtMemcpy(signals, signal_bytes, signal_values.data(), signal_bytes, ACL_MEMCPY_HOST_TO_DEVICE), 0);
+    aclshmemi_control_barrier_all();
+    test_udma_highlevel_put_signal_noncontiguous_tensor(1, stream, gva, signals);
+    ASSERT_EQ(aclrtSynchronizeStream(stream), 0);
+    aclshmemi_control_barrier_all();
+    ASSERT_EQ(aclrtMemcpy(output.data(), output.size(), gva, output.size(), ACL_MEMCPY_DEVICE_TO_HOST), 0);
+    ASSERT_EQ(aclrtMemcpy(signal_values.data(), signal_bytes, signals, signal_bytes, ACL_MEMCPY_DEVICE_TO_HOST), 0);
+    for (uint32_t sender = 0; sender < static_cast<uint32_t>(n_ranks); ++sender) {
+        for (uint32_t slot = 0; slot < UDMA_SIGNAL_NONCONTIG_SLOT_COUNT; ++slot) {
+            const size_t index = static_cast<size_t>(sender) * UDMA_SIGNAL_NONCONTIG_SLOT_COUNT + slot;
+            const int32_t expected_signal =
+                100 + static_cast<int32_t>(slot) + ((slot == 1 || slot == 3) ? UDMA_SIGNAL_INITIAL : 0);
+            if (sender == static_cast<uint32_t>(rank_id)) {
+                ASSERT_EQ(signal_values[index], UDMA_SIGNAL_INITIAL);
+                continue;
+            }
+            ASSERT_EQ(signal_values[index], expected_signal) << "sender=" << sender << " slot=" << slot;
+            const size_t base = bank_bytes + index * UDMA_SIGNAL_NONCONTIG_SLOT_BYTES;
+            for (uint32_t byte = 0; byte < UDMA_SIGNAL_NONCONTIG_SLOT_BYTES; ++byte) {
+                uint8_t expected = UDMA_SIGNAL_GUARD;
+                for (uint32_t row = 0; row < UDMA_SIGNAL_NONCONTIG_REPEAT; ++row) {
+                    const uint32_t row_begin = UDMA_SIGNAL_NONCONTIG_PREFIX_BYTES + row * UDMA_SIGNAL_NONCONTIG_LD;
+                    if (byte >= row_begin && byte < row_begin + UDMA_SIGNAL_NONCONTIG_LENGTH) {
+                        expected = noncontiguous_tensor_source_byte(sender, slot, row, byte - row_begin);
+                        break;
+                    }
+                }
+                ASSERT_EQ(output[base + byte], expected) << "sender=" << sender << " slot=" << slot << " byte=" << byte;
+            }
+        }
+    }
+    aclshmem_free(gva);
+    test_finalize(stream, device_id);
+}
+
+TEST(TestMemApi, TestShmemNonContiguousTensorSignal)
+{
+    if (test_gnpu_num < 2) {
+        GTEST_SKIP() << "non-contiguous Tensor signal test requires at least 2 NPUs";
+    }
+    const char* soc_name = aclrtGetSocName();
+    if (soc_name == nullptr || std::string(soc_name).find("Ascend950") == std::string::npos) {
+        GTEST_SKIP() << "non-contiguous Tensor signal test requires Ascend950";
+    }
+    const uint64_t local_mem_size = ALIGN_UP(64UL * 1024UL * 1024UL, ACLSHMEM_PAGE_SIZE);
+    test_mutil_task(test_aclshmem_noncontiguous_tensor_signal, local_mem_size, test_gnpu_num);
+}
+
+TEST(TestMemApi, TestShmemUDMASignalOverloads)
+{
+    const int processCount = test_gnpu_num;
+    if (processCount < 2) {
+        GTEST_SKIP() << "UDMA high-level overload test requires at least 2 NPUs";
+    }
+    const char* soc_name = aclrtGetSocName();
+    if (soc_name == nullptr || std::string(soc_name).find("Ascend950") == std::string::npos) {
+        GTEST_SKIP() << "UDMA high-level overload test requires Ascend950";
+    }
+    const uint64_t required_mem_size = 64UL * 1024UL * 1024UL;
+    const uint64_t local_mem_size = ALIGN_UP(required_mem_size, ACLSHMEM_PAGE_SIZE);
+    test_mutil_task(test_aclshmem_udma_signal_overload, local_mem_size, processCount);
+}
+
 void test_aclshmem_udma_highlevel_put_signal_split(int rank_id, int n_ranks, uint64_t local_mem_size)
 {
     int32_t device_id = rank_id % test_gnpu_num + test_first_npu;
@@ -395,8 +578,20 @@ void test_aclshmem_udma_highlevel_put_signal_split(int rank_id, int n_ranks, uin
     auto* gva = static_cast<uint8_t*>(aclshmem_malloc(gva_size));
     ASSERT_NE(gva, nullptr);
     ASSERT_EQ(aclrtMemset(gva, gva_size, 0, gva_size), 0);
-    test_udma_highlevel_put_signal_split_case(stream, gva, rank_id, n_ranks, 256UL * 1024UL * 1024UL, 5000);
-    test_udma_highlevel_put_signal_split_case(stream, gva, rank_id, n_ranks, max_message_size, 6000);
+    int32_t signal = 5000;
+    // Keep one exact-limit case, then cover every overload form with a
+    // transfer one byte beyond the UDMA limit so splitting is mandatory.
+    test_udma_highlevel_put_signal_split_case(
+        stream, gva, rank_id, n_ranks, 256UL * 1024UL * 1024UL, signal++, UDMA_SIGNAL_SPLIT_PUTMEM, false, false);
+    for (uint32_t family = 0; family < UDMA_SIGNAL_SPLIT_FAMILY_COUNT; ++family) {
+        for (uint32_t tensor_index = 0; tensor_index < 2; ++tensor_index) {
+            for (uint32_t nbi_index = 0; nbi_index < 2; ++nbi_index) {
+                test_udma_highlevel_put_signal_split_case(
+                    stream, gva, rank_id, n_ranks, max_message_size, signal++, family, nbi_index != 0,
+                    tensor_index != 0);
+            }
+        }
+    }
     aclshmem_free(gva);
     test_finalize(stream, device_id);
 }

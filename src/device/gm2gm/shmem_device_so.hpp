@@ -24,15 +24,34 @@ constexpr int ACLSHMEM_RDMA_V2_SUPPORTED = 0;
 
 constexpr size_t ACLSHMEM_UDMA_MAX_TRANSFER_BYTES = 256ULL * 1024ULL * 1024ULL;
 
+template <typename T>
+ACLSHMEM_DEVICE bool aclshmemi_validate_mte_non_contiguous_copy(
+    const non_contiguous_copy_param& copy_params, uint32_t ub_size)
+{
+    if (copy_params.src_ld < copy_params.length || copy_params.dst_ld < copy_params.length) {
+        ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "Invalid non-contiguous leading dimension.\n");
+        return false;
+    }
+
+    constexpr size_t ub_align = UB_ALIGN_SIZE;
+    const size_t row_bytes = static_cast<size_t>(copy_params.length) * sizeof(T);
+    const size_t aligned_row_bytes = (row_bytes + ub_align - 1) / ub_align * ub_align;
+    if (aligned_row_bytes != 0 &&
+        static_cast<size_t>(copy_params.repeat) > static_cast<size_t>(ub_size) / aligned_row_bytes) {
+        ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "Non-contiguous MTE transfer exceeds UB capacity.\n");
+        return false;
+    }
+    return true;
+}
+
 ACLSHMEM_DEVICE bool aclshmemi_is_supported_signal_op(int sig_op)
 {
     return sig_op == ACLSHMEM_SIGNAL_SET || sig_op == ACLSHMEM_SIGNAL_ADD;
 }
 
 template <typename T>
-ACLSHMEM_DEVICE void aclshmemi_udma_put_signal_nbi(
-    __gm__ aclshmem_device_host_state_t* device_state, __gm__ T* dst, __gm__ T* src, size_t elem_size,
-    __gm__ int32_t* sig_addr, int32_t signal, int sig_op, int pe)
+ACLSHMEM_DEVICE void aclshmemi_udma_put_signal_data_nbi(
+    __gm__ aclshmem_device_host_state_t* device_state, __gm__ T* dst, __gm__ T* src, size_t elem_size, int pe)
 {
     uint64_t copy_ub = device_state->udma_config.aclshmem_ub;
     uint32_t sync_id = device_state->udma_config.sync_id;
@@ -43,16 +62,32 @@ ACLSHMEM_DEVICE void aclshmemi_udma_put_signal_nbi(
         if (chunk_size > max_elem_size) {
             chunk_size = max_elem_size;
         }
-        aclshmemx_udma_put_nbi<T, PIPE_MTE3>(
+        // Relax-order data WQEs may execute independently. The following strong-order
+        // signal WQE waits for all preceding RO data WQEs to complete.
+        aclshmemx_udma_put_nbi<T, PIPE_MTE3, ACLSHMEMX_UDMA_OP_CONFIG_RO>(
             dst + offset, src + offset, reinterpret_cast<__ubuf__ T*>(copy_ub), static_cast<uint32_t>(chunk_size), pe,
             sync_id);
         offset += chunk_size;
     }
+}
+
+ACLSHMEM_DEVICE void aclshmemi_udma_put_signal_notify(__gm__ int32_t* sig_addr, int32_t signal, int sig_op, int pe)
+{
+    // SIGNAL_SET may wait internally in the existing get + quiet + CAS implementation.
     if (sig_op == ACLSHMEM_SIGNAL_SET) {
-        aclshmemx_udma_atomic_set<int32_t>(sig_addr, signal, pe);
+        aclshmemx_udma_atomic_set<int32_t, ACLSHMEMX_UDMA_OP_CONFIG_SO>(sig_addr, signal, pe);
     } else {
-        aclshmemx_udma_atomic_add<int32_t>(sig_addr, signal, pe);
+        aclshmemx_udma_atomic_add<int32_t, ACLSHMEMX_UDMA_OP_CONFIG_SO>(sig_addr, signal, pe);
     }
+}
+
+template <typename T>
+ACLSHMEM_DEVICE void aclshmemi_udma_put_signal_nbi(
+    __gm__ aclshmem_device_host_state_t* device_state, __gm__ T* dst, __gm__ T* src, size_t elem_size,
+    __gm__ int32_t* sig_addr, int32_t signal, int sig_op, int pe)
+{
+    aclshmemi_udma_put_signal_data_nbi(device_state, dst, src, elem_size, pe);
+    aclshmemi_udma_put_signal_notify(sig_addr, signal, sig_op, pe);
 }
 
 /**
@@ -120,6 +155,15 @@ ACLSHMEM_DEVICE void aclshmem_putmem_signal(
     aclshmemi_signal_op(sig_addr, signal, sig_op, pe);
 }
 
+template <typename T>
+ACLSHMEM_DEVICE void aclshmem_putmem_signal(
+    AscendC::GlobalTensor<T> dst, AscendC::GlobalTensor<T> src, size_t elem_size, __gm__ int32_t* sig_addr,
+    int32_t signal, int sig_op, int pe)
+{
+    aclshmem_putmem_signal(
+        (__gm__ void*)dst.GetPhyAddr(), (__gm__ void*)src.GetPhyAddr(), elem_size, sig_addr, signal, sig_op, pe);
+}
+
 #define ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL(NAME, TYPE)                                                                \
     ACLSHMEM_DEVICE void aclshmem_##NAME##_put_signal(                                                              \
         __gm__ TYPE* dst, __gm__ TYPE* src, size_t elem_size, __gm__ int32_t* sig_addr, int32_t signal, int sig_op, \
@@ -150,6 +194,7 @@ ACLSHMEM_DEVICE void aclshmem_putmem_signal(
     }
 
 ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL);
+#undef ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL
 
 #define ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR(NAME, TYPE)                                                           \
     ACLSHMEM_DEVICE void aclshmem_##NAME##_put_signal(                                                                \
@@ -157,6 +202,16 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL);
         int32_t signal, int sig_op, int pe)                                                                           \
     {                                                                                                                 \
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                    \
+        if (!aclshmemi_is_supported_signal_op(sig_op)) {                                                              \
+            return;                                                                                                   \
+        }                                                                                                             \
+        if (ACLSHMEM_UDMA_SUPPORTED && (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA)) {                     \
+            aclshmemi_udma_put_signal_nbi(                                                                            \
+                device_state, (__gm__ TYPE*)dst.GetPhyAddr(), (__gm__ TYPE*)src.GetPhyAddr(), elem_size, sig_addr,    \
+                signal, sig_op, pe);                                                                                  \
+            aclshmemx_udma_quiet(pe);                                                                                 \
+            return;                                                                                                   \
+        }                                                                                                             \
         if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                            \
             (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                                \
             ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                            \
@@ -182,6 +237,9 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR);
         int32_t signal, int sig_op, int pe)                                                                         \
     {                                                                                                               \
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                  \
+        if (!aclshmemi_validate_mte_non_contiguous_copy<TYPE>(copy_params, device_state->mte_config.ub_size)) {     \
+            return;                                                                                                 \
+        }                                                                                                           \
         if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                          \
             (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                              \
             ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                          \
@@ -196,7 +254,6 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR);
         aclshmem_quiet();                                                                                           \
         aclshmemi_signal_op(sig_addr, signal, sig_op, pe);                                                          \
     }
-
 ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED);
 
 #define ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_DETAILED(NAME, TYPE)                                                \
@@ -205,6 +262,9 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED);
         const non_contiguous_copy_param& copy_params, __gm__ int32_t* sig_addr, int32_t signal, int sig_op, int pe) \
     {                                                                                                               \
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                  \
+        if (!aclshmemi_validate_mte_non_contiguous_copy<TYPE>(copy_params, device_state->mte_config.ub_size)) {     \
+            return;                                                                                                 \
+        }                                                                                                           \
         if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                          \
             (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                              \
             ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                          \
@@ -221,6 +281,7 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED);
         aclshmem_quiet();                                                                                           \
         aclshmemi_signal_op(sig_addr, signal, sig_op, pe);                                                          \
     }
+ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_DETAILED);
 
 #define ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAIL(BITS)                                                                 \
     ACLSHMEM_DEVICE void aclshmem_put##BITS##_signal(                                                             \
@@ -231,6 +292,23 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED);
     }
 
 ACLSHMEM_SIZE_FUNC(ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAIL);
+#undef ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAIL
+
+// CopyParams units are bytes for putmem and BITS / 8 bytes for sized APIs.
+// Use size_t arithmetic so scaling uint32_t CopyParams fields does not truncate.
+
+#define ACLSHMEM_PUT_SIZE_SIGNAL_TENSOR(BITS)                                                                      \
+    template <typename T>                                                                                          \
+    ACLSHMEM_DEVICE void aclshmem_put##BITS##_signal(                                                              \
+        AscendC::GlobalTensor<T> dst, AscendC::GlobalTensor<T> src, size_t nelems, __gm__ int32_t* sig_addr,       \
+        int32_t signal, int sig_op, int pe)                                                                        \
+    {                                                                                                              \
+        static_assert(sizeof(T) == (BITS) / 8, "Tensor element size must match the API bit width");                \
+        aclshmem_put##BITS##_signal(                                                                               \
+            (__gm__ void*)dst.GetPhyAddr(), (__gm__ void*)src.GetPhyAddr(), nelems, sig_addr, signal, sig_op, pe); \
+    }
+ACLSHMEM_SIZE_FUNC(ACLSHMEM_PUT_SIZE_SIGNAL_TENSOR);
+#undef ACLSHMEM_PUT_SIZE_SIGNAL_TENSOR
 
 ACLSHMEM_DEVICE void aclshmem_putmem_signal_nbi(
     __gm__ void* dst, __gm__ void* src, size_t elem_size, __gm__ int32_t* sig_addr, int32_t signal, int sig_op, int pe)
@@ -261,6 +339,15 @@ ACLSHMEM_DEVICE void aclshmem_putmem_signal_nbi(
         reinterpret_cast<__ubuf__ char*>(copy_ub), copy_ub_size, elem_size, pe, copy_event_id);
     aclshmem_fence();
     aclshmemi_signal_op(sig_addr, signal, sig_op, pe);
+}
+
+template <typename T>
+ACLSHMEM_DEVICE void aclshmem_putmem_signal_nbi(
+    AscendC::GlobalTensor<T> dst, AscendC::GlobalTensor<T> src, size_t elem_size, __gm__ int32_t* sig_addr,
+    int32_t signal, int sig_op, int pe)
+{
+    aclshmem_putmem_signal_nbi(
+        (__gm__ void*)dst.GetPhyAddr(), (__gm__ void*)src.GetPhyAddr(), elem_size, sig_addr, signal, sig_op, pe);
 }
 
 #define ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_NBI(NAME, TYPE)                                                             \
@@ -294,6 +381,7 @@ ACLSHMEM_DEVICE void aclshmem_putmem_signal_nbi(
     }
 
 ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_NBI);
+#undef ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_NBI
 
 #define ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_NBI(NAME, TYPE)                                                       \
     ACLSHMEM_DEVICE void aclshmem_##NAME##_put_signal_nbi(                                                            \
@@ -301,6 +389,15 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_NBI);
         int32_t signal, int sig_op, int pe)                                                                           \
     {                                                                                                                 \
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                    \
+        if (!aclshmemi_is_supported_signal_op(sig_op)) {                                                              \
+            return;                                                                                                   \
+        }                                                                                                             \
+        if (ACLSHMEM_UDMA_SUPPORTED && (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA)) {                     \
+            aclshmemi_udma_put_signal_nbi(                                                                            \
+                device_state, (__gm__ TYPE*)dst.GetPhyAddr(), (__gm__ TYPE*)src.GetPhyAddr(), elem_size, sig_addr,    \
+                signal, sig_op, pe);                                                                                  \
+            return;                                                                                                   \
+        }                                                                                                             \
         if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                            \
             (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                                \
             ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                            \
@@ -319,6 +416,7 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_NBI);
     }
 
 ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_NBI);
+#undef ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_NBI
 
 #define ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED_NBI(NAME, TYPE)                                                   \
     ACLSHMEM_DEVICE void aclshmem_##NAME##_put_signal_nbi(                                                          \
@@ -326,6 +424,9 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_NBI);
         int32_t signal, int sig_op, int pe)                                                                         \
     {                                                                                                               \
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                  \
+        if (!aclshmemi_validate_mte_non_contiguous_copy<TYPE>(copy_params, device_state->mte_config.ub_size)) {     \
+            return;                                                                                                 \
+        }                                                                                                           \
         if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                          \
             (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                              \
             ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                          \
@@ -340,7 +441,6 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_NBI);
         aclshmem_fence();                                                                                           \
         aclshmemi_signal_op(sig_addr, signal, sig_op, pe);                                                          \
     }
-
 ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED_NBI);
 
 #define ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_DETAILED_NBI(NAME, TYPE)                                            \
@@ -349,6 +449,9 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED_NBI);
         const non_contiguous_copy_param& copy_params, __gm__ int32_t* sig_addr, int32_t signal, int sig_op, int pe) \
     {                                                                                                               \
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                  \
+        if (!aclshmemi_validate_mte_non_contiguous_copy<TYPE>(copy_params, device_state->mte_config.ub_size)) {     \
+            return;                                                                                                 \
+        }                                                                                                           \
         if ((device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) == 0 &&                                          \
             (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE)) {                                              \
             ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "put-signal is not supported.\n");                          \
@@ -365,7 +468,6 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED_NBI);
         aclshmem_fence();                                                                                           \
         aclshmemi_signal_op(sig_addr, signal, sig_op, pe);                                                          \
     }
-
 ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_DETAILED_NBI);
 
 #define ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAILED_NBI(BITS)                                                          \
@@ -377,6 +479,20 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_DETAILED_NBI);
     }
 
 ACLSHMEM_SIZE_FUNC(ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAILED_NBI);
+#undef ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAILED_NBI
+
+#define ACLSHMEM_PUT_SIZE_SIGNAL_TENSOR_NBI(BITS)                                                                  \
+    template <typename T>                                                                                          \
+    ACLSHMEM_DEVICE void aclshmem_put##BITS##_signal_nbi(                                                          \
+        AscendC::GlobalTensor<T> dst, AscendC::GlobalTensor<T> src, size_t nelems, __gm__ int32_t* sig_addr,       \
+        int32_t signal, int sig_op, int pe)                                                                        \
+    {                                                                                                              \
+        static_assert(sizeof(T) == (BITS) / 8, "Tensor element size must match the API bit width");                \
+        aclshmem_put##BITS##_signal_nbi(                                                                           \
+            (__gm__ void*)dst.GetPhyAddr(), (__gm__ void*)src.GetPhyAddr(), nelems, sig_addr, signal, sig_op, pe); \
+    }
+ACLSHMEM_SIZE_FUNC(ACLSHMEM_PUT_SIZE_SIGNAL_TENSOR_NBI);
+#undef ACLSHMEM_PUT_SIZE_SIGNAL_TENSOR_NBI
 
 ACLSHMEM_DEVICE void aclshmemi_signal_set(__gm__ int32_t* addr, int32_t val)
 {

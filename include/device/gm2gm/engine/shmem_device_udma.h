@@ -30,6 +30,7 @@ inline constexpr uint32_t ACLSHMEMX_UDMA_ODR_RO = 0b101U;
 inline constexpr uint32_t ACLSHMEMX_UDMA_ODR_SO = 0b110U;
 inline constexpr aclshmemx_udma_op_config_t ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT{1U, 0U, 0U, ACLSHMEMX_UDMA_ODR_NO};
 inline constexpr aclshmemx_udma_op_config_t ACLSHMEMX_UDMA_OP_CONFIG_NO_CQE{0U, 0U, 0U, ACLSHMEMX_UDMA_ODR_NO};
+inline constexpr aclshmemx_udma_op_config_t ACLSHMEMX_UDMA_OP_CONFIG_RO{1U, 0U, 0U, ACLSHMEMX_UDMA_ODR_RO};
 inline constexpr aclshmemx_udma_op_config_t ACLSHMEMX_UDMA_OP_CONFIG_SO{1U, 0U, 0U, ACLSHMEMX_UDMA_ODR_SO};
 inline constexpr aclshmemx_udma_op_config_t ACLSHMEMX_UDMA_OP_CONFIG_SUBMIT_DEFAULT{1U, 0U, 0U, ACLSHMEMX_UDMA_ODR_NO};
 

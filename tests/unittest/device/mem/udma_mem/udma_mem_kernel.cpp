@@ -11,6 +11,7 @@
 
 #include "gm2gm/engine/shmemi_device_udma.h"
 #include "shmem.h"
+#include "unittest/udma_mem_kernel.h"
 constexpr uint64_t MESSAGE_SIZE = 64;
 constexpr uint32_t UDMA_ACTION_BATCH_COUNT = 2;
 constexpr uint32_t UDMA_ACTION_UB_SIZE = MESSAGE_SIZE * UDMA_ACTION_BATCH_COUNT;
@@ -850,13 +851,193 @@ void test_udma_highlevel_put_size_signal_sync(uint32_t block_dim, void* stream, 
     UDMAHighLevelPutSizeSignalSyncTest<<<block_dim, nullptr, stream>>>(gva, sig_addr);
 }
 
-extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void UDMAHighLevelPutSignalSplitTest(
-    GM_ADDR gva, GM_ADDR sig_addr, uint64_t elem_size, int32_t signal)
+extern "C" ACLSHMEM_GLOBAL_VECTOR void UDMAHighLevelPutSignalOverloadsTest(GM_ADDR gva, GM_ADDR sig_addr, bool use_add)
+{
+    if ASCEND_IS_AIV {
+        if (AscendC::GetBlockIdx() != 0 || AscendC::GetSubBlockIdx() != 0) {
+            return;
+        }
+        const int64_t rank = aclshmem_my_pe();
+        const int64_t npes = aclshmem_n_pes();
+        const uint64_t bank_bytes = npes * UDMA_SIGNAL_SLOT_COUNT * UDMA_SIGNAL_SLOT_BYTES;
+        for (int peer = 0; peer < npes; ++peer) {
+            if (peer == rank) {
+                continue;
+            }
+            auto* src = reinterpret_cast<__gm__ uint8_t*>(gva + rank * UDMA_SIGNAL_SLOT_COUNT * UDMA_SIGNAL_SLOT_BYTES);
+            auto* dst = reinterpret_cast<__gm__ uint8_t*>(
+                gva + bank_bytes + rank * UDMA_SIGNAL_SLOT_COUNT * UDMA_SIGNAL_SLOT_BYTES);
+            auto* signals = reinterpret_cast<__gm__ int32_t*>(sig_addr) + rank * UDMA_SIGNAL_SLOT_COUNT;
+            AscendC::GlobalTensor<uint8_t> src_tensor;
+            AscendC::GlobalTensor<uint8_t> dst_tensor;
+            AscendC::GlobalTensor<uint32_t> src_size32_tensor;
+            AscendC::GlobalTensor<uint32_t> dst_size32_tensor;
+#define UDMA_SIGNAL_ARGS(SLOT)                                                                      \
+    (dst + (SLOT) * UDMA_SIGNAL_SLOT_BYTES + UDMA_SIGNAL_PREFIX_BYTES),                             \
+        (src + (SLOT) * UDMA_SIGNAL_SLOT_BYTES + UDMA_SIGNAL_PREFIX_BYTES), UDMA_SIGNAL_COPY_BYTES, \
+        (signals + (SLOT)), 100 + (SLOT), (use_add ? ACLSHMEM_SIGNAL_ADD : ACLSHMEM_SIGNAL_SET), peer
+#define UDMA_SIGNAL_TENSOR_ARGS(SLOT)                                                 \
+    dst_tensor, src_tensor, UDMA_SIGNAL_COPY_BYTES, (signals + (SLOT)), 100 + (SLOT), \
+        (use_add ? ACLSHMEM_SIGNAL_ADD : ACLSHMEM_SIGNAL_SET), peer
+#define UDMA_SIGNAL_SIZE32_ARGS(SLOT)                                                                                  \
+    (dst + (SLOT) * UDMA_SIGNAL_SLOT_BYTES + UDMA_SIGNAL_PREFIX_BYTES),                                                \
+        (src + (SLOT) * UDMA_SIGNAL_SLOT_BYTES + UDMA_SIGNAL_PREFIX_BYTES), UDMA_SIGNAL_COPY_BYTES / sizeof(uint32_t), \
+        (signals + (SLOT)), 100 + (SLOT), (use_add ? ACLSHMEM_SIGNAL_ADD : ACLSHMEM_SIGNAL_SET), peer
+#define UDMA_SIGNAL_SIZE32_TENSOR_ARGS(SLOT)                                                                           \
+    dst_size32_tensor, src_size32_tensor, UDMA_SIGNAL_COPY_BYTES / sizeof(uint32_t), (signals + (SLOT)), 100 + (SLOT), \
+        (use_add ? ACLSHMEM_SIGNAL_ADD : ACLSHMEM_SIGNAL_SET), peer
+#define UDMA_SET_TENSORS(SLOT)                                                                         \
+    do {                                                                                               \
+        src_tensor.SetGlobalBuffer(                                                                    \
+            src + (SLOT) * UDMA_SIGNAL_SLOT_BYTES + UDMA_SIGNAL_PREFIX_BYTES, UDMA_SIGNAL_SLOT_BYTES); \
+        dst_tensor.SetGlobalBuffer(                                                                    \
+            dst + (SLOT) * UDMA_SIGNAL_SLOT_BYTES + UDMA_SIGNAL_PREFIX_BYTES, UDMA_SIGNAL_SLOT_BYTES); \
+    } while (0)
+#define UDMA_SET_SIZE32_TENSORS(SLOT)                                                                             \
+    do {                                                                                                          \
+        src_size32_tensor.SetGlobalBuffer(                                                                        \
+            reinterpret_cast<__gm__ uint32_t*>(src + (SLOT) * UDMA_SIGNAL_SLOT_BYTES + UDMA_SIGNAL_PREFIX_BYTES), \
+            UDMA_SIGNAL_SLOT_BYTES / sizeof(uint32_t));                                                           \
+        dst_size32_tensor.SetGlobalBuffer(                                                                        \
+            reinterpret_cast<__gm__ uint32_t*>(dst + (SLOT) * UDMA_SIGNAL_SLOT_BYTES + UDMA_SIGNAL_PREFIX_BYTES), \
+            UDMA_SIGNAL_SLOT_BYTES / sizeof(uint32_t));                                                           \
+    } while (0)
+            aclshmem_putmem_signal(UDMA_SIGNAL_ARGS(0));
+            UDMA_SET_TENSORS(2);
+            aclshmem_putmem_signal(UDMA_SIGNAL_TENSOR_ARGS(2));
+            aclshmem_put32_signal(UDMA_SIGNAL_SIZE32_ARGS(4));
+            UDMA_SET_SIZE32_TENSORS(6);
+            aclshmem_put32_signal(UDMA_SIGNAL_SIZE32_TENSOR_ARGS(6));
+            aclshmem_uint8_put_signal(UDMA_SIGNAL_ARGS(8));
+            UDMA_SET_TENSORS(10);
+            aclshmem_uint8_put_signal(UDMA_SIGNAL_TENSOR_ARGS(10));
+            // Keep NBI calls last so a later synchronous call cannot hide an
+            // early-signal ordering failure from the receiver.
+            aclshmem_putmem_signal_nbi(UDMA_SIGNAL_ARGS(1));
+            UDMA_SET_TENSORS(3);
+            aclshmem_putmem_signal_nbi(UDMA_SIGNAL_TENSOR_ARGS(3));
+            aclshmem_put32_signal_nbi(UDMA_SIGNAL_SIZE32_ARGS(5));
+            UDMA_SET_SIZE32_TENSORS(7);
+            aclshmem_put32_signal_nbi(UDMA_SIGNAL_SIZE32_TENSOR_ARGS(7));
+            aclshmem_uint8_put_signal_nbi(UDMA_SIGNAL_ARGS(9));
+            UDMA_SET_TENSORS(11);
+            aclshmem_uint8_put_signal_nbi(UDMA_SIGNAL_TENSOR_ARGS(11));
+#undef UDMA_SET_TENSORS
+#undef UDMA_SET_SIZE32_TENSORS
+#undef UDMA_SIGNAL_SIZE32_TENSOR_ARGS
+#undef UDMA_SIGNAL_SIZE32_ARGS
+#undef UDMA_SIGNAL_TENSOR_ARGS
+#undef UDMA_SIGNAL_ARGS
+        }
+        // Observe the contiguous put-with-signal contract on the receiving PE before draining the
+        // sender's outstanding NBI operations. Seeing the signal must imply
+        // that the corresponding contiguous payload is already visible.
+        auto* all_signals = reinterpret_cast<__gm__ int32_t*>(sig_addr);
+        auto* errors = all_signals + npes * UDMA_SIGNAL_SLOT_COUNT;
+        int32_t error = 0;
+        for (int sender = 0; sender < npes; ++sender) {
+            if (sender == rank) {
+                continue;
+            }
+            // Check NBI slots first so synchronous cases do not delay the
+            // observation window for an early-signal failure.
+            for (uint32_t phase = 0; phase < 2; ++phase) {
+                const bool check_nbi = phase == 0;
+                for (uint32_t slot = 0; slot < UDMA_SIGNAL_SLOT_COUNT; ++slot) {
+                    if (UDMA_SIGNAL_ACCEPTANCE_SLOT_IS_NBI(slot) != check_nbi) {
+                        continue;
+                    }
+                    auto* received_signal = all_signals + sender * UDMA_SIGNAL_SLOT_COUNT + slot;
+                    const int32_t expected_signal = 100 + slot + (use_add ? UDMA_SIGNAL_INITIAL : 0);
+                    aclshmem_signal_wait_until(received_signal, ACLSHMEM_CMP_EQ, expected_signal);
+                    auto* received = reinterpret_cast<__gm__ uint8_t*>(
+                        gva + bank_bytes + (sender * UDMA_SIGNAL_SLOT_COUNT + slot) * UDMA_SIGNAL_SLOT_BYTES +
+                        UDMA_SIGNAL_PREFIX_BYTES);
+                    dcci_cachelines(received, 8);
+                    for (uint32_t byte = 0; byte < 8; ++byte) {
+                        const uint8_t expected = static_cast<uint8_t>(
+                            (sender * 31 + slot * 13 + (UDMA_SIGNAL_PREFIX_BYTES + byte) * 7) % 127);
+                        if (received[byte] != expected) {
+                            error |= 1U << slot;
+                        }
+                    }
+                }
+            }
+        }
+        errors[rank] = error;
+        for (int peer = 0; peer < npes; ++peer) {
+            if (peer != rank) {
+                aclshmemx_udma_quiet(peer);
+            }
+        }
+    }
+}
+
+void test_udma_highlevel_put_signal_overloads(
+    uint32_t block_dim, void* stream, uint8_t* gva, uint8_t* sig_addr, bool use_add)
+{
+    UDMAHighLevelPutSignalOverloadsTest<<<block_dim, nullptr, stream>>>(gva, sig_addr, use_add);
+}
+
+extern "C" ACLSHMEM_GLOBAL_VECTOR void UDMAHighLevelPutSignalNonContiguousTensorTest(GM_ADDR gva, GM_ADDR sig_addr)
+{
+    if ASCEND_IS_AIV {
+        if (AscendC::GetBlockIdx() != 0 || AscendC::GetSubBlockIdx() != 0) {
+            return;
+        }
+        const int64_t rank = aclshmem_my_pe();
+        const int64_t npes = aclshmem_n_pes();
+        const uint64_t bank_bytes = npes * UDMA_SIGNAL_NONCONTIG_SLOT_COUNT * UDMA_SIGNAL_NONCONTIG_SLOT_BYTES;
+        auto* src = reinterpret_cast<__gm__ uint8_t*>(
+            gva + rank * UDMA_SIGNAL_NONCONTIG_SLOT_COUNT * UDMA_SIGNAL_NONCONTIG_SLOT_BYTES);
+        auto* dst = reinterpret_cast<__gm__ uint8_t*>(
+            gva + bank_bytes + rank * UDMA_SIGNAL_NONCONTIG_SLOT_COUNT * UDMA_SIGNAL_NONCONTIG_SLOT_BYTES);
+        auto* signals = reinterpret_cast<__gm__ int32_t*>(sig_addr) + rank * UDMA_SIGNAL_NONCONTIG_SLOT_COUNT;
+        AscendC::GlobalTensor<uint8_t> src_tensor;
+        AscendC::GlobalTensor<uint8_t> dst_tensor;
+        const non_contiguous_copy_param copy_params{
+            UDMA_SIGNAL_NONCONTIG_REPEAT, UDMA_SIGNAL_NONCONTIG_LENGTH, UDMA_SIGNAL_NONCONTIG_LD,
+            UDMA_SIGNAL_NONCONTIG_LD};
+        for (int peer = 0; peer < npes; ++peer) {
+            if (peer == rank) {
+                continue;
+            }
+            for (uint32_t slot = 0; slot < UDMA_SIGNAL_NONCONTIG_SLOT_COUNT; ++slot) {
+                auto* src_slot = src + slot * UDMA_SIGNAL_NONCONTIG_SLOT_BYTES + UDMA_SIGNAL_NONCONTIG_PREFIX_BYTES;
+                auto* dst_slot = dst + slot * UDMA_SIGNAL_NONCONTIG_SLOT_BYTES + UDMA_SIGNAL_NONCONTIG_PREFIX_BYTES;
+                src_tensor.SetGlobalBuffer(src_slot, UDMA_SIGNAL_NONCONTIG_SLOT_BYTES);
+                dst_tensor.SetGlobalBuffer(dst_slot, UDMA_SIGNAL_NONCONTIG_SLOT_BYTES);
+                const int32_t signal = 100 + static_cast<int32_t>(slot);
+                const int sig_op = (slot == 1 || slot == 3) ? ACLSHMEM_SIGNAL_ADD : ACLSHMEM_SIGNAL_SET;
+                if (slot == 0 || slot == 1) {
+                    aclshmem_uint8_put_signal(
+                        dst_tensor, src_tensor, copy_params, signals + slot, signal, sig_op, peer);
+                } else {
+                    aclshmem_uint8_put_signal_nbi(
+                        dst_tensor, src_tensor, copy_params, signals + slot, signal, sig_op, peer);
+                }
+            }
+            aclshmem_quiet();
+        }
+    }
+}
+
+void test_udma_highlevel_put_signal_noncontiguous_tensor(
+    uint32_t block_dim, void* stream, uint8_t* gva, uint8_t* sig_addr)
+{
+    UDMAHighLevelPutSignalNonContiguousTensorTest<<<block_dim, nullptr, stream>>>(gva, sig_addr);
+}
+
+extern "C" ACLSHMEM_GLOBAL_VECTOR void UDMAHighLevelPutSignalSplitTest(
+    GM_ADDR gva, GM_ADDR sig_addr, uint64_t elem_size, int32_t signal, uint32_t family, bool nbi, bool use_tensor)
 {
     int64_t my_pe = aclshmem_my_pe();
     int64_t npes = aclshmem_n_pes();
     auto src_addr = reinterpret_cast<__gm__ void*>(gva + my_pe * elem_size);
+    auto typed_src_addr = reinterpret_cast<__gm__ uint8_t*>(src_addr);
     auto signal_addr = reinterpret_cast<__gm__ int32_t*>(sig_addr + my_pe * sizeof(int32_t));
+    AscendC::GlobalTensor<uint8_t> tensor;
+    tensor.SetGlobalBuffer(typed_src_addr, elem_size);
 
     if ASCEND_IS_AIV {
         if (AscendC::GetSubBlockIdx() != 0) {
@@ -866,13 +1047,56 @@ extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void UDMAHighLeve
             if (peer == my_pe) {
                 continue;
             }
-            aclshmem_putmem_signal(src_addr, src_addr, elem_size, signal_addr, signal, ACLSHMEM_SIGNAL_SET, peer);
+            if (family == UDMA_SIGNAL_SPLIT_PUTMEM) {
+                if (use_tensor && nbi) {
+                    aclshmem_putmem_signal_nbi(
+                        tensor, tensor, elem_size, signal_addr, signal, ACLSHMEM_SIGNAL_SET, peer);
+                } else if (use_tensor) {
+                    aclshmem_putmem_signal(tensor, tensor, elem_size, signal_addr, signal, ACLSHMEM_SIGNAL_SET, peer);
+                } else if (nbi) {
+                    aclshmem_putmem_signal_nbi(
+                        src_addr, src_addr, elem_size, signal_addr, signal, ACLSHMEM_SIGNAL_SET, peer);
+                } else {
+                    aclshmem_putmem_signal(
+                        src_addr, src_addr, elem_size, signal_addr, signal, ACLSHMEM_SIGNAL_SET, peer);
+                }
+            } else if (family == UDMA_SIGNAL_SPLIT_SIZE) {
+                if (use_tensor && nbi) {
+                    aclshmem_put8_signal_nbi(tensor, tensor, elem_size, signal_addr, signal, ACLSHMEM_SIGNAL_SET, peer);
+                } else if (use_tensor) {
+                    aclshmem_put8_signal(tensor, tensor, elem_size, signal_addr, signal, ACLSHMEM_SIGNAL_SET, peer);
+                } else if (nbi) {
+                    aclshmem_put8_signal_nbi(
+                        src_addr, src_addr, elem_size, signal_addr, signal, ACLSHMEM_SIGNAL_SET, peer);
+                } else {
+                    aclshmem_put8_signal(src_addr, src_addr, elem_size, signal_addr, signal, ACLSHMEM_SIGNAL_SET, peer);
+                }
+            } else {
+                if (use_tensor && nbi) {
+                    aclshmem_uint8_put_signal_nbi(
+                        tensor, tensor, elem_size, signal_addr, signal, ACLSHMEM_SIGNAL_SET, peer);
+                } else if (use_tensor) {
+                    aclshmem_uint8_put_signal(
+                        tensor, tensor, elem_size, signal_addr, signal, ACLSHMEM_SIGNAL_SET, peer);
+                } else if (nbi) {
+                    aclshmem_uint8_put_signal_nbi(
+                        typed_src_addr, typed_src_addr, elem_size, signal_addr, signal, ACLSHMEM_SIGNAL_SET, peer);
+                } else {
+                    aclshmem_uint8_put_signal(
+                        typed_src_addr, typed_src_addr, elem_size, signal_addr, signal, ACLSHMEM_SIGNAL_SET, peer);
+                }
+            }
+            if (nbi) {
+                aclshmemx_udma_quiet(peer);
+            }
         }
     }
 }
 
 void test_udma_highlevel_put_signal_split(
-    uint32_t block_dim, void* stream, uint8_t* gva, uint8_t* sig_addr, uint64_t elem_size, int32_t signal)
+    uint32_t block_dim, void* stream, uint8_t* gva, uint8_t* sig_addr, uint64_t elem_size, int32_t signal,
+    uint32_t family, bool nbi, bool use_tensor)
 {
-    UDMAHighLevelPutSignalSplitTest<<<block_dim, nullptr, stream>>>(gva, sig_addr, elem_size, signal);
+    UDMAHighLevelPutSignalSplitTest<<<block_dim, nullptr, stream>>>(
+        gva, sig_addr, elem_size, signal, family, nbi, use_tensor);
 }

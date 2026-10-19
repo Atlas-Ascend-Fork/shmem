@@ -57,18 +57,13 @@
  *       then update sig_addr
  *
  * @note This interface supports single-core invocation only; multiple cores or writers are unsupported.
- * @note For
+ * @note For UDMA, transfers over 256 MB are split internally before updating sig_addr.
  *
- * UDMA, transfers over 256 MB are split internally before updating sig_addr.
- *
- * @param dst               [in]
- *
- * Pointer on Symmetric memory of the destination data.
- * @param src               [in] Pointer on local device of the
-
- * * source data.
- * @param elem_size         [in] Number of elements in the dest and source arrays.
- * @param sig_addr          [in] Symmetric address of the signal word to be updated.
+ * @param dst               [in] Pointer on Symmetric memory of the destination data.
+ * @param src               [in] Pointer on local device of the source data.
+ * @param elem_size         [in] Number of bytes copied from src to dst.
+ * @param sig_addr          [in] Symmetric
+ * address of the signal word to be updated.
  * @param signal            [in] The value used to update sig_addr.
  * @param sig_op            [in] Operation used to update sig_addr with signal. Supported operations:
  *                               ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
@@ -77,6 +72,20 @@
 ACLSHMEM_DEVICE void aclshmem_putmem_signal(
     __gm__ void* dst, __gm__ void* src, size_t elem_size, __gm__ int32_t* sig_addr, int32_t signal, int sig_op, int pe);
 #define shmem_putmem_signal aclshmem_putmem_signal
+
+/**
+ * Tensor overloads use the tensor's current GM address.
+ * putmem lengths are bytes; sized API lengths are element
+ * counts.
+ * Sized Tensor overloads require sizeof(T) == BITS / 8.
+ * UDMA requests larger than 256 MiB are split
+ * internally.
+ */
+
+template <typename T>
+ACLSHMEM_DEVICE void aclshmem_putmem_signal(
+    AscendC::GlobalTensor<T> dst, AscendC::GlobalTensor<T> src, size_t elem_size, __gm__ int32_t* sig_addr,
+    int32_t signal, int sig_op, int pe);
 
 /**
  * @brief  Automatically generates aclshmem put signal functions for different data types (e.g., float, int8_t).
@@ -89,18 +98,14 @@ ACLSHMEM_DEVICE void aclshmem_putmem_signal(
  *      Synchronous interface. Copy a contiguous data on local UB to symmetric address on the specified PE.
  *
  * @note This interface supports single-core invocation only; multiple cores or writers are unsupported.
- * @note For
- *
- * UDMA, transfers over 256 MB are split internally before updating sig_addr.
+ * @note For UDMA, transfers over 256 MB are split internally before updating sig_addr.
  *
  * @par Parameters
- * - **dst** - [in]
-
- * * Pointer on Symmetric memory of the destination data.
- * - **src**         - [in] Pointer on local device of the
- * source data.
- * - **elem_size**   - [in] Number of elements in the dest and source arrays.
- * - **sig_addr**    - [in] Symmetric address of the signal word to be updated.
+ * - **dst**         - [in] Pointer on Symmetric memory of the destination data.
+ * - **src**         - [in] Pointer on local device of the source data.
+ * - **elem_size**   - [in] Number of TYPE elements copied from src to dst.
+ * - **sig_addr**    - [in] Symmetric
+ * address of the signal word to be updated.
  * - **signal**      - [in] The value used to update sig_addr.
  * - **sig_op**      - [in] Operation used to update sig_addr with signal. Supported operations:
  *                          ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
@@ -112,6 +117,7 @@ ACLSHMEM_DEVICE void aclshmem_putmem_signal(
         int pe)
 /** \cond */
 ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL);
+#undef ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL
 /** \endcond */
 #define shmem_put_half_mem_signal aclshmem_half_put_signal
 #define shmem_put_float_mem_signal aclshmem_float_put_signal
@@ -140,8 +146,9 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL);
  * @par Parameters
  * - **dst**         - [in] Pointer on Symmetric memory of the destination data.
  * - **src**         - [in] Pointer on local device of the source data.
- * - **elem_size**   - [in] Number of elements in the dest and source arrays.
- * - **sig_addr**    - [in] Symmetric address of the signal word to be updated.
+ * - **elem_size**   - [in] Number of TYPE elements copied from src to dst.
+ * - **sig_addr**    - [in] Symmetric
+ * address of the signal word to be updated.
  * - **signal**      - [in] The value used to update sig_addr.
  * - **sig_op**      - [in] Operation used to update sig_addr with signal. Supported operations:
  *                          ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
@@ -154,58 +161,81 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL);
 
 /** \cond */
 ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR);
+#undef ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR
 /** \endcond */
 
 /**
  * @brief  Automatically generates aclshmem put signal functions for different data types (e.g., float, int8_t).
- *        The macro parameters: NAME is the function name suffix, TYPE is the operation data type.
  *
- * \remark ACLSHMEM_DEVICE void aclshmem_NAME_put_signal(\_\_gm\_\_ TYPE *dst, \_\_gm\_\_ TYPE *src, const\
+ * The macro parameters: NAME is the function name suffix, TYPE is the operation data type.
+ *
+ * \remark
+ * ACLSHMEM_DEVICE void aclshmem_NAME_put_signal(\_\_gm\_\_ TYPE *dst, \_\_gm\_\_ TYPE *src, const\
+ *
  * non_contiguous_copy_param &copy_params, \_\_gm\_\_ int32_t *sig_addr, int32_t signal, int sig_op, int pe)
  *
- * @par Function Description
+ * @par
+ * Function Description
  *      Synchronous interface. Provide a high-performance way to copy non-contiguous data
- *        on local UB to symmetric address on the specified PE then update sig_addr
+ * on
+ * local UB to symmetric address on the specified PE then update sig_addr
  *
  * @par Parameters
- * - **dst**         - [in] Pointer on Symmetric memory of the destination data.
- * - **src**         - [in] Pointer on local device of the source data.
+ * - **dst**         -
+ * [in] Pointer on Symmetric memory of the destination data.
+ * - **src**         - [in] Pointer on local device of the
+ * source data.
  * - **copy_params** - [in] Params to describe how non-contiguous data is organized in src and dst.
- * - **sig_addr**    - [in] Symmetric address of the signal word to be updated.
- * - **signal**      - [in] The value used to update sig_addr.
+ * -
+ * **sig_addr**    - [in] Symmetric address of the signal word to be updated.
+ * - **signal**      - [in] The value used
+ * to update sig_addr.
  * - **sig_op**      - [in] Operation used to update sig_addr with signal. Supported operations:
- *                          ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
- * - **pe**          - [in] PE number of the remote PE.
+
+ * *                          ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
+ * - **pe**          - [in] PE number of the
+ * remote PE.
  */
 #define ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED(NAME, TYPE)                                                       \
     ACLSHMEM_DEVICE void aclshmem_##NAME##_put_signal(                                                              \
         __gm__ TYPE* dst, __gm__ TYPE* src, const non_contiguous_copy_param& copy_params, __gm__ int32_t* sig_addr, \
         int32_t signal, int sig_op, int pe)
-
 /** \cond */
 ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED);
 /** \endcond */
 
 /**
  * @brief  Automatically generates aclshmem put signal functions for different data types (e.g., float, int8_t).
- *        The macro parameters: NAME is the function name suffix, TYPE is the operation data type.
  *
- * \remark ACLSHMEM_DEVICE void aclshmem_NAME_put_signal(AscendC::GlobalTensor<TYPE> dst, AscendC::GlobalTensor<TYPE>\
- * src，const non_contiguous_copy_param &copy_params, \_\_gm\_\_ int32_t *sig_addr, int32_t signal, int sig_op, int pe)
+ * The macro parameters: NAME is the function name suffix, TYPE is the operation data type.
+ *
+ * \remark
+ * ACLSHMEM_DEVICE void aclshmem_NAME_put_signal(AscendC::GlobalTensor<TYPE> dst, AscendC::GlobalTensor<TYPE>\
+ *
+ * src，const non_contiguous_copy_param &copy_params, \_\_gm\_\_ int32_t *sig_addr, int32_t signal, int sig_op, int
+ * pe)
  *
  * @par Function Description
- *      Synchronous interface. Provide a high-performance way to copy non-contiguous data
+ *      Synchronous interface. Provide a high-performance way to copy
+ * non-contiguous data
  *        on local UB to symmetric address on the specified PE.
  *
  * @par Parameters
- * - **dst**         - [in] Pointer on Symmetric memory of the destination data.
- * - **src**         - [in] Pointer on local device of the source data.
- * - **copy_params** - [in] Params to describe how non-contiguous data is organized in src and dst.
- * - **sig_addr**    - [in] Symmetric address of the signal word to be updated.
- * - **signal**      - [in] The value used to update sig_addr.
+ * -
+ * **dst**         - [in] Pointer on Symmetric memory of the destination data.
+ * - **src**         - [in] Pointer on
+ * local device of the source data.
+ * - **copy_params** - [in] Params to describe how non-contiguous data is organized
+ * in src and dst.
+ * -
+ * **sig_addr**    - [in] Symmetric address of the signal word to be updated.
+ * - **signal**      - [in] The value used
+ * to update sig_addr.
  * - **sig_op**      - [in] Operation used to update sig_addr with signal. Supported operations:
- *                          ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
- * - **pe**          - [in] PE number of the remote PE.
+
+ * *                          ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
+ * - **pe**          - [in] PE number of the
+ * remote PE.
  */
 #define ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_DETAILED(NAME, TYPE)      \
     ACLSHMEM_DEVICE void aclshmem_##NAME##_put_signal(                    \
@@ -218,32 +248,42 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_DETAILED);
 
 /**
  * @brief  Automatically generates aclshmem put functions for different bits (e.g., 8, 16).
- *         The macro parameters: BITS is the bits.
+ *         The macro
+ * parameters: BITS is the bits.
  *
- * \remark ACLSHMEM_DEVICE void aclshmem_putBITS_signal(void *dst, void *src, size_t nelems, int32_t *sig_addr,\
+ * \remark ACLSHMEM_DEVICE void aclshmem_putBITS_signal(void *dst, void *src, size_t
+ * nelems, int32_t *sig_addr,\
  * int32_t signal, int sig_op, int pe)
  *
  * @par Function Description
- *    Synchronous interface. Copy a contiguous data from local to symmetric address on the specified PE and
- *    updating a remote signal flag on completion.
+ *    Synchronous
+ * interface. Copy a contiguous data from local to symmetric address on the specified PE and
+ *    updating a remote
+ * signal flag on completion.
  *
- * @note This interface supports single-core invocation only; multiple cores or writers are unsupported.
+ * @note This interface supports single-core invocation only; multiple cores or writers
+ * are unsupported.
  * @note For
  *
  * UDMA, transfers over 256 MB are split internally before updating sig_addr.
  *
+ *
  * @par Parameters
  * - **dst** - [in]
-
  * * Pointer on Symmetric memory of the destination data.
- * - **src**         - [in] Pointer on local device of the
+ * - **src**         -
+ * [in] Pointer on local device of the
  * source data.
- * - **nelems**      - [in] Number of elements in the dest and source arrays.
+ * - **nelems**      - [in] Number of BITS-wide elements copied
+ * from src to dst.
  * - **sig_addr**    - [in] Symmetric address of the signal word to be updated.
- * - **signal**      - [in] The value used to update sig_addr.
- * - **sig_op**      - [in] Operation used to update sig_addr with signal. Supported operations:
+ * - **signal** -
+ * [in] The value used to update sig_addr.
+ * - **sig_op**      - [in] Operation used to update sig_addr with signal.
+ * Supported operations:
  *                          ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
- * - **pe**          - [in] PE number of the remote PE.
+ * - **pe**          - [in]
+ * PE number of the remote PE.
  */
 #define ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAIL(BITS)                                                                \
     ACLSHMEM_DEVICE void aclshmem_put##BITS##_signal(                                                            \
@@ -251,6 +291,15 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_DETAILED);
         int pe)
 /** \cond */
 ACLSHMEM_SIZE_FUNC(ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAIL);
+#undef ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAIL
+
+#define ACLSHMEM_PUT_SIZE_SIGNAL_TENSOR(BITS)                                                                \
+    template <typename T>                                                                                    \
+    ACLSHMEM_DEVICE void aclshmem_put##BITS##_signal(                                                        \
+        AscendC::GlobalTensor<T> dst, AscendC::GlobalTensor<T> src, size_t nelems, __gm__ int32_t* sig_addr, \
+        int32_t signal, int sig_op, int pe)
+ACLSHMEM_SIZE_FUNC(ACLSHMEM_PUT_SIZE_SIGNAL_TENSOR);
+#undef ACLSHMEM_PUT_SIZE_SIGNAL_TENSOR
 /** \endcond */
 
 /**
@@ -258,18 +307,13 @@ ACLSHMEM_SIZE_FUNC(ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAIL);
  * sig_addr
  *
  * @note This interface supports single-core invocation only; multiple cores or writers are unsupported.
- * @note For
+ * @note For UDMA, transfers over 256 MB are split internally before updating sig_addr.
  *
- * UDMA, transfers over 256 MB are split internally before updating sig_addr.
- *
- * @param dst               [in]
- *
- * Pointer on Symmetric memory of the destination data.
- * @param src               [in] Pointer on local device of the
-
- * * source data.
- * @param elem_size         [in] Number of elements in the dest and source arrays.
- * @param sig_addr          [in] Symmetric address of the signal word to be updated.
+ * @param dst               [in] Pointer on Symmetric memory of the destination data.
+ * @param src               [in] Pointer on local device of the source data.
+ * @param elem_size         [in] Number of bytes copied from src to dst.
+ * @param sig_addr          [in] Symmetric
+ * address of the signal word to be updated.
  * @param signal            [in] The value used to update sig_addr.
  * @param sig_op            [in] Operation used to update sig_addr with signal. Supported operations:
  *                               ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
@@ -277,6 +321,12 @@ ACLSHMEM_SIZE_FUNC(ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAIL);
  */
 ACLSHMEM_DEVICE void aclshmem_putmem_signal_nbi(
     __gm__ void* dst, __gm__ void* src, size_t elem_size, __gm__ int32_t* sig_addr, int32_t signal, int sig_op, int pe);
+#define shmem_putmem_signal_nbi aclshmem_putmem_signal_nbi
+
+template <typename T>
+ACLSHMEM_DEVICE void aclshmem_putmem_signal_nbi(
+    AscendC::GlobalTensor<T> dst, AscendC::GlobalTensor<T> src, size_t elem_size, __gm__ int32_t* sig_addr,
+    int32_t signal, int sig_op, int pe);
 
 /**
  * @brief  Automatically generates aclshmem put signal nbi functions for different data types (e.g., float, int8_t).
@@ -289,18 +339,14 @@ ACLSHMEM_DEVICE void aclshmem_putmem_signal_nbi(
  *      Asynchronous interface. Copy a contiguous data on local UB to symmetric address on the specified PE.
  *
  * @note This interface supports single-core invocation only; multiple cores or writers are unsupported.
- * @note For
- *
- * UDMA, transfers over 256 MB are split internally before updating sig_addr.
+ * @note For UDMA, transfers over 256 MB are split internally before updating sig_addr.
  *
  * @par Parameters
- * - **dst** - [in]
-
- * * Pointer on Symmetric memory of the destination data.
- * - **src**         - [in] Pointer on local device of the
- * source data.
- * - **elem_size**   - [in] Number of elements in the dest and source arrays.
- * - **sig_addr**    - [in] Symmetric address of the signal word to be updated.
+ * - **dst**         - [in] Pointer on Symmetric memory of the destination data.
+ * - **src**         - [in] Pointer on local device of the source data.
+ * - **elem_size**   - [in] Number of TYPE elements copied from src to dst.
+ * - **sig_addr**    - [in] Symmetric
+ * address of the signal word to be updated.
  * - **signal**      - [in] The value used to update sig_addr.
  * - **sig_op**      - [in] Operation used to update sig_addr with signal. Supported operations:
  *                          ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
@@ -313,6 +359,7 @@ ACLSHMEM_DEVICE void aclshmem_putmem_signal_nbi(
 
 /** \cond */
 ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_NBI);
+#undef ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_NBI
 /** \endcond */
 #define shmem_put_half_mem_signal_nbi aclshmem_half_put_signal_nbi
 #define shmem_put_float_mem_signal_nbi aclshmem_float_put_signal_nbi
@@ -333,8 +380,10 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_NBI);
  *        The macro parameters: NAME is the function name suffix, TYPE is the operation data type.
  *
  * \remark ACLSHMEM_DEVICE void aclshmem_NAME_put_signal_nbi(AscendC::GlobalTensor<TYPE> dst,\
- * AscendC::GlobalTensor<TYPE> src, size_t elem_size, size_t elem_size, \_\_gm\_\_ int32_t *sig_addr, int32_t signal,\
- * int sig_op, int pe)
+ *
+ * AscendC::GlobalTensor<TYPE> src, size_t elem_size, \_\_gm\_\_ int32_t *sig_addr, int32_t signal,\
+ * int sig_op, int
+ * pe)
  *
  * @par Function Description
  *      Asynchronous interface. Copy a contiguous data on local UB to symmetric address on the specified PE.
@@ -342,8 +391,9 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_NBI);
  * @par Parameters
  * - **dst**         - [in] Pointer on Symmetric memory of the destination data.
  * - **src**         - [in] Pointer on local device of the source data.
- * - **elem_size**   - [in] Number of elements in the dest and source arrays.
- * - **sig_addr**    - [in] Symmetric address of the signal word to be updated.
+ * - **elem_size**   - [in] Number of TYPE elements copied from src to dst.
+ * - **sig_addr**    - [in] Symmetric
+ * address of the signal word to be updated.
  * - **signal**      - [in] The value used to update sig_addr.
  * - **sig_op**      - [in] Operation used to update sig_addr with signal. Supported operations:
  *                          ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
@@ -356,105 +406,146 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_NBI);
 
 /** \cond */
 ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_NBI);
+#undef ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_NBI
 /** \endcond */
 
 /**
  * @brief  Automatically generates aclshmem put signal functions for different data types (e.g., float, int8_t).
- *        The macro parameters: NAME is the function name suffix, TYPE is the operation data type.
  *
- * \remark ACLSHMEM_DEVICE void aclshmem_NAME_put_signal_nbi(\_\_gm\_\_ TYPE *dst, \_\_gm\_\_ TYPE *src, const\
+ * The macro parameters: NAME is the function name suffix, TYPE is the operation data type.
+ *
+ * \remark
+ * ACLSHMEM_DEVICE void aclshmem_NAME_put_signal_nbi(\_\_gm\_\_ TYPE *dst, \_\_gm\_\_ TYPE *src, const\
+ *
  * non_contiguous_copy_param &copy_params, \_\_gm\_\_ int32_t *sig_addr, int32_t signal, int sig_op, int pe)
  *
- * @par Function Description
+ * @par
+ * Function Description
  *      Asynchronous interface. Provide a high-performance way to copy non-contiguous data
- *        on local UB to symmetric address on the specified PE then update sig_addr
+ * on
+ * local UB to symmetric address on the specified PE then update sig_addr
  *
  * @par Parameters
- * - **dst**         - [in] Pointer on Symmetric memory of the destination data.
- * - **src**         - [in] Pointer on local device of the source data.
+ * - **dst**         -
+ * [in] Pointer on Symmetric memory of the destination data.
+ * - **src**         - [in] Pointer on local device of the
+ * source data.
  * - **copy_params** - [in] Params to describe how non-contiguous data is organized in src and dst.
- * - **sig_addr**    - [in] Symmetric address of the signal word to be updated.
- * - **signal**      - [in] The value used to update sig_addr.
+ * -
+ * **sig_addr**    - [in] Symmetric address of the signal word to be updated.
+ * - **signal**      - [in] The value used
+ * to update sig_addr.
  * - **sig_op**      - [in] Operation used to update sig_addr with signal. Supported operations:
- *                          ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
- * - **pe**          - [in] PE number of the remote PE.
+
+ * *                          ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
+ * - **pe**          - [in] PE number of the
+ * remote PE.
  */
 #define ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED_NBI(NAME, TYPE)                                                   \
     ACLSHMEM_DEVICE void aclshmem_##NAME##_put_signal_nbi(                                                          \
         __gm__ TYPE* dst, __gm__ TYPE* src, const non_contiguous_copy_param& copy_params, __gm__ int32_t* sig_addr, \
         int32_t signal, int sig_op, int pe)
-
 /** \cond */
 ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED_NBI);
 /** \endcond */
+#undef ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_DETAILED_NBI
 
 /**
  * @brief  Automatically generates aclshmem put signal functions for different data types (e.g., float, int8_t).
- *        The macro parameters: NAME is the function name suffix, TYPE is the operation data type.
  *
- * \remark ACLSHMEM_DEVICE void aclshmem_NAME_put_signal_nbi(AscendC::GlobalTensor<TYPE> dst,
- * AscendC::GlobalTensor<TYPE>\ src，const non_contiguous_copy_param &copy_params, \_\_gm\_\_ int32_t *sig_addr, int32_t
+ * The macro parameters: NAME is the function name suffix, TYPE is the operation data type.
+ *
+ * \remark
+ * ACLSHMEM_DEVICE void aclshmem_NAME_put_signal_nbi(AscendC::GlobalTensor<TYPE> dst,
+ *
+ * AscendC::GlobalTensor<TYPE>\ src，const non_contiguous_copy_param &copy_params, \_\_gm\_\_ int32_t *sig_addr,
+ * int32_t
  * signal, int sig_op, int pe)
  *
  * @par Function Description
- *      Asynchronous interface. Provide a high-performance way to copy non-contiguous data
+ *      Asynchronous interface. Provide a
+ * high-performance way to copy non-contiguous data
  *        on local UB to symmetric address on the specified PE.
  *
- * @par Parameters
+
+ * * @par Parameters
  * - **dst**         - [in] Pointer on Symmetric memory of the destination data.
- * - **src**         - [in] Pointer on local device of the source data.
- * - **copy_params** - [in] Params to describe how non-contiguous data is organized in src and dst.
+ * - **src** -
+ * [in] Pointer on local device of the source data.
+ * - **copy_params** - [in] Params to describe how non-contiguous
+ * data is organized in src and dst.
  * - **sig_addr**    - [in] Symmetric address of the signal word to be updated.
+ *
  * - **signal**      - [in] The value used to update sig_addr.
- * - **sig_op**      - [in] Operation used to update sig_addr with signal. Supported operations:
+ * - **sig_op**      - [in] Operation used to update
+ * sig_addr with signal. Supported operations:
  *                          ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
- * - **pe**          - [in] PE number of the remote PE.
+ * -
+ * **pe**          - [in] PE number of the remote PE.
  */
 #define ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_DETAILED_NBI(NAME, TYPE)  \
     ACLSHMEM_DEVICE void aclshmem_##NAME##_put_signal_nbi(                \
         AscendC::GlobalTensor<TYPE> dst, AscendC::GlobalTensor<TYPE> src, \
         const non_contiguous_copy_param& copy_params, __gm__ int32_t* sig_addr, int32_t signal, int sig_op, int pe)
-
 /** \cond */
 ACLSHMEM_TYPE_FUNC(ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_DETAILED_NBI);
 /** \endcond */
+#undef ACLSHMEM_PUT_TYPENAME_MEM_SIGNAL_TENSOR_DETAILED_NBI
+
+#define ACLSHMEM_PUT_SIZE_SIGNAL_TENSOR_NBI(BITS)                                                            \
+    template <typename T>                                                                                    \
+    ACLSHMEM_DEVICE void aclshmem_put##BITS##_signal_nbi(                                                    \
+        AscendC::GlobalTensor<T> dst, AscendC::GlobalTensor<T> src, size_t nelems, __gm__ int32_t* sig_addr, \
+        int32_t signal, int sig_op, int pe)
+ACLSHMEM_SIZE_FUNC(ACLSHMEM_PUT_SIZE_SIGNAL_TENSOR_NBI);
+#undef ACLSHMEM_PUT_SIZE_SIGNAL_TENSOR_NBI
 
 /**
  * @brief  Automatically generates aclshmem put functions for different bits (e.g., 8, 16).
- *         The macro parameters: BITS is the bits.
+ *         The macro
+ * parameters: BITS is the bits.
  *
- * \remark ACLSHMEM_DEVICE void aclshmem_putBITS_signal_nbi(void *dst, void *src, size_t nelems, int32_t \
+ * \remark ACLSHMEM_DEVICE void aclshmem_putBITS_signal_nbi(void *dst, void *src,
+ * size_t nelems, int32_t \
  * *sig_addr, int32_t signal, int sig_op, int pe)
  *
  * @par Function Description
- *    Asynchronous interface. Copy a contiguous data from local to symmetric address on the specified PE and
- *    updating a remote signal flag on completion.
  *
- * @note This interface supports single-core invocation only; multiple cores or writers are unsupported.
+ * Asynchronous interface. Copy a contiguous data from local to symmetric address on the specified PE and
+ *    updating
+ * a remote signal flag on completion.
+ *
+ * @note This interface supports single-core invocation only; multiple cores
+ * or writers are unsupported.
  * @note For
  *
- * UDMA, transfers over 256 MB are split internally before updating sig_addr.
+ * UDMA, transfers over 256 MB are split internally before updating
+ * sig_addr.
  *
  * @par Parameters
  * - **dst** - [in]
-
  * * Pointer on Symmetric memory of the destination data.
- * - **src**         - [in] Pointer on local device of the
+ * -
+ * **src**         - [in] Pointer on local device of the
  * source data.
- * - **nelems**      - [in] Number of elements in the dest and source arrays.
+ * - **nelems**      - [in] Number of BITS-wide
+ * elements copied from src to dst.
  * - **sig_addr**    - [in] Symmetric address of the signal word to be updated.
- * - **signal**      - [in] The value used to update sig_addr.
- * - **sig_op**      - [in] Operation used to update sig_addr with signal. Supported operations:
+ * -
+ * **signal**      - [in] The value used to update sig_addr.
+ * - **sig_op**      - [in] Operation used to update
+ * sig_addr with signal. Supported operations:
  *                          ACLSHMEM_SIGNAL_SET/ACLSHMEM_SIGNAL_ADD
- * - **pe**          - [in] PE number of the remote PE.
+ * -
+ * **pe**          - [in] PE number of the remote PE.
  */
 #define ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAILED_NBI(BITS)                                                          \
     ACLSHMEM_DEVICE void aclshmem_put##BITS##_signal_nbi(                                                        \
         __gm__ void* dst, __gm__ void* src, size_t nelems, __gm__ int32_t* sig_addr, int32_t signal, int sig_op, \
         int pe)
-
 /** \cond */
 ACLSHMEM_SIZE_FUNC(ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAILED_NBI);
+#undef ACLSHMEM_PUT_SIZE_MEM_SIGNAL_DETAILED_NBI
 /** \endcond */
 
 #endif
