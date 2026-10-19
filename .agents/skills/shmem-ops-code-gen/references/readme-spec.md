@@ -92,7 +92,6 @@ bash "${SHMEM_REPO}/custom-ops/{op_name}/scripts/perf.sh" <device_list> <base_co
 
 ## 注意事项
 列出 symmetric allocation 顺序、NBI 完成路径、signal/epoch、输出目录清理、多 PE 输出隔离等约束。
-```
 
 ## 3. 官方 example 模式
 
