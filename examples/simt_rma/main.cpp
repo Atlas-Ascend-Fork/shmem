@@ -377,6 +377,6 @@ int main(int argc, char* argv[])
     }
 
     test_aclshmem_rma_mem(my_pe, n_pes);
-    INFO_LOG("[INFO] demo run end in pe %d.", my_pe);
+    INFO_LOG("demo run end in pe %d.", my_pe);
     return 0;
 }

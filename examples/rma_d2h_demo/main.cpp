@@ -19,9 +19,7 @@
 #include "shmem.h"
 #include "../utils/utils.h"
 
-
-const char *ipport = "tcp://127.0.0.1:8998";
-
+const char* ipport = "tcp://127.0.0.1:8998";
 
 aclshmemx_uniqueid_t default_flag_uid;
 
@@ -45,7 +43,7 @@ extern "C" __global__ __aicore__ void kernel_test(__gm__ int* input, __gm__ int*
         aclshmem_quiet();
         auto get_num = aclshmem_int32_g(input, peer);
         aclshmem_quiet();
-        *(output ) = get_num;
+        *(output) = get_num;
     }
 }
 
@@ -63,12 +61,14 @@ int test_aclshmem_rma_scalar_8p(int my_pe, int n_pes)
     ACL_CHECK_WITH_RET(aclrtSetDevice(my_pe), ERROR_LOG("aclrtSetDevice failed"), return -1);
     ACL_CHECK_WITH_RET(aclrtCreateStream(&stream), ERROR_LOG("aclrtCreateStream failed"), return -1);
 
-    int32_t *input_host;
-    int32_t *output_host;
-    ACL_CHECK_WITH_RET(aclrtMallocHost(reinterpret_cast<void**>(&input_host), sizeof(int)),
-        ERROR_LOG("aclrtMallocHost failed"), return -1);
-    ACL_CHECK_WITH_RET(aclrtMallocHost(reinterpret_cast<void**>(&output_host), sizeof(int)),
-        ERROR_LOG("aclrtMallocHost failed"), return -1);
+    int32_t* input_host;
+    int32_t* output_host;
+    ACL_CHECK_WITH_RET(
+        aclrtMallocHost(reinterpret_cast<void**>(&input_host), sizeof(int)), ERROR_LOG("aclrtMallocHost failed"),
+        return -1);
+    ACL_CHECK_WITH_RET(
+        aclrtMallocHost(reinterpret_cast<void**>(&output_host), sizeof(int)), ERROR_LOG("aclrtMallocHost failed"),
+        return -1);
     *input_host = 0;
     *output_host = my_pe;
 
@@ -78,13 +78,16 @@ int test_aclshmem_rma_scalar_8p(int my_pe, int n_pes)
     auto status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes);
     ACL_CHECK_WITH_RET(status, ERROR_LOG("aclshmemx_init_attr failed"), return -1);
 
-    uint8_t *input = (uint8_t*)aclshmemx_malloc(2*1024*1024, HOST_SIDE);
-    uint8_t *output = nullptr;
-    ACL_CHECK_WITH_RET(aclrtMalloc((void **)&output, sizeof(int), ACL_MEM_MALLOC_HUGE_FIRST),
-        ERROR_LOG("aclrtMalloc failed"), return -1);
-    ACL_CHECK_WITH_RET(aclrtMemcpy(input, sizeof(int), input_host, sizeof(int), ACL_MEMCPY_HOST_TO_DEVICE),
+    uint8_t* input = (uint8_t*)aclshmemx_malloc(2 * 1024 * 1024, HOST_SIDE);
+    uint8_t* output = nullptr;
+    ACL_CHECK_WITH_RET(
+        aclrtMalloc((void**)&output, sizeof(int), ACL_MEM_MALLOC_HUGE_FIRST), ERROR_LOG("aclrtMalloc failed"),
+        return -1);
+    ACL_CHECK_WITH_RET(
+        aclrtMemcpy(input, sizeof(int), input_host, sizeof(int), ACL_MEMCPY_HOST_TO_DEVICE),
         ERROR_LOG("aclrtMemcpy failed"), return -1);
-    ACL_CHECK_WITH_RET(aclrtMemcpy(output, sizeof(int), output_host, sizeof(int), ACL_MEMCPY_HOST_TO_DEVICE),
+    ACL_CHECK_WITH_RET(
+        aclrtMemcpy(output, sizeof(int), output_host, sizeof(int), ACL_MEMCPY_HOST_TO_DEVICE),
         ERROR_LOG("aclrtMemcpy failed"), return -1);
 
     aclshmem_barrier_all();
@@ -93,16 +96,18 @@ int test_aclshmem_rma_scalar_8p(int my_pe, int n_pes)
     ACL_CHECK_WITH_RET(aclrtSynchronizeStream(stream), ERROR_LOG("aclrtSynchronizeStream failed"), return -1);
     aclshmem_barrier_all();
 
-    ACL_CHECK_WITH_RET(aclrtMemcpy(input_host, sizeof(int), input, sizeof(int), ACL_MEMCPY_DEVICE_TO_HOST),
+    ACL_CHECK_WITH_RET(
+        aclrtMemcpy(input_host, sizeof(int), input, sizeof(int), ACL_MEMCPY_DEVICE_TO_HOST),
         ERROR_LOG("aclrtMemcpy failed"), return -1);
-    ACL_CHECK_WITH_RET(aclrtMemcpy(output_host, sizeof(int), output, sizeof(int), ACL_MEMCPY_DEVICE_TO_HOST),
+    ACL_CHECK_WITH_RET(
+        aclrtMemcpy(output_host, sizeof(int), output, sizeof(int), ACL_MEMCPY_DEVICE_TO_HOST),
         ERROR_LOG("aclrtMemcpy failed"), return -1);
 
     printf("%d: received message %d %d\n", my_pe, *input_host, *output_host);
-    if ( *output_host == ((my_pe + 1) % n_pes)) {
+    if (*output_host == ((my_pe + 1) % n_pes)) {
         printf("[SUCCESS] run success in pe %d\n", my_pe);
     } else {
-        printf("[ERROR] run result incorrect in pe %d\n", my_pe);  // 期望input变为前卡, output变为后卡
+        printf("[ERROR] run result incorrect in pe %d\n", my_pe); // 期望input变为前卡, output变为后卡
     }
 
     aclshmemx_free(input, HOST_SIDE);
@@ -115,13 +120,13 @@ int test_aclshmem_rma_scalar_8p(int my_pe, int n_pes)
     return 0;
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     int argIdx = 1;
     int n_pes = atoi(argv[argIdx++]);
     int my_pe = atoi(argv[argIdx++]);
 
     (void)test_aclshmem_rma_scalar_8p(my_pe, n_pes);
-    INFO_LOG("[INFO] demo run end in pe %d.", my_pe);
+    INFO_LOG("demo run end in pe %d.", my_pe);
     return 0;
 }

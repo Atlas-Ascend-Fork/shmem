@@ -170,6 +170,6 @@ int main(int argc, char* argv[])
     }
 
     (void)test_aclshmem_rma_scalar_8p(my_pe, n_pes);
-    INFO_LOG("[INFO] demo run end in pe %d.", my_pe);
+    INFO_LOG("demo run end in pe %d.", my_pe);
     return 0;
 }
