@@ -352,13 +352,13 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v3(aclshmem_team_t team_idx)
     aclshmemx_team_t* team = aclshmemi_get_state()->team_pools[team_idx];
     int32_t vec_id = AscendC::GetBlockIdx();
     int32_t vec_size = AscendC::GetBlockNum() * AscendC::GetTaskRation();
+    int32_t size = team->size;
 
     MSTX_FUSE_SCOPE_START();
 
     int32_t my_pe = aclshmemi_get_state()->team_pools[ACLSHMEM_TEAM_WORLD]->mype;
     int32_t start = team->start;
     int32_t stride = team->stride;
-    int32_t size = team->size;
     auto sync_pool = aclshmemi_get_team_sync_pool(team->team_idx);
     auto sync_counter = aclshmemi_get_team_sync_counter(team->team_idx);
 
