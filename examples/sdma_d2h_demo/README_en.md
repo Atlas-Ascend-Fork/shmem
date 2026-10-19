@@ -10,7 +10,7 @@ The example supports three verification modes: `put`, `get`, and `all`.
 
 ## Supported Product Models
 
-- Atlas A3 training products and Atlas A3 inference products
+- Atlas A3 products
 
 ## Example Implementation
 

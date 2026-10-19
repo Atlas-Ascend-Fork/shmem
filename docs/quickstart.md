@@ -30,7 +30,7 @@
 ### 4.1 硬件要求
 
 - Atlas 系列：800I A2/A3、800T A2/A3
-- Ascend 950 系列
+- Ascend 950PR&950DT系列产品
 - 架构兼容：aarch64、x86
 
 ### 4.2 工具链依赖
@@ -79,7 +79,7 @@ source ${install_path}/ascend-toolkit/set_env.sh
 |----------|------|-------------|
 | Ascend 910B | 910b | `Ascend-cann-910b-ops_9.0.0_linux-x86_64.run` |
 | A3 | - | `Ascend-cann-A3-ops_9.0.0_linux-x86_64.run` |
-| Ascend 950 | 950 | `Ascend-cann-950-ops_9.0.0_linux-x86_64.run` |
+| Ascend 950PR&950DT系列产品 | 950 | `Ascend-cann-950-ops_9.0.0_linux-x86_64.run` |
 
 安装 toolkit 包
 

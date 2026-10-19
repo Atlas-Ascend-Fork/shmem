@@ -54,7 +54,7 @@ Some test dimensions are controlled by constants defined at the top of `main.cpp
 
 ## Supported Devices
 
-- Ascend 950
+- Ascend 950PR&950DT products
 
 ## Instructions
 

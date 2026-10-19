@@ -29,7 +29,7 @@ This example demonstrates how RMA single-scalar APIs work through the following 
 
 ## Supported Devices
 
-- Ascend 950
+- Ascend 950PR&950DT products
 
 ## Instructions
 

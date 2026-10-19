@@ -14,13 +14,13 @@ English | <a href="./README.md">简体中文</a>
 
 🚀 [October 2026] [SHMEM v1.7.0](https://gitcode.com/cann/shmem/releases/v1.7.0) is now available.
 
-   - Added QP-specific put/get APIs for Ascend 950 RDMA/UDMA, expanded aggregate submission support, and enabled concurrent UDMA communication across multiple links.
+   - Added QP-specific put/get APIs for Ascend 950PR&950DT products RDMA/UDMA, expanded aggregate submission support, and enabled concurrent UDMA communication across multiple links.
    - Added QP-specific put/get APIs for A2/A3 SDMA to support multi-QP communication.
    - Improved installation and runtime diagnostics, with new MegaMoE and UDMA AllReduce examples and multi-QP performance tests.
 
 > Before upgrading, read the [v1.7.0 release notes](https://gitcode.com/cann/shmem/releases/v1.7.0) for multi-QP usage constraints, asynchronous communication completion semantics, and compatibility requirements.
 
-📌 [July 2026] [SHMEM v1.6.0](https://gitcode.com/cann/shmem/releases/v1.6.0): expanded Ascend 950 RDMA, UDMA/MTE, and SIMT capabilities, and improved Python wheel installation and `shmem-config` diagnostics.
+📌 [July 2026] [SHMEM v1.6.0](https://gitcode.com/cann/shmem/releases/v1.6.0): expanded Ascend 950PR&950DT products RDMA, UDMA/MTE, and SIMT capabilities, and improved Python wheel installation and `shmem-config` diagnostics.
 
 📌 [April 2026] [SHMEM v1.3.0](https://gitcode.com/cann/shmem/releases/v1.3.0): added AI Core direct-driven capabilities and 40+ communication APIs, with expanded DFX tooling.
 
@@ -68,7 +68,7 @@ source /usr/local/Ascend/shmem/latest/set_env.sh
 git clone https://gitcode.com/cann/shmem.git
 cd shmem
 bash scripts/build.sh             # A2/A3 platforms
-# bash scripts/build.sh -soc_type Ascend950  # Ascend 950 platform
+# bash scripts/build.sh -soc_type Ascend950  # Ascend 950PR&950DT products platform
 # Optional: limit build parallelism via the standard CMake environment variable
 # CMAKE_BUILD_PARALLEL_LEVEL=16 bash scripts/build.sh
 source install/set_env.sh
@@ -215,7 +215,7 @@ A: Call `aclshmemx_set_conf_store_tls` before `aclshmemx_init_attr`. The TLS con
 
 **Q5: What do I do if a Git failure is reported for dependencies such as googletest and nlohmann/json when `build.sh` is executed?**
 
-A: Check whether the Git configuration can access GitCode. `googletest v1.14.x` is used for UT builds and `nlohmann/json v3.11.3` is used for Ascend 950 platform builds. They are automatically downloaded by `scripts/build.sh` by default. In an offline environment, prepare them in `3rdparty/googletest` and `3rdparty/json` in advance. For details, see [Third-party Source Code Dependencies](docs/quickstart_en.md).
+A: Check whether the Git configuration can access GitCode. `googletest v1.14.x` is used for UT builds and `nlohmann/json v3.11.3` is used for Ascend 950PR&950DT products platform builds. They are automatically downloaded by `scripts/build.sh` by default. In an offline environment, prepare them in `3rdparty/googletest` and `3rdparty/json` in advance. For details, see [Third-party Source Code Dependencies](docs/quickstart_en.md).
 
 **Q6: What do I do if the CANN package fails to be installed?**
 

@@ -2,10 +2,10 @@
 
 ## Overview
 
-**root_info_generate** is a tool that shows the topology address information about Ascend 950 NPUs. It helps you stay on top of networking structures and device configurations.
+**root_info_generate** is a tool that shows the topology address information about Ascend 950PR&950DT products NPUs. It helps you stay on top of networking structures and device configurations.
 
 **Notes**:
-- **Support**: Currently, this tool is only supported for Ascend 950.
+- **Support**: Currently, this tool is only supported for Ascend 950PR&950DT products.
 - **Automatic**: The tool automatically generates root information by calling related APIs when SHMEM initializes. You do not need to manually run the tool.
 - **Auxiliary**: This tool helps you view and understand information such as network topologies and EID addresses, making development and commissioning easier.
 - **Optional**: When the SHMEM is used properly, you do not need to manually run this tool.
@@ -14,7 +14,7 @@
 
 ### Introduction
 
-Ascend 950 uses the Unified Bus (UB) for hyperplane networking. Various topological networking configurations are employed across different product modalities. This module is designed to identify the endpoint addresses of each edge within diverse topologies.
+Ascend 950PR&950DT products uses the Unified Bus (UB) for hyperplane networking. Various topological networking configurations are employed across different product modalities. This module is designed to identify the endpoint addresses of each edge within diverse topologies.
 
 #### Networking
 
@@ -48,7 +48,7 @@ Any two NPUs communicate through forwarding by a switch chip. As a result, each 
 
 #### Network Layers
 
-In Ascend 950, networks are divided into multiple layers based on communication quality and scope.
+In Ascend 950PR&950DT products, networks are divided into multiple layers based on communication quality and scope.
 
 | Network Layer| Description|
 |:-------|:-----------|
@@ -108,7 +108,7 @@ In v2 RDMA mode, when the topology file fails to be read and fallback rootinfo g
 ## Prerequisites
 
 ### System Requirements
-- **SoC type**: Ascend 950
+- **SoC type**: Ascend 950PR&950DT products
 - **Platform**: Linux
 - **Dependent libraries**: libdcmi.so driver library and c_sec security library
 
@@ -126,7 +126,7 @@ In v2 RDMA mode, when the topology file fails to be read and fallback rootinfo g
 git clone <repository_address>
 cd shmem
 
-# Build with the Ascend 950 SoC.
+# Build with the Ascend 950PR&950DT products SoC.
 bash scripts/build.sh -soc_type Ascend950
 
 # Tool location:
@@ -251,7 +251,7 @@ Common error causes:
 ```
 
 **Solution**:
-1. Build with soc_type set to Ascend 950
+1. Build with soc_type set to Ascend 950PR&950DT products
 2. Verify the installation location: `build/bin/` or `install/shmem/bin/`
 3. Check the build log to ensure that the tool has been generated.
 

@@ -10,7 +10,7 @@
 
 ## 支持的产品型号
 
-- Atlas A3 训练系列产品/Atlas A3 推理系列产品
+- Atlas A3系列产品
 
 ## 样例实现
 
@@ -65,7 +65,7 @@ bash run.sh -pes 2 -op get -type int64 -elems 262144
 bash run.sh -pes 2 -op all -type fp32 -elems 262144
 ```
 
-用例执行完成，打屏信息出现"[SUCCESS] put op pass in pe <my_pe>"，说明当前 PE 的 `put` 结果校验成功；打屏信息出现"[SUCCESS] get op pass in pe <my_pe>"，说明当前 PE 的 `get` 结果校验成功；打屏信息出现"[SUCCESS] sdma_d2h_demo run success in pe <my_pe>"，说明当前 PE 样例执行成功且资源释放正常。
+用例执行完成，打屏信息出现"[SUCCESS] put op pass in pe `<my_pe>`"，说明当前 PE 的 `put` 结果校验成功；打屏信息出现"[SUCCESS] get op pass in pe `<my_pe>`"，说明当前 PE 的 `get` 结果校验成功；打屏信息出现"[SUCCESS] sdma_d2h_demo run success in pe `<my_pe>`"，说明当前 PE 样例执行成功且资源释放正常。
 
 样例还会打印每个 PE 负责 segment 的前 8 个值，例如：
 

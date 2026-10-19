@@ -57,7 +57,7 @@ HCCS/SIO 链路测试工具，用于验证 NPU 之间 SIO / HCCS 链路的正确
 
 本示例需要通过 `-examples` 编译选项启用，CMake 会自动检测当前 CANN 版本是否支持 `aclrtMemMapSelectedLink` 函数，若支持则自动编译本示例：
 
-> **仅支持 Atlas A3**：本示例依赖 Die 间 SIO/HCCS 链路，仅在 A3（Atlas A3 训练系列/Atlas A3 推理系列）上支持，不支持 A2（Atlas A2 训练系列/Atlas A2 推理系列）与 Ascend950。
+> **仅支持 Atlas A3**：本示例依赖 Die 间 SIO/HCCS 链路，仅在 A3（Atlas A3系列产品）上支持，不支持 A2（Atlas A2系列产品）与 Ascend 950PR&950DT系列产品。
 
 ```bash
 bash scripts/build.sh -examples

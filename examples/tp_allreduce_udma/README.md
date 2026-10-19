@@ -101,7 +101,7 @@ golden 数据和输出固定放在示例目录下的 `golden/`、`output/`。每
 
 ## 约束
 
-- `baseline` 与 `tailcut` 算子依赖 UB-Mesh 互联，以及 AIV Core 直驱 UDMA 的能力，**当前仅支持 Ascend 950**。
+- `baseline` 与 `tailcut` 算子依赖 UB-Mesh 互联，以及 AIV Core 直驱 UDMA 的能力，**当前仅支持 Ascend 950PR&950DT系列产品**。
 - `tailcut` 需借助其他 NPU 中转部分通信数据，**当前 relay 功能仅支持 Atlas 950 SuperPoD**；非该形态部署下，无法保证绕路转发可用，请勿使用 `tailcut` 模式。
 - TP 大小固定为 2。
 - `elements` 必须为正数且能被 2 整除。

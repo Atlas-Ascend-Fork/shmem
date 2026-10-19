@@ -51,7 +51,7 @@ To use the RDMA function, enable the `-enable_rdma` parameter during build. Then
 
 - Ascend 910B/C platform
   - Only the `-enable_rdma` parameter is required. No additional parameter is required. The backend uses the default configuration.
-- Ascend 950 platform
+- Ascend 950PR&950DT products platform
   - Use the `-enable_rdma` parameter.
   - Explicitly specify `-soc_type Ascend950`.
   - Specify the `-rdma_backend` parameter. Otherwise, the build script will report an error.
@@ -65,13 +65,13 @@ To use the RDMA function, enable the `-enable_rdma` parameter during build. Then
 **Valid command examples**:
 
 ```shell
-# Enabling RDMA on the Ascend 950 platform and specifying XSCALE as the backend (parameter sequence example 1)
+# Enabling RDMA on the Ascend 950PR&950DT products platform and specifying XSCALE as the backend (parameter sequence example 1)
 bash scripts/build.sh -soc_type Ascend950 -enable_rdma -rdma_backend XSCALE
 
-# Enabling RDMA on the Ascend 950 platform and specifying XSCALE as the backend (parameter sequence example 2)
+# Enabling RDMA on the Ascend 950PR&950DT products platform and specifying XSCALE as the backend (parameter sequence example 2)
 bash scripts/build.sh -enable_rdma -soc_type Ascend950 -rdma_backend XSCALE
 
-# Enabling RDMA on the Ascend 950 platform and specifying XSCALE as the backend (parameter sequence example 3)
+# Enabling RDMA on the Ascend 950PR&950DT products platform and specifying XSCALE as the backend (parameter sequence example 3)
 bash scripts/build.sh -rdma_backend XSCALE -enable_rdma -soc_type Ascend950
 
 # Enabling RDMA on Ascend 910B/C (backend not specified)
@@ -85,7 +85,7 @@ bash scripts/build.sh -enable_rdma
 bash scripts/build.sh -soc_type Ascend950 -rdma_backend XSCALE
 # Error message: "Error: -rdma_backend requires -enable_rdma to be specified."
 
-# Error: -rdma_backend is used on a non-Ascend 950 platform.
+# Error: -rdma_backend is used on a non-Ascend 950PR&950DT products platform.
 bash scripts/build.sh -enable_rdma -rdma_backend XSCALE
 # Error message: "Error: -rdma_backend can only be specified when SOC_TYPE is Ascend950."
 ```
@@ -123,7 +123,7 @@ When `-enable_relay` is enabled, CMake automatically adds the `ACLSHMEM_RELAY_SU
 **Valid command examples**:
 
 ```shell
-# Build examples and enable relay on the Ascend 950 platform
+# Build examples and enable relay on the Ascend 950PR&950DT products platform
 bash scripts/build.sh -examples -soc_type Ascend950 -enable_relay
 
 # The reversed parameter sequence is also valid
@@ -136,7 +136,7 @@ bash scripts/build.sh -python_extension -enable_relay
 **Invalid command examples**:
 
 ```shell
-# Error: -enable_relay is used on a non-Ascend 950 platform (-soc_type Ascend950 not specified).
+# Error: -enable_relay is used on a non-Ascend 950PR&950DT products platform (-soc_type Ascend950 not specified).
 bash scripts/build.sh -examples -enable_relay
 # Error message: "Error: -enable_relay requires UDMA support, which is only enabled for Ascend950."
 ```

@@ -62,7 +62,7 @@ Steps 2-3 demonstrate "UB staging + remote write", while steps 4-5 demonstrate "
 
 ## Supported Devices
 
-- Ascend 950
+- Ascend 950PR&950DT products
 
 ## Directory Structure
 

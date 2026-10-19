@@ -76,7 +76,7 @@ The demonstration targets the device symmetric memory (the default of `aclshmemx
 
 ## Supported Devices
 
-- Ascend 950
+- Ascend 950PR&950DT products
 
 ## Instructions
 
