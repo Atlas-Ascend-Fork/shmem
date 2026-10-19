@@ -296,7 +296,11 @@ __aicore__ inline void udma_perf_test_put_impl(
     const int peer_pe = (pe + 1) % aclshmem_n_pes();
     const uint32_t qp_idx = static_cast<uint32_t>(AscendC::GetBlockIdx());
     const bool is_unilateral = (test_mode == perftest::TEST_MODE_UDMA_PUT);
+    // Host-side buffer initialization is independent on every PE. Ensure all
+    // destination buffers are initialized before the sender can issue a put.
+    aclshmemx_sync_vec_all();
     if (is_unilateral && pe != prof_pe_val) {
+        // Match the sender's completion barrier before this PE exits.
         aclshmemx_sync_vec_all();
         return;
     }
@@ -353,7 +357,10 @@ __aicore__ inline void udma_perf_test_get_impl(
     const int peer_pe = (pe + 1) % aclshmem_n_pes();
     const uint32_t qp_idx = static_cast<uint32_t>(AscendC::GetBlockIdx());
     const bool is_unilateral = (test_mode == perftest::TEST_MODE_UDMA_GET);
+    // Ensure all source buffers are initialized before the sender can issue a get.
+    aclshmemx_sync_vec_all();
     if (is_unilateral && pe != prof_pe_val) {
+        // Match the sender's completion barrier before this PE exits.
         aclshmemx_sync_vec_all();
         return;
     }
@@ -402,7 +409,11 @@ __aicore__ inline void udma_perf_test_put_signal_impl(
     int64_t pe = aclshmem_my_pe();
     int peer_pe = (pe + 1) % aclshmem_n_pes();
 
+    // Synchronize after host-side data and signal initialization, before the profiling PE
+    // can issue a remote put-with-signal.
+    aclshmemx_sync_vec_all();
     if (pe != prof_pe_val) {
+        // Match the sender's completion barrier before this PE exits.
         aclshmemx_sync_vec_all();
         return;
     }

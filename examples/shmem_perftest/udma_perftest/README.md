@@ -9,9 +9,9 @@
 针对以下 UDMA 数据传输操作的性能：
 
 1. **单向 Put** (`put`)：仅 `SHMEM_CYCLE_PROF_PE` 指定的 PE 调用 `aclshmemx_udma_put_nbi`，将数据传输到对端 PE。
-2. **双向 Put** (`bi_put`)：两个 PE 同时调用 put，互相传输数据。
+2. **环形 Put** (`bi_put`)：每个 PE 向下一 PE 调用 put，并接收前一 PE 的数据；2 PE 时表现为互相传输。
 3. **单向 Get** (`get`)：仅 prof PE 调用 `aclshmemx_udma_get_nbi`，从对端 PE 拉取数据。
-4. **双向 Get** (`bi_get`)：两个 PE 同时调用 get，互相拉取数据。
+4. **环形 Get** (`bi_get`)：每个 PE 从下一 PE 调用 get 读取数据；2 PE 时表现为互相拉取。
 5. **Put + Signal** (`put_signal`)：仅 prof PE 调用 `aclshmemx_udma_put_signal_nbi`，传输数据后写一个远端信号；测试结束做信号值校验。
 
 ## 与 `mte_perftest` (MTE 版) 的差异

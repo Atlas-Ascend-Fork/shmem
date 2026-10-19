@@ -205,11 +205,32 @@ int test_udma_perf_test_impl(
             cleanup);
 
         int peer_pe = (pe_id + 1) % n_pes;
-        if (test_mode == perftest::TEST_MODE_UDMA_PUT) {
-            std::cout << "\n[Verification] put: checking..." << std::endl;
-            if (pe_id != prof_pe) {
-                T expected_val = static_cast<T>(prof_pe + 10);
-                if (!compare_values(dst_host.data(), expected_val, total_elements, "dst", "expected")) {
+        const bool is_put_signal = test_mode == perftest::TEST_MODE_UDMA_PUT_SIGNAL;
+        if (test_mode == perftest::TEST_MODE_UDMA_PUT || is_put_signal) {
+            const char* verification_desc =
+                is_put_signal ? "put_signal: checking data + signal..." : "put: checking...";
+            std::cout << "\n[Verification] " << verification_desc << std::endl;
+            // Unilateral put is issued only by prof_pe and targets its next PE. All
+            // other PEs retain their locally initialized destination buffer.
+            const int target_pe = (prof_pe + 1) % n_pes;
+            const T expected_val = static_cast<T>(pe_id == target_pe ? prof_pe + 10 : pe_id + 100);
+            if (!compare_values(dst_host.data(), expected_val, total_elements, "dst", "expected")) {
+                verify_success = false;
+            }
+            if (is_put_signal) {
+                std::vector<uint64_t> sig_init(n_pes, 0);
+                PERFTEST_CHECK_GOTO(
+                    aclrtMemcpy(
+                        sig_init.data(), n_pes * sizeof(uint64_t), sig_ptr, n_pes * sizeof(uint64_t),
+                        ACL_MEMCPY_DEVICE_TO_HOST),
+                    ret, cleanup);
+                const uint64_t expected_sig =
+                    pe_id == target_pe ?
+                        signal_base + static_cast<uint64_t>(perftest::PERFTEST_WARMUP_ITERS + loop_count - 1) :
+                        0;
+                if (sig_init[prof_pe] != expected_sig) {
+                    std::cout << "  [ERROR] signal slot[" << prof_pe << "]=" << sig_init[prof_pe]
+                              << ", expected=" << expected_sig << std::endl;
                     verify_success = false;
                 }
             }
@@ -223,7 +244,10 @@ int test_udma_perf_test_impl(
             }
         } else if (test_mode == perftest::TEST_MODE_UDMA_BI_PUT) {
             std::cout << "\n[Verification] bi_put: checking..." << std::endl;
-            T expected_val = static_cast<T>(peer_pe + 10);
+            // Each PE writes to its next PE, so this PE receives data from its
+            // previous PE in the ring.
+            const int sender_pe = (pe_id - 1 + n_pes) % n_pes;
+            T expected_val = static_cast<T>(sender_pe + 10);
             if (!compare_values(dst_host.data(), expected_val, total_elements, "dst", "expected")) {
                 verify_success = false;
             }
@@ -232,27 +256,6 @@ int test_udma_perf_test_impl(
             T expected_val = static_cast<T>(peer_pe + 10);
             if (!compare_values(dst_host.data(), expected_val, total_elements, "dst", "expected")) {
                 verify_success = false;
-            }
-        } else if (test_mode == perftest::TEST_MODE_UDMA_PUT_SIGNAL) {
-            std::cout << "\n[Verification] put_signal: checking data + signal..." << std::endl;
-            if (pe_id != prof_pe) {
-                T expected_val = static_cast<T>(prof_pe + 10);
-                if (!compare_values(dst_host.data(), expected_val, total_elements, "dst", "expected")) {
-                    verify_success = false;
-                }
-                std::vector<uint64_t> sig_init(n_pes, 0);
-                PERFTEST_CHECK_GOTO(
-                    aclrtMemcpy(
-                        sig_init.data(), n_pes * sizeof(uint64_t), sig_ptr, n_pes * sizeof(uint64_t),
-                        ACL_MEMCPY_DEVICE_TO_HOST),
-                    ret, cleanup);
-                uint64_t expected_sig =
-                    signal_base + static_cast<uint64_t>(perftest::PERFTEST_WARMUP_ITERS + loop_count - 1);
-                if (sig_init[prof_pe] != expected_sig) {
-                    std::cout << "  [ERROR] signal slot[" << prof_pe << "]=" << sig_init[prof_pe]
-                              << ", expected=" << expected_sig << std::endl;
-                    verify_success = false;
-                }
             }
         }
 
