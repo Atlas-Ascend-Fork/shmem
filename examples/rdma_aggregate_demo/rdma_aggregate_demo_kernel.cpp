@@ -129,10 +129,11 @@ extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void device_rdma_
 
     const int my_pe = static_cast<int>(aclshmem_my_pe());
     const int n_pes = static_cast<int>(aclshmem_n_pes());
-    if (n_pes != 2) {
+    if (n_pes < 2 || my_pe < 0 || my_pe >= n_pes) {
         return;
     }
-    const int peer = 1 - my_pe;
+    // Exchange with the next PE so the example scales to multi-PE and multi-node runs.
+    const int peer = (my_pe + 1) % n_pes;
     __gm__ uint32_t* data = (__gm__ uint32_t*)gva;
 
     // Wait until both PEs have initialized their symmetric buffers before starting the first batch.

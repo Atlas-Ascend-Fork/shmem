@@ -12,22 +12,36 @@
 set -e
 
 usage() {
-    echo "Usage: $0 [-ip <ip>] [-port <port>]"
+    echo "Usage: $0 [-ipport tcp://ip:port] [-pes N] [-gnpus N] [-fpe ID] [-fnpu ID]"
     exit 1
 }
 
-ip="127.0.0.1"
-port="8899"
+ipport=tcp://127.0.0.1:8299
+pes=2
+gnpus=""
+fpe=0
+fnpu=0
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -ip)
-            [[ -n "${2:-}" ]] || usage
-            ip="$2"
+        -ipport)
+            ipport="$2"
             shift 2
             ;;
-        -port)
-            [[ -n "${2:-}" && "$2" =~ ^[0-9]+$ ]] || usage
-            port="$2"
+        -pes)
+            pes="$2"
+            shift 2
+            ;;
+        -gnpus)
+            gnpus="$2"
+            shift 2
+            ;;
+        -fpe)
+            fpe="$2"
+            shift 2
+            ;;
+        -fnpu)
+            fnpu="$2"
             shift 2
             ;;
         *)
@@ -36,22 +50,28 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-project_root="$(cd ${script_dir}/../../ && pwd)"
-export PROJECT_ROOT=${project_root}
-export LD_LIBRARY_PATH=${PROJECT_ROOT}/build/lib:$LD_LIBRARY_PATH
+# 未指定 -gnpus 时默认与 -pes 相同（单机全量场景）
+[[ -z "$gnpus" ]] && gnpus=$pes
+[[ "$pes" =~ ^[1-9][0-9]*$ && "$gnpus" =~ ^[1-9][0-9]*$ && "$fpe" =~ ^[0-9]+$ && "$fnpu" =~ ^[0-9]+$ ]] || usage
+(( pes >= 2 )) || usage
+(( (pes & (pes - 1)) == 0 )) || { echo "ERROR: pes must be a power of 2 (2, 4, 8, 16, ...), got $pes"; exit 1; }
+(( fpe + gnpus <= pes )) || usage
 
-cd "${PROJECT_ROOT}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "$script_dir/../../" && pwd)"
+export PROJECT_ROOT="$project_root"
+export LD_LIBRARY_PATH="$PROJECT_ROOT/build/lib:$LD_LIBRARY_PATH"
+cd "$project_root"
+
 pids=()
-for pe_id in 0 1; do
-    ./build/bin/rdma_aggregate_demo 2 "${pe_id}" "tcp://${ip}:${port}" 2 0 0 &
+for ((offset = 0; offset < gnpus; offset++)); do
+    pe_id=$((fpe + offset))
+    ./build/bin/rdma_aggregate_demo "$pes" "$pe_id" "$ipport" "$gnpus" "$fpe" "$fnpu" &
     pids+=("$!")
 done
 
 ret=0
 for pid in "${pids[@]}"; do
-    if ! wait "${pid}"; then
-        ret=1
-    fi
+    wait "$pid" || ret=1
 done
-exit "${ret}"
+exit "$ret"
