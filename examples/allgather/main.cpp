@@ -37,10 +37,10 @@ using bfloat16 = op::bfloat16;
 #include "allgather_kernel.h"
 
 int g_npus = 8;
-const char *ipport = "tcp://127.0.0.1:8998";
+const char* ipport = "tcp://127.0.0.1:8998";
 int f_pe = 0;
 int f_npu = 0;
-const char *data_type = "int32_t";
+const char* data_type = "int32_t";
 int perf_times = 50;
 
 constexpr int64_t SYNC_FLAG_INTERVAL = 16;
@@ -100,49 +100,52 @@ int test_aclshmem_all_gather(int pe_id, int n_pes)
             BLOCK_NUM = BLOCK_NUM_LARGE_DATA;
         }
 
-        void *input_ptr;
+        void* input_ptr;
         aclrtMalloc(&input_ptr, trans_size * sizeof(T), ACL_MEM_MALLOC_HUGE_FIRST);
-        uint8_t *input_host;
+        uint8_t* input_host;
         aclrtMallocHost(reinterpret_cast<void**>(&input_host), trans_size * sizeof(T));
         std::string inputFile = "../../examples/allgather/golden/allgather_" + std::to_string(trans_size) + "_" +
                                 std::to_string(n_pes) + "/input_gm_" + std::to_string(pe_id) + ".bin";
         ReadFile(inputFile, input_host, trans_size * sizeof(T));
         aclrtMemcpy(input_ptr, trans_size * sizeof(T), input_host, trans_size * sizeof(T), ACL_MEMCPY_HOST_TO_DEVICE);
 
-        void *output_ptr;
+        void* output_ptr;
         aclrtMalloc(&output_ptr, trans_size * n_pes * sizeof(T), ACL_MEM_MALLOC_HUGE_FIRST);
 
         // sync Buffer + data Buffer
         int aiv_num = BLOCK_NUM;
-        void *ptr = aclshmem_malloc(aiv_num * SYNC_FLAG_INTERVAL * sizeof(T) + GVA_BUFF_MAX_SIZE / sizeof(T));
+        void* ptr = aclshmem_malloc(aiv_num * SYNC_FLAG_INTERVAL * sizeof(T) + GVA_BUFF_MAX_SIZE / sizeof(T));
 
         // AllGather
         for (int zz = 0; zz < perf_times; zz++) {
             magic++;
-            allgather_demo<T>(BLOCK_NUM, stream, fftsAddr, (uint8_t *)input_ptr,
-                              (uint8_t *)output_ptr, (uint8_t *)ptr, trans_size, magic * MAGIC_MULTIPLIER);
+            allgather_demo<T>(
+                BLOCK_NUM, stream, fftsAddr, (uint8_t*)input_ptr, (uint8_t*)output_ptr, (uint8_t*)ptr, trans_size,
+                magic * MAGIC_MULTIPLIER);
         }
         status = aclrtSynchronizeStream(stream);
 
         aclshmemx_get_prof(nullptr, true);
 
         // Result Check
-        T *output_host;
+        T* output_host;
         size_t output_size = n_pes * trans_size * sizeof(T);
         status = aclrtMallocHost(reinterpret_cast<void**>(&output_host), output_size);
         status = aclrtMemcpy(output_host, output_size, output_ptr, output_size, ACL_MEMCPY_DEVICE_TO_HOST);
 
-        T *golden_host;
+        T* golden_host;
         status = aclrtMallocHost(reinterpret_cast<void**>(&golden_host), output_size);
-        std::string goldenFile = "../../examples/allgather/golden/allgather_" +
-            std::to_string(trans_size) + "_" + std::to_string(n_pes) + "/golden.bin";
+        std::string goldenFile = "../../examples/allgather/golden/allgather_" + std::to_string(trans_size) + "_" +
+                                 std::to_string(n_pes) + "/golden.bin";
         ReadFile(goldenFile, golden_host, n_pes * trans_size * sizeof(T));
+        int validation_status = 0;
         for (int zz = 0; zz < n_pes * trans_size; zz++) {
             if (static_cast<float>(output_host[zz]) != static_cast<float>(golden_host[zz])) {
-                std::cout << static_cast<float>(output_host[zz]) << " != " << static_cast<float>(golden_host[zz])
-                          << ", trans_size is : " << trans_size << ", idx is: " << zz
-                          << ", pe_id is: "<< pe_id << std::endl;
-                std::exit(EXIT_FAILURE);
+                std::cerr << "[ERROR] allgather validation failed: " << static_cast<float>(output_host[zz])
+                          << " != " << static_cast<float>(golden_host[zz]) << ", trans_size is: " << trans_size
+                          << ", idx is: " << zz << ", pe_id is: " << pe_id << std::endl;
+                validation_status = 1;
+                break;
             }
         }
 
@@ -154,6 +157,12 @@ int test_aclshmem_all_gather(int pe_id, int n_pes)
         aclshmem_free(ptr);
         aclrtFree(input_ptr);
         aclrtFree(output_ptr);
+
+        if (validation_status != 0) {
+            outFile.close();
+            aclrtDestroyStream(stream);
+            return validation_status;
+        }
 
         outFile << 1 << "," << trans_size << "," << " " << "\n";
 
@@ -167,8 +176,14 @@ int test_aclshmem_all_gather(int pe_id, int n_pes)
     return status;
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
+    if (argc <= INDEX8) {
+        std::cerr << "[ERROR] invalid arguments: expected " << INDEX8 << " parameters after the program name"
+                  << std::endl;
+        return 1;
+    }
+
     int status = 0;
     int n_pes = atoi(argv[INDEX1]);
     int pe_id = atoi(argv[INDEX2]);
@@ -182,12 +197,28 @@ int main(int argc, char *argv[])
     // Acl && Shmem init
     int32_t device_id = pe_id % g_npus + f_npu;
     status = aclInit(nullptr);
+    if (status != ACL_SUCCESS) {
+        std::cerr << "[ERROR] aclInit failed, status=" << status << std::endl;
+        return status;
+    }
+
     status = aclrtSetDevice(device_id);
+    if (status != ACL_SUCCESS) {
+        std::cerr << "[ERROR] aclrtSetDevice failed for device " << device_id << ", status=" << status << std::endl;
+        (void)aclFinalize();
+        return status;
+    }
 
     uint64_t local_mem_size = 1024UL * 1024UL * 1024;
     aclshmemx_init_attr_t attributes;
     test_set_attr(pe_id, n_pes, local_mem_size, ipport, default_flag_uid, &attributes);
     status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes);
+    if (status != ACLSHMEM_SUCCESS) {
+        std::cerr << "[ERROR] aclshmemx_init_attr failed, status=" << status << std::endl;
+        (void)aclrtResetDevice(device_id);
+        (void)aclFinalize();
+        return status;
+    }
 
     if (std::string(data_type) == "int32_t") {
         status = test_aclshmem_all_gather<int32_t>(pe_id, n_pes);
@@ -195,12 +226,31 @@ int main(int argc, char *argv[])
         status = test_aclshmem_all_gather<fp16_t>(pe_id, n_pes);
     } else if (std::string(data_type) == "bfloat16_t") {
         status = test_aclshmem_all_gather<bfloat16>(pe_id, n_pes);
+    } else {
+        std::cerr << "[ERROR] unsupported data_type: " << data_type << std::endl;
+        status = 1;
     }
-    status = aclshmem_finalize();
-    status = aclrtResetDevice(device_id);
-    status = aclFinalize();
-    if (status) {
-        std::exit(EXIT_FAILURE);
+    const int test_status = status;
+    const int finalize_status = aclshmem_finalize();
+    const int reset_status = aclrtResetDevice(device_id);
+    const int acl_finalize_status = aclFinalize();
+    int exit_code = ACL_SUCCESS;
+    if (test_status != ACL_SUCCESS) {
+        std::cerr << "[ERROR] allgather test failed, skip judging cleanup statuses." << std::endl;
+        exit_code = test_status;
+    } else if (finalize_status != ACLSHMEM_SUCCESS) {
+        std::cerr << "[ERROR] allgather cleanup failed: shmem_finalize_status=" << finalize_status << std::endl;
+        exit_code = finalize_status;
+    } else if (reset_status != ACL_SUCCESS) {
+        std::cerr << "[ERROR] allgather cleanup failed: reset_status=" << reset_status << std::endl;
+        exit_code = reset_status;
+    } else if (acl_finalize_status != ACL_SUCCESS) {
+        std::cerr << "[ERROR] allgather cleanup failed: acl_finalize_status=" << acl_finalize_status << std::endl;
+        exit_code = acl_finalize_status;
+    }
+
+    if (exit_code != ACL_SUCCESS) {
+        return exit_code;
     }
 
     std::cout << "[SUCCESS] demo run success in pe " << pe_id << std::endl;

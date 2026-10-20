@@ -16,8 +16,11 @@ PERF_TEST_CYCLE_TIMES = 40
 
 
 def open_input_file(input_file):
-    df = pd.read_csv(input_file)
-    return df
+    try:
+        return pd.read_csv(input_file)
+    except (pd.errors.EmptyDataError, pd.errors.ParserError, FileNotFoundError) as error:
+        print(f"warning: invalid profiling csv, skip data statistic: {input_file} ({error})")
+        return None
 
 
 def get_time_data(df, test_line_num: int):
@@ -70,6 +73,9 @@ def process_kernel_data():
         print(f"no results csv: {results_csv}, skip data statistic")
         return
     tiling_df = open_input_file(results_csv)
+    if tiling_df is None or tiling_df.empty:
+        print(f"no valid results csv data: {results_csv}, skip data statistic")
+        return
     print(tiling_df)
 
     output_dir = os.path.join(parent_dir, "output")
@@ -86,12 +92,23 @@ def process_kernel_data():
     perf_output = np.zeros((case_num, )).astype(np.float32)
 
     # Average x Cards' data of all cases
+    valid_pref_file_count = 0
     for pref_file in pref_file_list:
         pref_df = open_input_file(pref_file)
+        if pref_df is None or pref_df.empty:
+            continue
         pref_data = get_time_data(pref_df, case_num)
+        if len(pref_data) != case_num:
+            print(f"invalid profiling data, skip file: {pref_file}")
+            continue
         perf_output += np.array(pref_data).astype(np.float32)
+        valid_pref_file_count += 1
 
-    perf_output = perf_output / len(pref_file_list)
+    if valid_pref_file_count == 0:
+        print("no valid profiling data, skip data statistic")
+        return
+
+    perf_output = perf_output / valid_pref_file_count
     tiling_df['Time(us)'] = perf_output
     tiling_df.to_csv(os.path.join(parent_dir, "result.csv"), index=False)
 

@@ -105,7 +105,11 @@ done
 # Golden generate
 rm -rf ./golden
 mkdir -p golden
-python3 ./scripts/data_gen.py $PE_SIZE $TEST_TYPE
+if ! python3 ./scripts/data_gen.py "$PE_SIZE" "$TEST_TYPE"; then
+    echo "[ERROR] golden data generation failed"
+    cd "${CURRENT_DIR}" || exit 1
+    exit 1
+fi
 
 # Kernel test
 rm -rf ./output
@@ -116,7 +120,7 @@ for (( idx =0; idx < ${GNPU_NUM}; idx = idx + 1 )); do
     if [[ "$TOOL" == "msprof" ]]; then
         PERF_TIME=50
         msprof --application="${PROJECT_ROOT}/build/bin/allgather $PE_SIZE $idx $IPPORT $GNPU_NUM $FIRST_PE $FIRST_NPU $TEST_TYPE $PERF_TIME" --output=${PROJECT_ROOT}/examples/allgather/output/ &
-    else 
+    else
         PERF_TIME=50
         ${PROJECT_ROOT}/build/bin/allgather $PE_SIZE $idx $IPPORT $GNPU_NUM $FIRST_PE $FIRST_NPU $TEST_TYPE $PERF_TIME &
     fi
@@ -126,17 +130,28 @@ for (( idx =0; idx < ${GNPU_NUM}; idx = idx + 1 )); do
 done
 
 ret=0
-for pid in ${pids[@]}; do
-    wait $pid
-    echo "wait process $pid done"
+for pid in "${pids[@]}"; do
+    wait "$pid"
     cur_ret=$?
+    echo "wait process $pid done, ret=$cur_ret"
     if [[ $cur_ret -ne 0 ]]; then
-        ret=$cur_ret
+        [[ $ret -eq 0 ]] && ret=$cur_ret
     fi
 done
 
+if [[ $ret -ne 0 ]]; then
+    echo "[ERROR] allgather process failed, skip profiling data statistic."
+    cd "${CURRENT_DIR}" || exit "$ret"
+    exit "$ret"
+fi
+
 # Profiling data statistic
 python3 ./scripts/data_statistic.py
+stat_ret=$?
+if [[ $stat_ret -ne 0 ]]; then
+    echo "[ERROR] profiling data statistic failed, ret=$stat_ret"
+    ret=$stat_ret
+fi
 
-cd ${CURRENT_DIR}
-exit $ret
+cd "${CURRENT_DIR}" || exit "$ret"
+exit "$ret"
