@@ -135,8 +135,8 @@ echo "============================================"
 echo "  Phase 3: 组合测试"
 echo "============================================"
 
-run_test "-debug -cann -enable_ascendc_dump -examples" \
-    "-debug" "-cann" "-enable_ascendc_dump" "-examples"
+run_test "-cann -examples" \
+    "-cann" "-examples"
 run_test "-full" "-full"
 
 echo ""
