@@ -20,7 +20,7 @@ for i in {0..7}; do hccn_tool -i $i -net_health -g; done
 注意：7需要根据实际要查看的卡数修改。
 
 可用环境命令输出如下：
-![](../../docs/images/rdma_env.png)
+![rdma_env](../../docs/images/rdma_env.png)
 
 #### Ascend950平台
 
@@ -32,7 +32,7 @@ for i in {0..7}; do hccn_tool -i $i -net_health -g; done
 ibv_devinfo | grep xscale
 ```
 
-![](../../docs/images/nda_check.png)
+![nda_check](../../docs/images/nda_check.png)
 
 1825网卡：
 
@@ -40,7 +40,7 @@ ibv_devinfo | grep xscale
 ibv_devinfo | grep hrn
 ```
 
-![](../../docs/images/hns1825_check.png)
+![hns1825_check](../../docs/images/hns1825_check.png)
 
 > 注：1825 网卡同端口通信时，若未开启交换机端口桥，RDMA 可能无法正常收发数据。端口桥配置详见[常见问题 - 端口桥配置](../../docs/debug/Troubleshooting_FAQs.md#同端口通信需开启端口桥)。
 

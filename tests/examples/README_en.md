@@ -73,7 +73,7 @@ The execution process of the test script (`test_<kernel_name>.py`) is as follows
     *Replace `<path_to_...>` with the actual library path.*
 
 4. **Output example**<br>
-![](./assets/test_mm_ar_output_example.png)
+![test_mm_ar_output_example](./assets/test_mm_ar_output_example.png)
 <br>Note: Cases with `correctness` are correctness test cases, and cases with `stability` are numerical stability test cases.
 
 

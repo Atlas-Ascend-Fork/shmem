@@ -20,7 +20,7 @@ for i in {0..7}; do hccn_tool -i $i -net_health -g; done
 Note: Change 7 based on the actual number of devices to be checked.
 
 If the following command output is displayed, the environment is available:
-![](../../docs/images/rdma_env.png)
+![rdma_env](../../docs/images/rdma_env.png)
 
 #### Ascend950 Platform
 
@@ -32,7 +32,7 @@ XSCALE NIC:
 ibv_devinfo | grep xscale
 ```
 
-![](../../docs/images/nda_check.png)
+![nda_check](../../docs/images/nda_check.png)
 
 HNS 1825 NIC:
 
@@ -40,7 +40,7 @@ HNS 1825 NIC:
 ibv_devinfo | grep hrn
 ```
 
-![](../../docs/images/hns1825_check.png)
+![hns1825_check](../../docs/images/hns1825_check.png)
 
 > Note: When the HNS 1825 NIC communicates over the same port, if port bridge is not enabled on the switch, RDMA may fail to send and receive data. For the port bridge configuration, see [FAQs - Port Bridge Configuration](../../docs/debug/Troubleshooting_FAQs.md#同端口通信需开启端口桥).
 
