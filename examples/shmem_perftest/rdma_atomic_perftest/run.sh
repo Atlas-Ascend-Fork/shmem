@@ -30,29 +30,43 @@ for arg in "$@"; do
 done
 if ${help}; then
     echo "run.sh [--all] [binary options]: --all runs 13 batch and 52 latency configurations."
-    echo "An explicit --pe-id runs one PE for cross-node single-case launches."
+    echo "An explicit --pe-id runs one PE for single-case or --all cross-node launches."
 fi
 if [[ ! -x "${EXEC_BIN}" ]]; then
-    echo "Build with -examples -enable_rdma -soc_type Ascend950 -rdma_backend XSCALE first." >&2
+    echo "Build with -examples -enable_rdma -soc_type Ascend950 -rdma_backend XSCALE (or HNS_1825) first." >&2
     exit 1
 fi
 if ${help}; then
     exec "${EXEC_BIN}" --help
 fi
 if ${matrix}; then
-    for arg in "${args[@]}"; do
-        case "${arg}" in
-            --pe-id|--pe-id=*|--test|--test=*|--op|--op=*|--data-type|--data-type=*)
-                echo "--all selects both PEs, tests, operations and types; do not override these options." >&2
+    summary_pe=0
+    for ((i = 0; i < ${#args[@]}; i++)); do
+        case "${args[i]}" in
+            --pe-id) summary_pe="${args[i+1]:-}" ;;
+            --pe-id=*) summary_pe="${args[i]#*=}" ;;
+            --test|--test=*|--op|--op=*|--data-type|--data-type=*|--summarize-all)
+                echo "--all does not accept --test, --op, --data-type or --summarize-all." >&2
                 exit 1
                 ;;
         esac
     done
+    summarize=false
+    if [[ "${summary_pe}" =~ ^0+$ ]]; then
+        summarize=true
+        latency_csv=output/rdma_atomic_all_latency_us.csv
+        rate_csv=output/rdma_atomic_all_mops.csv
+        rm -f -- "${latency_csv}" "${rate_csv}"
+    fi
 elif ${explicit_pe}; then
     exec "${EXEC_BIN}" "${args[@]}"
 fi
 
 run_case() {
+    if ${explicit_pe}; then
+        "${EXEC_BIN}" "$@"
+        return
+    fi
     "${EXEC_BIN}" "$@" --pe-id 0 &
     local pe0_pid=$!
     "${EXEC_BIN}" "$@" --pe-id 1 &
@@ -73,6 +87,13 @@ if ${matrix}; then
             run_case "${args[@]}" --test latency --op "${op}" --data-type "${data_type}"
         done
     done
+    if ${summarize}; then
+        if ! "${EXEC_BIN}" --summarize-all; then
+            rm -f -- "${latency_csv}" "${rate_csv}"
+            exit 1
+        fi
+        echo "[INFO] Atomic summary tables: ${latency_csv}, ${rate_csv}"
+    fi
 else
     run_case "${args[@]}"
 fi

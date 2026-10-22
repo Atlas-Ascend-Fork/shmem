@@ -68,10 +68,7 @@
             AscendC::SetAtomicNone();                                                                                 \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                           \
             /* ROCE path - supports Ascend_950 only */                                                                \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                           \
-                ACLSHMEM_DEBUG_FUNC(                                                                                  \
-                    aclshmemi_kernel_abort, "HNS1825 does not support high-level atomic_add on the ROCE path.\n");    \
-            } else if constexpr (std::is_same_v<TYPE, float>) {                                                       \
+            if constexpr (std::is_same_v<TYPE, float>) {                                                              \
                 ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "ROCE does not support float for atomic_add\n");          \
             } else {                                                                                                  \
                 aclshmemx_roce_atomic_add(dst, value, pe);                                                            \
@@ -98,12 +95,7 @@
             aclshmemx_mte_atomic_add(dst, value, pe);                                                                \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                          \
             /* ROCE path - supports Ascend_950 only */                                                               \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                          \
-                ACLSHMEM_DEBUG_FUNC(                                                                                 \
-                    aclshmemi_kernel_abort, "HNS1825 does not support high-level atomic_add on the ROCE path.\n");   \
-            } else {                                                                                                 \
-                aclshmemx_roce_atomic_add(dst, value, pe);                                                           \
-            }                                                                                                        \
+            aclshmemx_roce_atomic_add(dst, value, pe);                                                               \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                          \
             /* UDMA path - supports Ascend_950 only */                                                               \
             aclshmemx_udma_atomic_add(dst, value, pe);                                                               \
@@ -132,12 +124,7 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_ADD_EXT(ACLSHMEM_ATOMIC_ADD_EXT_TYPENAME);
             return res;                                                                                            \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                        \
             /* ROCE path - supports Ascend_950 only */                                                             \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                        \
-                ACLSHMEM_DEBUG_FUNC(                                                                               \
-                    aclshmemi_kernel_abort,                                                                        \
-                    "HNS1825 does not support high-level atomic_fetch_add on the ROCE path.\n");                   \
-                return 0;                                                                                          \
-            } else if constexpr (std::is_same_v<TYPE, float>) {                                                    \
+            if constexpr (std::is_same_v<TYPE, float>) {                                                           \
                 ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "ROCE does not support float for atomic_fetch_add\n"); \
                 return 0;                                                                                          \
             } else {                                                                                               \
@@ -160,27 +147,24 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_ADD_950(ACLSHMEM_ATOMIC_FETCH_ADD_TYPENAME);
  *        Supported types: uint32, uint64, int32, int64, float.
  *        Supported hardware platform: Ascend_950(MTE and ROCE path).
  */
-#define ACLSHMEM_ATOMIC_INC_TYPENAME(NAME, TYPE)                                                                   \
-    ACLSHMEM_DEVICE void aclshmem_##NAME##_atomic_inc(__gm__ TYPE* dst, int32_t pe)                                \
-    {                                                                                                              \
-        __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                 \
-        if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) {                                                \
-            aclshmemx_mte_atomic_inc(dst, pe);                                                                     \
-        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                        \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                        \
-                ACLSHMEM_DEBUG_FUNC(                                                                               \
-                    aclshmemi_kernel_abort, "HNS1825 does not support high-level atomic_inc on the ROCE path.\n"); \
-            } else if constexpr (std::is_same_v<TYPE, float>) {                                                    \
-                ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "ROCE does not support float for atomic_inc\n");       \
-            } else {                                                                                               \
-                aclshmemx_roce_atomic_inc(dst, pe);                                                                \
-            }                                                                                                      \
-        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                        \
-            aclshmemx_udma_atomic_inc(dst, pe);                                                                    \
-        } else {                                                                                                   \
-            ACLSHMEM_DEBUG_FUNC(                                                                                   \
-                aclshmemi_kernel_abort, "atomic_inc is only supported on MTE, ROCE and UDMA path. \n");            \
-        }                                                                                                          \
+#define ACLSHMEM_ATOMIC_INC_TYPENAME(NAME, TYPE)                                                             \
+    ACLSHMEM_DEVICE void aclshmem_##NAME##_atomic_inc(__gm__ TYPE* dst, int32_t pe)                          \
+    {                                                                                                        \
+        __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                           \
+        if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) {                                          \
+            aclshmemx_mte_atomic_inc(dst, pe);                                                               \
+        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                  \
+            if constexpr (std::is_same_v<TYPE, float>) {                                                     \
+                ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "ROCE does not support float for atomic_inc\n"); \
+            } else {                                                                                         \
+                aclshmemx_roce_atomic_inc(dst, pe);                                                          \
+            }                                                                                                \
+        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                  \
+            aclshmemx_udma_atomic_inc(dst, pe);                                                              \
+        } else {                                                                                             \
+            ACLSHMEM_DEBUG_FUNC(                                                                             \
+                aclshmemi_kernel_abort, "atomic_inc is only supported on MTE, ROCE and UDMA path. \n");      \
+        }                                                                                                    \
     }
 
 ACLSHMEM_TYPE_FUNC_ATOMIC_ADD_950(ACLSHMEM_ATOMIC_INC_TYPENAME);
@@ -200,12 +184,7 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_ADD_950(ACLSHMEM_ATOMIC_INC_TYPENAME);
             AscendC::PipeBarrier<PIPE_ALL>();                                                                      \
             return res;                                                                                            \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                        \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                        \
-                ACLSHMEM_DEBUG_FUNC(                                                                               \
-                    aclshmemi_kernel_abort,                                                                        \
-                    "HNS1825 does not support high-level atomic_fetch_inc on the ROCE path.\n");                   \
-                return 0;                                                                                          \
-            } else if constexpr (std::is_same_v<TYPE, float>) {                                                    \
+            if constexpr (std::is_same_v<TYPE, float>) {                                                           \
                 ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "ROCE does not support float for atomic_fetch_inc\n"); \
                 return 0;                                                                                          \
             } else {                                                                                               \
@@ -238,12 +217,7 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_ADD_950(ACLSHMEM_ATOMIC_FETCH_INC_TYPENAME);
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                 \
         if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                               \
             /* ROCE path - supports Ascend_950 only */                                                             \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                        \
-                ACLSHMEM_DEBUG_FUNC(                                                                               \
-                    aclshmemi_kernel_abort, "HNS1825 does not support high-level atomic_and on the ROCE path.\n"); \
-            } else {                                                                                               \
-                aclshmemx_roce_atomic_and(dest, value, pe);                                                        \
-            }                                                                                                      \
+            aclshmemx_roce_atomic_and(dest, value, pe);                                                            \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                        \
             aclshmemx_udma_atomic_and(dest, value, pe);                                                            \
         } else {                                                                                                   \
@@ -264,12 +238,7 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_LOGIC(ACLSHMEM_ATOMIC_AND_TYPENAME);
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                \
         if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                              \
             /* ROCE path - supports Ascend_950 only */                                                            \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                       \
-                ACLSHMEM_DEBUG_FUNC(                                                                              \
-                    aclshmemi_kernel_abort, "HNS1825 does not support high-level atomic_or on the ROCE path.\n"); \
-            } else {                                                                                              \
-                aclshmemx_roce_atomic_or(dest, value, pe);                                                        \
-            }                                                                                                     \
+            aclshmemx_roce_atomic_or(dest, value, pe);                                                            \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                       \
             aclshmemx_udma_atomic_or(dest, value, pe);                                                            \
         } else {                                                                                                  \
@@ -290,12 +259,7 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_LOGIC(ACLSHMEM_ATOMIC_OR_TYPENAME);
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                 \
         if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                               \
             /* ROCE path - supports Ascend_950 only */                                                             \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                        \
-                ACLSHMEM_DEBUG_FUNC(                                                                               \
-                    aclshmemi_kernel_abort, "HNS1825 does not support high-level atomic_xor on the ROCE path.\n"); \
-            } else {                                                                                               \
-                aclshmemx_roce_atomic_xor(dest, value, pe);                                                        \
-            }                                                                                                      \
+            aclshmemx_roce_atomic_xor(dest, value, pe);                                                            \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                        \
             aclshmemx_udma_atomic_xor(dest, value, pe);                                                            \
         } else {                                                                                                   \
@@ -316,14 +280,7 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_LOGIC(ACLSHMEM_ATOMIC_XOR_TYPENAME);
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                       \
         if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                     \
             /* ROCE path - supports Ascend_950 only */                                                   \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {              \
-                ACLSHMEM_DEBUG_FUNC(                                                                     \
-                    aclshmemi_kernel_abort,                                                              \
-                    "HNS1825 does not support high-level atomic_fetch_and on the ROCE path.\n");         \
-                return 0;                                                                                \
-            } else {                                                                                     \
-                return aclshmemx_roce_atomic_fetch_and(dest, value, pe);                                 \
-            }                                                                                            \
+            return aclshmemx_roce_atomic_fetch_and(dest, value, pe);                                     \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                              \
             return aclshmemx_udma_atomic_fetch_and(dest, value, pe);                                     \
         } else {                                                                                         \
@@ -346,14 +303,7 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_LOGIC(ACLSHMEM_ATOMIC_FETCH_AND_TYPENAME);
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                      \
         if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                    \
             /* ROCE path - supports Ascend_950 only */                                                  \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {             \
-                ACLSHMEM_DEBUG_FUNC(                                                                    \
-                    aclshmemi_kernel_abort,                                                             \
-                    "HNS1825 does not support high-level atomic_fetch_or on the ROCE path.\n");         \
-                return 0;                                                                               \
-            } else {                                                                                    \
-                return aclshmemx_roce_atomic_fetch_or(dest, value, pe);                                 \
-            }                                                                                           \
+            return aclshmemx_roce_atomic_fetch_or(dest, value, pe);                                     \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                             \
             return aclshmemx_udma_atomic_fetch_or(dest, value, pe);                                     \
         } else {                                                                                        \
@@ -376,14 +326,7 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_LOGIC(ACLSHMEM_ATOMIC_FETCH_OR_TYPENAME);
         __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                       \
         if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                     \
             /* ROCE path - supports Ascend_950 only */                                                   \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {              \
-                ACLSHMEM_DEBUG_FUNC(                                                                     \
-                    aclshmemi_kernel_abort,                                                              \
-                    "HNS1825 does not support high-level atomic_fetch_xor on the ROCE path.\n");         \
-                return 0;                                                                                \
-            } else {                                                                                     \
-                return aclshmemx_roce_atomic_fetch_xor(dest, value, pe);                                 \
-            }                                                                                            \
+            return aclshmemx_roce_atomic_fetch_xor(dest, value, pe);                                     \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                              \
             return aclshmemx_udma_atomic_fetch_xor(dest, value, pe);                                     \
         } else {                                                                                         \
@@ -400,37 +343,31 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_LOGIC(ACLSHMEM_ATOMIC_FETCH_XOR_TYPENAME);
  *        Supported types: uint32, uint64, int32, int64, float.
  *        Supported hardware platform: Ascend_950(MTE and ROCE path).
  */
-#define ACLSHMEM_ATOMIC_FETCH_TYPENAME(NAME, TYPE)                                                                   \
-    ACLSHMEM_DEVICE TYPE aclshmem_##NAME##_atomic_fetch(__gm__ const TYPE* source, int32_t pe)                       \
-    {                                                                                                                \
-        __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                   \
-        if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) {                                                  \
-            /* MTE path - supports Ascend_950 only */                                                                \
-            TYPE res = aclshmemx_mte_atomic_fetch(const_cast<__gm__ TYPE*>(source), pe);                             \
-            AscendC::PipeBarrier<PIPE_ALL>();                                                                        \
-            return res;                                                                                              \
-        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                          \
-            /* ROCE path - supports Ascend_950 only */                                                               \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                          \
-                ACLSHMEM_DEBUG_FUNC(                                                                                 \
-                    aclshmemi_kernel_abort, "HNS1825 does not support high-level atomic_fetch on the ROCE path.\n"); \
-                return 0;                                                                                            \
-            } else {                                                                                                 \
-                return aclshmemx_roce_atomic_fetch(const_cast<__gm__ TYPE*>(source), pe);                            \
-            }                                                                                                        \
-        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                          \
-            /* UDMA path - supports Ascend_950 only */                                                               \
-            if constexpr (std::is_same_v<TYPE, float>) {                                                             \
-                ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "UDMA does not support float for atomic_fetch. \n");     \
-                return 0;                                                                                            \
-            } else {                                                                                                 \
-                return aclshmemx_udma_atomic_fetch(const_cast<__gm__ TYPE*>(source), pe);                            \
-            }                                                                                                        \
-        } else {                                                                                                     \
-            ACLSHMEM_DEBUG_FUNC(                                                                                     \
-                aclshmemi_kernel_abort, "atomic_fetch is only supported on MTE, ROCE and UDMA path. \n");            \
-            return 0;                                                                                                \
-        }                                                                                                            \
+#define ACLSHMEM_ATOMIC_FETCH_TYPENAME(NAME, TYPE)                                                               \
+    ACLSHMEM_DEVICE TYPE aclshmem_##NAME##_atomic_fetch(__gm__ const TYPE* source, int32_t pe)                   \
+    {                                                                                                            \
+        __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                               \
+        if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) {                                              \
+            /* MTE path - supports Ascend_950 only */                                                            \
+            TYPE res = aclshmemx_mte_atomic_fetch(const_cast<__gm__ TYPE*>(source), pe);                         \
+            AscendC::PipeBarrier<PIPE_ALL>();                                                                    \
+            return res;                                                                                          \
+        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                      \
+            /* ROCE path - supports Ascend_950 only */                                                           \
+            return aclshmemx_roce_atomic_fetch(const_cast<__gm__ TYPE*>(source), pe);                            \
+        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                      \
+            /* UDMA path - supports Ascend_950 only */                                                           \
+            if constexpr (std::is_same_v<TYPE, float>) {                                                         \
+                ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "UDMA does not support float for atomic_fetch. \n"); \
+                return 0;                                                                                        \
+            } else {                                                                                             \
+                return aclshmemx_udma_atomic_fetch(const_cast<__gm__ TYPE*>(source), pe);                        \
+            }                                                                                                    \
+        } else {                                                                                                 \
+            ACLSHMEM_DEBUG_FUNC(                                                                                 \
+                aclshmemi_kernel_abort, "atomic_fetch is only supported on MTE, ROCE and UDMA path. \n");        \
+            return 0;                                                                                            \
+        }                                                                                                        \
     }
 
 ACLSHMEM_TYPE_FUNC_ATOMIC_ADD_950(ACLSHMEM_ATOMIC_FETCH_TYPENAME);
@@ -440,28 +377,23 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_ADD_950(ACLSHMEM_ATOMIC_FETCH_TYPENAME);
  *        Supported types: uint32, uint64.
  *        Supported hardware platform: Ascend_950(MTE and ROCE path).
  */
-#define ACLSHMEM_ATOMIC_SET_TYPENAME(NAME, TYPE)                                                                   \
-    ACLSHMEM_DEVICE void aclshmem_##NAME##_atomic_set(__gm__ TYPE* dest, TYPE value, int32_t pe)                   \
-    {                                                                                                              \
-        __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                 \
-        if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) {                                                \
-            /* MTE path - supports Ascend_950 only */                                                              \
-            aclshmemx_mte_atomic_set(dest, value, pe);                                                             \
-        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                        \
-            /* ROCE path - supports Ascend_950 only */                                                             \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                        \
-                ACLSHMEM_DEBUG_FUNC(                                                                               \
-                    aclshmemi_kernel_abort, "HNS1825 does not support high-level atomic_set on the ROCE path.\n"); \
-            } else {                                                                                               \
-                aclshmemx_roce_atomic_set(dest, value, pe);                                                        \
-            }                                                                                                      \
-        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                        \
-            /* UDMA path - supports Ascend_950 only */                                                             \
-            aclshmemx_udma_atomic_set(dest, value, pe);                                                            \
-        } else {                                                                                                   \
-            ACLSHMEM_DEBUG_FUNC(                                                                                   \
-                aclshmemi_kernel_abort, "atomic_set is only supported on MTE, ROCE and UDMA path. \n");            \
-        }                                                                                                          \
+#define ACLSHMEM_ATOMIC_SET_TYPENAME(NAME, TYPE)                                                        \
+    ACLSHMEM_DEVICE void aclshmem_##NAME##_atomic_set(__gm__ TYPE* dest, TYPE value, int32_t pe)        \
+    {                                                                                                   \
+        __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                      \
+        if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) {                                     \
+            /* MTE path - supports Ascend_950 only */                                                   \
+            aclshmemx_mte_atomic_set(dest, value, pe);                                                  \
+        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                             \
+            /* ROCE path - supports Ascend_950 only */                                                  \
+            aclshmemx_roce_atomic_set(dest, value, pe);                                                 \
+        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                             \
+            /* UDMA path - supports Ascend_950 only */                                                  \
+            aclshmemx_udma_atomic_set(dest, value, pe);                                                 \
+        } else {                                                                                        \
+            ACLSHMEM_DEBUG_FUNC(                                                                        \
+                aclshmemi_kernel_abort, "atomic_set is only supported on MTE, ROCE and UDMA path. \n"); \
+        }                                                                                               \
     }
 
 /**
@@ -470,32 +402,27 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_ADD_950(ACLSHMEM_ATOMIC_FETCH_TYPENAME);
  *        Converts dst, value to underlying unsigned type.
  *        Supported hardware platform: Ascend_950(MTE and ROCE path).
  */
-#define ACLSHMEM_ATOMIC_SET_TYPENAME_CAST(NAME, TYPE, SUBTYPE)                                                     \
-    ACLSHMEM_DEVICE void aclshmem_##NAME##_atomic_set(__gm__ TYPE* dest, TYPE value, int32_t pe)                   \
-    {                                                                                                              \
-        __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                 \
-        if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) {                                                \
-            /* MTE path - supports Ascend_950 only */                                                              \
-            aclshmemx_mte_atomic_set(reinterpret_cast<__gm__ SUBTYPE*>(dest), *((SUBTYPE*)&value), pe);            \
-        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                        \
-            /* ROCE path - supports Ascend_950 only */                                                             \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                        \
-                ACLSHMEM_DEBUG_FUNC(                                                                               \
-                    aclshmemi_kernel_abort, "HNS1825 does not support high-level atomic_set on the ROCE path.\n"); \
-            } else {                                                                                               \
-                aclshmemx_roce_atomic_set(reinterpret_cast<__gm__ SUBTYPE*>(dest), *((SUBTYPE*)&value), pe);       \
-            }                                                                                                      \
-        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                        \
-            /* UDMA path - supports Ascend_950 only */                                                             \
-            if constexpr (std::is_same_v<TYPE, float>) {                                                           \
-                ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "UDMA does not support float for atomic_set. \n");     \
-            } else {                                                                                               \
-                aclshmemx_udma_atomic_set(dest, value, pe);                                                        \
-            }                                                                                                      \
-        } else {                                                                                                   \
-            ACLSHMEM_DEBUG_FUNC(                                                                                   \
-                aclshmemi_kernel_abort, "atomic_set is only supported on MTE, ROCE and UDMA path. \n");            \
-        }                                                                                                          \
+#define ACLSHMEM_ATOMIC_SET_TYPENAME_CAST(NAME, TYPE, SUBTYPE)                                                 \
+    ACLSHMEM_DEVICE void aclshmem_##NAME##_atomic_set(__gm__ TYPE* dest, TYPE value, int32_t pe)               \
+    {                                                                                                          \
+        __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                             \
+        if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) {                                            \
+            /* MTE path - supports Ascend_950 only */                                                          \
+            aclshmemx_mte_atomic_set(reinterpret_cast<__gm__ SUBTYPE*>(dest), *((SUBTYPE*)&value), pe);        \
+        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                    \
+            /* ROCE path - supports Ascend_950 only */                                                         \
+            aclshmemx_roce_atomic_set(reinterpret_cast<__gm__ SUBTYPE*>(dest), *((SUBTYPE*)&value), pe);       \
+        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                    \
+            /* UDMA path - supports Ascend_950 only */                                                         \
+            if constexpr (std::is_same_v<TYPE, float>) {                                                       \
+                ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "UDMA does not support float for atomic_set. \n"); \
+            } else {                                                                                           \
+                aclshmemx_udma_atomic_set(dest, value, pe);                                                    \
+            }                                                                                                  \
+        } else {                                                                                               \
+            ACLSHMEM_DEBUG_FUNC(                                                                               \
+                aclshmemi_kernel_abort, "atomic_set is only supported on MTE, ROCE and UDMA path. \n");        \
+        }                                                                                                      \
     }
 
 ACLSHMEM_TYPE_FUNC_ATOMIC_SWAP(ACLSHMEM_ATOMIC_SET_TYPENAME);
@@ -506,32 +433,26 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_SWAP_CAST(ACLSHMEM_ATOMIC_SET_TYPENAME_CAST);
  *        Supported types: uint32, uint64.
  *        Supported hardware platform: Ascend_950(MTE and ROCE path).
  */
-#define ACLSHMEM_ATOMIC_SWAP_TYPENAME(NAME, TYPE)                                                                   \
-    ACLSHMEM_DEVICE TYPE aclshmem_##NAME##_atomic_swap(__gm__ TYPE* dest, TYPE value, int32_t pe)                   \
-    {                                                                                                               \
-        __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                  \
-        if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) {                                                 \
-            /* MTE path - supports Ascend_950 only */                                                               \
-            TYPE res = aclshmemx_mte_atomic_swap(dest, value, pe);                                                  \
-            AscendC::PipeBarrier<PIPE_ALL>();                                                                       \
-            return res;                                                                                             \
-        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                         \
-            /* ROCE path - supports Ascend_950 only */                                                              \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                         \
-                ACLSHMEM_DEBUG_FUNC(                                                                                \
-                    aclshmemi_kernel_abort, "HNS1825 does not support high-level atomic_swap on the ROCE path.\n"); \
-                return 0;                                                                                           \
-            } else {                                                                                                \
-                return aclshmemx_roce_atomic_swap(dest, value, pe);                                                 \
-            }                                                                                                       \
-        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                         \
-            /* UDMA path - supports Ascend_950 only */                                                              \
-            return aclshmemx_udma_atomic_swap(dest, value, pe);                                                     \
-        } else {                                                                                                    \
-            ACLSHMEM_DEBUG_FUNC(                                                                                    \
-                aclshmemi_kernel_abort, "atomic_swap is only supported on MTE, ROCE and UDMA path. \n");            \
-            return 0;                                                                                               \
-        }                                                                                                           \
+#define ACLSHMEM_ATOMIC_SWAP_TYPENAME(NAME, TYPE)                                                        \
+    ACLSHMEM_DEVICE TYPE aclshmem_##NAME##_atomic_swap(__gm__ TYPE* dest, TYPE value, int32_t pe)        \
+    {                                                                                                    \
+        __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                       \
+        if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) {                                      \
+            /* MTE path - supports Ascend_950 only */                                                    \
+            TYPE res = aclshmemx_mte_atomic_swap(dest, value, pe);                                       \
+            AscendC::PipeBarrier<PIPE_ALL>();                                                            \
+            return res;                                                                                  \
+        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                              \
+            /* ROCE path - supports Ascend_950 only */                                                   \
+            return aclshmemx_roce_atomic_swap(dest, value, pe);                                          \
+        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                              \
+            /* UDMA path - supports Ascend_950 only */                                                   \
+            return aclshmemx_udma_atomic_swap(dest, value, pe);                                          \
+        } else {                                                                                         \
+            ACLSHMEM_DEBUG_FUNC(                                                                         \
+                aclshmemi_kernel_abort, "atomic_swap is only supported on MTE, ROCE and UDMA path. \n"); \
+            return 0;                                                                                    \
+        }                                                                                                \
     }
 
 /**
@@ -540,40 +461,34 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_SWAP_CAST(ACLSHMEM_ATOMIC_SET_TYPENAME_CAST);
  *        Converts dest, value to underlying unsigned type.
  *        Supported hardware platform: Ascend_950(MTE and ROCE path).
  */
-#define ACLSHMEM_ATOMIC_SWAP_TYPENAME_CAST(NAME, TYPE, SUBTYPE)                                                     \
-    ACLSHMEM_DEVICE TYPE aclshmem_##NAME##_atomic_swap(__gm__ TYPE* dest, TYPE value, int32_t pe)                   \
-    {                                                                                                               \
-        __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                                  \
-        if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) {                                                 \
-            /* MTE path - supports Ascend_950 only */                                                               \
-            SUBTYPE temp =                                                                                          \
-                aclshmemx_mte_atomic_swap(reinterpret_cast<__gm__ SUBTYPE*>(dest), *((SUBTYPE*)&value), pe);        \
-            AscendC::PipeBarrier<PIPE_ALL>();                                                                       \
-            return *((TYPE*)&temp);                                                                                 \
-        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                         \
-            /* ROCE path - supports Ascend_950 only */                                                              \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                         \
-                ACLSHMEM_DEBUG_FUNC(                                                                                \
-                    aclshmemi_kernel_abort, "HNS1825 does not support high-level atomic_swap on the ROCE path.\n"); \
-                return 0;                                                                                           \
-            } else {                                                                                                \
-                SUBTYPE temp =                                                                                      \
-                    aclshmemx_roce_atomic_swap(reinterpret_cast<__gm__ SUBTYPE*>(dest), *((SUBTYPE*)&value), pe);   \
-                return *((TYPE*)&temp);                                                                             \
-            }                                                                                                       \
-        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                         \
-            /* UDMA path - supports Ascend_950 only */                                                              \
-            if constexpr (std::is_same_v<TYPE, float>) {                                                            \
-                ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "UDMA does not support float for atomic_swap\n");       \
-                return 0;                                                                                           \
-            } else {                                                                                                \
-                return aclshmemx_udma_atomic_swap(dest, value, pe);                                                 \
-            }                                                                                                       \
-        } else {                                                                                                    \
-            ACLSHMEM_DEBUG_FUNC(                                                                                    \
-                aclshmemi_kernel_abort, "atomic_swap is only supported on MTE, ROCE and UDMA path. \n");            \
-            return 0;                                                                                               \
-        }                                                                                                           \
+#define ACLSHMEM_ATOMIC_SWAP_TYPENAME_CAST(NAME, TYPE, SUBTYPE)                                               \
+    ACLSHMEM_DEVICE TYPE aclshmem_##NAME##_atomic_swap(__gm__ TYPE* dest, TYPE value, int32_t pe)             \
+    {                                                                                                         \
+        __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();                            \
+        if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_MTE) {                                           \
+            /* MTE path - supports Ascend_950 only */                                                         \
+            SUBTYPE temp =                                                                                    \
+                aclshmemx_mte_atomic_swap(reinterpret_cast<__gm__ SUBTYPE*>(dest), *((SUBTYPE*)&value), pe);  \
+            AscendC::PipeBarrier<PIPE_ALL>();                                                                 \
+            return *((TYPE*)&temp);                                                                           \
+        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                   \
+            /* ROCE path - supports Ascend_950 only */                                                        \
+            SUBTYPE temp =                                                                                    \
+                aclshmemx_roce_atomic_swap(reinterpret_cast<__gm__ SUBTYPE*>(dest), *((SUBTYPE*)&value), pe); \
+            return *((TYPE*)&temp);                                                                           \
+        } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                   \
+            /* UDMA path - supports Ascend_950 only */                                                        \
+            if constexpr (std::is_same_v<TYPE, float>) {                                                      \
+                ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "UDMA does not support float for atomic_swap\n"); \
+                return 0;                                                                                     \
+            } else {                                                                                          \
+                return aclshmemx_udma_atomic_swap(dest, value, pe);                                           \
+            }                                                                                                 \
+        } else {                                                                                              \
+            ACLSHMEM_DEBUG_FUNC(                                                                              \
+                aclshmemi_kernel_abort, "atomic_swap is only supported on MTE, ROCE and UDMA path. \n");      \
+            return 0;                                                                                         \
+        }                                                                                                     \
     }
 
 ACLSHMEM_TYPE_FUNC_ATOMIC_SWAP(ACLSHMEM_ATOMIC_SWAP_TYPENAME);
@@ -595,14 +510,7 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_SWAP_CAST(ACLSHMEM_ATOMIC_SWAP_TYPENAME_CAST);
             return res;                                                                                              \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                          \
             /* ROCE path - supports Ascend_950 only */                                                               \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                          \
-                ACLSHMEM_DEBUG_FUNC(                                                                                 \
-                    aclshmemi_kernel_abort,                                                                          \
-                    "HNS1825 does not support high-level atomic_compare_swap on the ROCE path.\n");                  \
-                return 0;                                                                                            \
-            } else {                                                                                                 \
-                return aclshmemx_roce_atomic_compare_swap(dest, cond, value, pe);                                    \
-            }                                                                                                        \
+            return aclshmemx_roce_atomic_compare_swap(dest, cond, value, pe);                                        \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                          \
             /* UDMA path - supports Ascend_950 only */                                                               \
             return aclshmemx_udma_atomic_compare_swap(dest, cond, value, pe);                                        \
@@ -631,14 +539,7 @@ ACLSHMEM_TYPE_FUNC_ATOMIC_SWAP_CAST(ACLSHMEM_ATOMIC_SWAP_TYPENAME_CAST);
             return *((TYPE*)&temp);                                                                                  \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) {                                          \
             /* ROCE path - supports Ascend_950 only */                                                               \
-            if constexpr (ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825) {                          \
-                ACLSHMEM_DEBUG_FUNC(                                                                                 \
-                    aclshmemi_kernel_abort,                                                                          \
-                    "HNS1825 does not support high-level atomic_compare_swap on the ROCE path.\n");                  \
-                return 0;                                                                                            \
-            } else {                                                                                                 \
-                return aclshmemx_roce_atomic_compare_swap(dest, cond, value, pe);                                    \
-            }                                                                                                        \
+            return aclshmemx_roce_atomic_compare_swap(dest, cond, value, pe);                                        \
         } else if (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_UDMA) {                                          \
             /* UDMA path - supports Ascend_950 only */                                                               \
             return aclshmemx_udma_atomic_compare_swap(dest, cond, value, pe);                                        \

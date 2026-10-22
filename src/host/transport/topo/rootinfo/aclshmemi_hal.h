@@ -16,6 +16,7 @@
 #include <string>
 #include <cstdint>
 #include <optional>
+#include <vector>
 #include "dl_dcmi_types.h"
 #include "dl_dcmi_api.h"
 
@@ -60,6 +61,8 @@ public:
 
     std::optional<uint32_t> get_mainboard_id(int phy_id);
     std::optional<uint32_t> get_user_id_from_phy_id(uint32_t phy_id);
+    // Physical IDs in Runtime user-device order; the list index is the user ID.
+    std::optional<std::vector<uint32_t>> get_visible_phy_ids();
     std::optional<int> get_npu_count();
     std::string get_server_id();
     std::string get_driver_install_path();

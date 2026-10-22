@@ -14,7 +14,7 @@
 
 using namespace perftest;
 
-#ifdef ACLSHMEMI_RDMA_K_BACKEND_XSCALE
+#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
 
 template <typename T>
 __aicore__ inline void store_atomic_result(__gm__ T* address, T value)
@@ -166,4 +166,4 @@ extern "C" void launch_rdma_atomic_perf_kernel(
     }
 }
 
-#endif // ACLSHMEMI_RDMA_K_BACKEND_XSCALE
+#endif // ACLSHMEMI_RDMA_K_BACKEND_XSCALE || ACLSHMEMI_RDMA_K_BACKEND_HNS_1825

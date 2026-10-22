@@ -33,6 +33,7 @@ struct Options {
     uint64_t min_batch = 1;
     uint64_t max_batch = 4096;
     uint64_t step_factor = 2;
+    bool summarize_all = false;
     std::string ipport = "tcp://127.0.0.1:8768";
     std::string test_name = "latency";
     std::string op_name = "inc";
@@ -63,6 +64,7 @@ static void print_help()
               << "  --gnpus <n>             Local device count (default: 2)\n"
               << "  --fnpu <id>             First local device (default: 0)\n"
               << "  --sync-id <id>          RoCE synchronization event ID (default: 0)\n"
+              << "  --summarize-all         Summarize existing --all CSV results without running tests\n"
               << "  -h, --help              Print this help\n"
               << "Device = pe-id % gnpus + fnpu. Both PEs must use matching case parameters.\n"
               << "PE0 issues to PE1 using one AIV and the default single QP (QP0).\n"
@@ -100,7 +102,8 @@ static int parse_options(int argc, char** argv, Options& opts)
         MIN_BATCH,
         MAX_BATCH,
         STEP,
-        SYNC_ID
+        SYNC_ID,
+        SUMMARY
     };
     static const option long_options[] = {
         {"pes", required_argument, nullptr, PES},
@@ -118,6 +121,7 @@ static int parse_options(int argc, char** argv, Options& opts)
         {"max-batch", required_argument, nullptr, MAX_BATCH},
         {"step-factor", required_argument, nullptr, STEP},
         {"sync-id", required_argument, nullptr, SYNC_ID},
+        {"summarize-all", no_argument, nullptr, SUMMARY},
         {"help", no_argument, nullptr, 'h'},
         {nullptr, 0, nullptr, 0}};
     int opt;
@@ -179,6 +183,9 @@ static int parse_options(int argc, char** argv, Options& opts)
                 if (!parse_number(optarg, 0, INT_MAX, opts.sync_id))
                     return -1;
                 break;
+            case SUMMARY:
+                opts.summarize_all = true;
+                break;
             case 'h':
                 print_help();
                 return 1;
@@ -223,7 +230,7 @@ static int parse_options(int argc, char** argv, Options& opts)
     return 0;
 }
 
-#ifdef ACLSHMEMI_RDMA_K_BACKEND_XSCALE
+#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
 static double get_cycles_per_us()
 {
     const char* soc = aclrtGetSocName();
@@ -254,6 +261,80 @@ static bool save_csv(const std::string& path, const CsvDataTable& rows)
     if (!out)
         std::cerr << "Failed to write CSV: " << path << std::endl;
     return static_cast<bool>(out);
+}
+
+static bool read_summary(
+    const std::string& test, const std::string& op, const std::string& type, const std::string& metric,
+    std::vector<std::string>& batches, std::vector<std::string>& medians)
+{
+    const std::string path = "output/rdma_atomic_" + test + "_" + op + "_" + type + "_summary.csv";
+    auto fail = [&path]() {
+        std::cerr << "Missing or invalid atomic summary: " << path << std::endl;
+        return false;
+    };
+    std::ifstream input(path);
+    std::string line;
+    if (!std::getline(input, line))
+        return fail();
+    uint64_t previous_batch = 0;
+    // The per-configuration writer emits fixed, unquoted CSV fields.
+    while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        std::istringstream fields(line);
+        std::vector<std::string> row;
+        for (std::string field; std::getline(fields, field, ',');)
+            row.push_back(field);
+        if (row.size() != 15)
+            return fail();
+        if (row[9] != metric)
+            continue;
+        uint64_t batch = 0, samples = 0;
+        double median = 0;
+        std::istringstream value(row[12]);
+        if (row[5] != test || row[6] != op || row[7] != type ||
+            !parse_number(row[8].c_str(), 1, SIZE_MAX / sizeof(uint64_t), batch) || batch <= previous_batch ||
+            (test == "latency" && batch != 1) || !parse_number(row[10].c_str(), 1, INT_MAX, samples) ||
+            !(value >> median) || !value.eof() || !std::isfinite(median) || median < 0)
+            return fail();
+        previous_batch = batch;
+        batches.push_back(row[8]);
+        std::ostringstream formatted;
+        formatted << std::fixed << std::setprecision(3) << median;
+        medians.push_back(formatted.str());
+    }
+    return input.eof() && !medians.empty() ? true : fail();
+}
+
+static bool summarize_all()
+{
+    CsvDataTable latency{{"Operation", "int32", "uint32", "int64", "uint64"}};
+    CsvDataTable rates{{"Operation / BatchSize"}};
+    for (const char* op : OP_NAMES) {
+        std::vector<std::string> row{op};
+        for (size_t type = 1; type < latency.front().size(); ++type) {
+            std::vector<std::string> batches, medians;
+            if (!read_summary("latency", op, latency.front()[type], "LatencyUs", batches, medians))
+                return false;
+            row.push_back(medians.front());
+        }
+        latency.push_back(row);
+        std::vector<std::string> batches, medians;
+        if (!read_summary("batch", op, "uint64", "AtomicRateMops", batches, medians))
+            return false;
+        if (rates.size() == 1) {
+            rates.front().insert(rates.front().end(), batches.begin(), batches.end());
+        } else if (
+            rates.front().size() != batches.size() + 1 ||
+            !std::equal(batches.begin(), batches.end(), rates.front().begin() + 1)) {
+            std::cerr << "Atomic summary batch sizes differ for " << op << std::endl;
+            return false;
+        }
+        rates.push_back({op});
+        rates.back().insert(rates.back().end(), medians.begin(), medians.end());
+    }
+    return save_csv("output/rdma_atomic_all_latency_us.csv", latency) &&
+           save_csv("output/rdma_atomic_all_mops.csv", rates);
 }
 
 static void append_summary(
@@ -545,7 +626,7 @@ cleanup:
     return ret;
 }
 
-#endif // ACLSHMEMI_RDMA_K_BACKEND_XSCALE
+#endif // ACLSHMEMI_RDMA_K_BACKEND_XSCALE || ACLSHMEMI_RDMA_K_BACKEND_HNS_1825
 
 int main(int argc, char** argv)
 {
@@ -553,11 +634,13 @@ int main(int argc, char** argv)
     const int status = parse_options(argc, argv, opts);
     if (status != 0)
         return status > 0 ? 0 : 1;
-#ifdef ACLSHMEMI_RDMA_K_BACKEND_XSCALE
+#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
+    if (opts.summarize_all)
+        return opts.pe == 0 && !summarize_all() ? 1 : 0;
     return run_perftest(opts);
 #else
     std::cerr << "Atomic perftest is not enabled for this RDMA backend; currently enable it with "
-                 "-rdma_backend XSCALE"
+                 "-rdma_backend XSCALE or HNS_1825"
               << std::endl;
     return 1;
 #endif

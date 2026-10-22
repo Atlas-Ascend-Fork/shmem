@@ -13,6 +13,7 @@
 #include <gmock/gmock.h>
 #include <optional>
 #include <string>
+#include <vector>
 #include "dl_dcmi_types.h"
 
 namespace shm {
@@ -50,6 +51,7 @@ public:
 
     MOCK_METHOD(std::optional<uint32_t>, get_mainboard_id, (int phy_id));
     MOCK_METHOD(std::optional<uint32_t>, get_user_id_from_phy_id, (uint32_t phy_id));
+    MOCK_METHOD(std::optional<std::vector<uint32_t>>, get_visible_phy_ids, ());
     MOCK_METHOD(std::optional<int>, get_npu_count, ());
     MOCK_METHOD(std::string, get_server_id, ());
     MOCK_METHOD(std::string, get_driver_install_path, ());

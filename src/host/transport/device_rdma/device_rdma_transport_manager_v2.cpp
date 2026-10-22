@@ -932,7 +932,7 @@ Result RdmaTransportManagerV2::GetRdmaInfoFromChannelEntity(
             if (aclRet != 0) {
                 SHM_LOG_ERROR("rank[" << rankId_ << "] pre-read atomic local buffer failed: " << aclRet);
 #if defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
-                // Software atomics require this lkey for RDMA access to the local AtomicBuffer.
+                // Atomics return the old value to the registered AtomicBuffer.
                 return ACLSHMEM_INNER_ERROR;
 #endif
             } else {
@@ -1014,33 +1014,6 @@ Result RdmaTransportManagerV2::GetRdmaInfoFromChannelEntity(
                 copyInfo->mr[remoteRank].lkey = remoteBuffer.bufferInfo.rma.protectionInfo.memInfo.roce.lkey;
                 copyInfo->mr[remoteRank].rkey = remoteBuffer.bufferInfo.rma.protectionInfo.memInfo.roce.rkey;
                 remoteInfoRead = true;
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
-                // Software atomics on QP0 need the peer's AtomicBuffer lock address and rkey.
-                if (qpIdx == 0) {
-                    RegedBufferEntity atomicRemoteBuffer{};
-                    aclRet = DlAclApi::AclrtMemcpy(
-                        &atomicRemoteBuffer, sizeof(atomicRemoteBuffer), hostEntity.remoteBufferAddr + 1,
-                        sizeof(atomicRemoteBuffer), ACL_MEMCPY_DEVICE_TO_HOST);
-                    if (aclRet != 0) {
-                        SHM_LOG_ERROR(
-                            "rank[" << rankId_ << "] read atomic MR for peer " << remoteRank << " failed: " << aclRet);
-                        return ACLSHMEM_INNER_ERROR;
-                    }
-                    const uint64_t lockOffset = static_cast<uint64_t>(remoteRank) * ATOMIC_MAX_NUM * sizeof(uint64_t);
-                    const auto& remoteAtomic = atomicRemoteBuffer.bufferInfo.rma;
-                    // The peer block stores {remote self-lock address, atomic rkey} at byte offset 256.
-                    constexpr uint32_t ATOMIC_PEER_INFO_OFFSET = 256;
-                    const uint64_t peerInfo[] = {
-                        remoteAtomic.addr + lockOffset, remoteAtomic.protectionInfo.memInfo.roce.rkey};
-                    auto peerAddr = static_cast<char*>(atomicSharedMemory_) + lockOffset + ATOMIC_PEER_INFO_OFFSET;
-                    aclRet = DlAclApi::AclrtMemcpy(
-                        peerAddr, sizeof(peerInfo), peerInfo, sizeof(peerInfo), ACL_MEMCPY_HOST_TO_DEVICE);
-                    if (aclRet != 0) {
-                        SHM_LOG_ERROR("rank[" << rankId_ << "] copy atomic peer info failed: " << aclRet);
-                        return ACLSHMEM_INNER_ERROR;
-                    }
-                }
-#endif
             } else {
                 SHM_LOG_ERROR(
                     "rank[" << rankId_ << "] remoteBufferNum = 0 || remoteBufferAddr is null, rank=" << remoteRank
@@ -1152,14 +1125,6 @@ bool RdmaTransportManagerV2::ReserveRdmaInfoSpace() noexcept
         return false;
     }
     atomicLkey_ = 0;
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
-    // Initialize the lock before publishing the AtomicBuffer MR.
-    ret = DlAclApi::AclrtMemset(atomicSharedMemory_, atomicSize, 0, atomicSize);
-    if (ret != 0) {
-        SHM_LOG_ERROR("rank[" << rankId_ << "] initialize atomic memory failed: " << ret);
-        return false;
-    }
-#endif
     return true;
 }
 

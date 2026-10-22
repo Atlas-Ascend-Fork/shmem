@@ -239,44 +239,22 @@ bool add_unique_nic(affinity_info_t& info, affinity_group_t& group, const std::s
     return true;
 }
 
-std::optional<int> get_validated_npu_count()
+bool build_bdf_table(const std::vector<uint32_t>& visible_phy_ids, std::unordered_map<std::string, int>& bdf_to_npu)
 {
-    const auto npu_count = aclshmemi_hal_t::instance().get_npu_count();
-    if (!npu_count) {
-        SHM_LOG_ERROR("Get system NPU count failed");
-        return std::nullopt;
-    }
-    if (*npu_count <= 0 || *npu_count > ACLSHMEMI_MAX_NPU_COUNT) {
-        SHM_LOG_ERROR(
-            "Invalid system NPU count, npu_count=" << *npu_count << ", expected range=[1, " << ACLSHMEMI_MAX_NPU_COUNT
-                                                   << "]");
-        return std::nullopt;
-    }
-    return npu_count;
-}
-
-bool build_bdf_table(std::unordered_map<std::string, int>& bdf_to_npu)
-{
-    const auto npu_count = get_validated_npu_count();
-    if (!npu_count) {
-        return false;
-    }
-    auto& hal = aclshmemi_hal_t::instance();
-    for (int phy_id = 0; phy_id < *npu_count; ++phy_id) {
-        if (!hal.get_user_id_from_phy_id(static_cast<uint32_t>(phy_id))) {
-            continue;
-        }
-        auto bdf = format_npu_bdf(phy_id);
+    for (uint32_t phy_id : visible_phy_ids) {
+        auto bdf = format_npu_bdf(static_cast<int>(phy_id));
         if (!bdf) {
             continue;
         }
-        bdf_to_npu.emplace(*bdf, phy_id);
+        bdf_to_npu.emplace(*bdf, static_cast<int>(phy_id));
+        SHM_LOG_INFO("Visible NPU PCI BDF, phy_id=" << phy_id << ", bdf=" << *bdf);
     }
     return !bdf_to_npu.empty();
 }
 
 bool build_affinity_info(
-    const std::vector<aclshmemi_xml_tag_t>& tags, affinity_info_t& info, std::string& error_message)
+    const std::vector<aclshmemi_xml_tag_t>& tags, const std::vector<uint32_t>& visible_phy_ids, affinity_info_t& info,
+    std::string& error_message)
 {
     if (tags.empty() || tags.front().name != "system") {
         error_message = "virtual topology root element must be <system>";
@@ -302,7 +280,7 @@ bool build_affinity_info(
     }
 
     std::unordered_map<std::string, int> bdf_to_npu;
-    if (has_pcie_group && !build_bdf_table(bdf_to_npu)) {
+    if (has_pcie_group && !build_bdf_table(visible_phy_ids, bdf_to_npu)) {
         error_message = "failed to obtain PCI BDF information for visible NPUs";
         return false;
     }
@@ -345,7 +323,7 @@ bool build_affinity_info(
                     return false;
                 }
                 has_npu_descriptor = true;
-                if (aclshmemi_hal_t::instance().get_user_id_from_phy_id(static_cast<uint32_t>(npu_id))) {
+                if (std::binary_search(visible_phy_ids.begin(), visible_phy_ids.end(), static_cast<uint32_t>(npu_id))) {
                     add_unique_npu(group, npu_id);
                 }
             }
@@ -390,13 +368,9 @@ bool build_affinity_info(
 }
 
 std::optional<std::string> select_ip_round_robin(
-    int phy_id, const affinity_info_t& info, const aclshmemi_nic_ip_resolver_t& resolver)
+    int phy_id, const std::vector<uint32_t>& visible_phy_ids, const affinity_info_t& info,
+    const aclshmemi_nic_ip_resolver_t& resolver)
 {
-    const auto npu_count = get_validated_npu_count();
-    if (!npu_count) {
-        return std::nullopt;
-    }
-
     std::vector<std::optional<std::string>> nic_ips;
     nic_ips.reserve(info.nic_names.size());
     for (const auto& name : info.nic_names) {
@@ -410,7 +384,7 @@ std::optional<std::string> select_ip_round_robin(
     std::vector<std::optional<std::string>> assignment(static_cast<size_t>(ACLSHMEMI_MAX_NPU_COUNT));
     std::vector<std::optional<size_t>> assignment_nic_index(static_cast<size_t>(ACLSHMEMI_MAX_NPU_COUNT));
     size_t current = 0;
-    for (int npu_id = 0; npu_id < *npu_count; ++npu_id) {
+    for (uint32_t npu_id : visible_phy_ids) {
         for (size_t offset = 0; offset < info.nic_names.size(); ++offset) {
             const size_t nic_index = (current + offset) % info.nic_names.size();
             if (!nic_ips[nic_index] || !info.affined[static_cast<size_t>(npu_id)][nic_index]) {
@@ -461,7 +435,15 @@ std::optional<std::string> aclshmemi_get_roce_ip_from_xml(
         SHM_LOG_ERROR("Invalid physical NPU id for virtual topology, phy_id=" << phy_id);
         return std::nullopt;
     }
-    if (!aclshmemi_hal_t::instance().get_user_id_from_phy_id(static_cast<uint32_t>(phy_id))) {
+    auto visible_phy_ids = aclshmemi_hal_t::instance().get_visible_phy_ids();
+    if (!visible_phy_ids || visible_phy_ids->empty()) {
+        SHM_LOG_ERROR("Get visible physical NPU IDs failed");
+        return std::nullopt;
+    }
+    // Device count is not a physical-ID bound. Sort a copy to preserve physical-order
+    // round robin without changing the HAL's user-to-physical mapping.
+    std::sort(visible_phy_ids->begin(), visible_phy_ids->end());
+    if (!std::binary_search(visible_phy_ids->begin(), visible_phy_ids->end(), static_cast<uint32_t>(phy_id))) {
         SHM_LOG_ERROR("Physical NPU id is not visible to the current process, phy_id=" << phy_id);
         return std::nullopt;
     }
@@ -474,12 +456,12 @@ std::optional<std::string> aclshmemi_get_roce_ip_from_xml(
     }
 
     affinity_info_t info;
-    if (!build_affinity_info(tags, info, error_message)) {
+    if (!build_affinity_info(tags, *visible_phy_ids, info, error_message)) {
         SHM_LOG_ERROR("Build NPU-NIC affinity from virtual topology failed: " << error_message);
         return std::nullopt;
     }
 
-    auto ip = select_ip_round_robin(phy_id, info, resolver);
+    auto ip = select_ip_round_robin(phy_id, *visible_phy_ids, info, resolver);
     if (!ip) {
         SHM_LOG_ERROR("No usable affined RoCE IPv4 address for phy_id=" << phy_id);
     }

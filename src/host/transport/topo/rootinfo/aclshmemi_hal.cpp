@@ -316,6 +316,19 @@ aclshmemi_hal_t& aclshmemi_hal_t::instance()
 std::optional<uint32_t> aclshmemi_hal_t::get_mainboard_id(int phy_id) { return dcmi_.get_mainboard_id(phy_id); }
 std::optional<uint32_t> aclshmemi_hal_t::get_user_id_from_phy_id(uint32_t phy_id)
 {
+    const auto visible_phy_ids = get_visible_phy_ids();
+    if (!visible_phy_ids) {
+        return std::nullopt;
+    }
+    const auto it = std::find(visible_phy_ids->begin(), visible_phy_ids->end(), phy_id);
+    if (it == visible_phy_ids->end()) {
+        return std::nullopt;
+    }
+    return static_cast<uint32_t>(std::distance(visible_phy_ids->begin(), it));
+}
+
+std::optional<std::vector<uint32_t>> aclshmemi_hal_t::get_visible_phy_ids()
+{
     static std::mutex visible_devices_mutex;
     static std::optional<std::vector<uint32_t>> visible_phy_ids;
 
@@ -340,15 +353,12 @@ std::optional<uint32_t> aclshmemi_hal_t::get_user_id_from_phy_id(uint32_t phy_id
                 return std::nullopt;
             }
             phy_ids.push_back(static_cast<uint32_t>(visible_phy_id));
+            SHM_LOG_INFO("Visible NPU mapping, user_id=" << user_id << ", phy_id=" << visible_phy_id);
         }
         visible_phy_ids = std::move(phy_ids);
     }
 
-    const auto it = std::find(visible_phy_ids->begin(), visible_phy_ids->end(), phy_id);
-    if (it == visible_phy_ids->end()) {
-        return std::nullopt;
-    }
-    return static_cast<uint32_t>(std::distance(visible_phy_ids->begin(), it));
+    return visible_phy_ids;
 }
 std::optional<int> aclshmemi_hal_t::get_npu_count() { return dcmi_.get_npu_count(); }
 

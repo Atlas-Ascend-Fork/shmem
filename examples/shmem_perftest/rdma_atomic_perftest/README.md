@@ -43,7 +43,7 @@ FA 和 CAS 分别对应 RDMA 后端的 `OP_ATOMIC_FA`、`OP_ATOMIC_CAS` 操作�
 
 ## 环境要求
 
-本示例的原子操作测试当前在 **Ascend950 + XSCALE（云脉网卡）** 配置下启用。其他后端可以查看 `--help`，执行测试时会报告用例未启用并返回非零状态。
+本示例的原子操作测试当前在 **Ascend950 + XSCALE（云脉网卡）或 HNS_1825（1825 网卡）** 配置下启用。其他后端可以查看 `--help`，执行测试时会报告用例未启用并返回非零状态。
 
 RDMA 网络、驱动和运行环境配置参见 [rdma_demo 环境要求](../../rdma_demo/README.md)。Ascend950 平台运行前需设置 `IBV_EXTEND_DRIVERS`，指向对应网卡的插件库，详见 [环境变量说明](../../rdma_demo/README.md#ibv_extend_drivers-环境变量)。
 
@@ -53,7 +53,10 @@ RDMA 网络、驱动和运行环境配置参见 [rdma_demo 环境要求](../../r
 
 ```bash
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
+# 云脉网卡
 bash scripts/build.sh -examples -enable_rdma -soc_type Ascend950 -rdma_backend XSCALE
+# 1825 网卡
+bash scripts/build.sh -examples -enable_rdma -soc_type Ascend950 -rdma_backend HNS_1825
 ```
 
 构建生成 `build/bin/rdma_atomic_perftest`。后端在编译时通过 `-rdma_backend` 选择；更改后端配置后需要重新编译。其他构建选项参见 [编译与构建](../../../docs/compilation_build_guide.md#rdma参数使用说明)。
@@ -107,9 +110,9 @@ bash run.sh --test latency --op fetch_add --data-type uint64 --iterations 1000
 bash run.sh --all --warmup-iterations 100 --repetitions 10
 ```
 
-完整矩阵包含 13 个 batch 配置（13 个操作 × uint64）和 52 个 latency 配置（13 个操作 × 4 种类型）。每个 batch 配置由二进制程序完成大小扫描。`--all` 可附加采样和设备参数，其中 `--iterations` 只作用于 latency 配置；不能同时指定 `--test`、`--op`、`--data-type` 或 `--pe-id`。任一配置失败后停止后续配置。
+完整矩阵包含 13 个 batch 配置（13 个操作 × uint64）和 52 个 latency 配置（13 个操作 × 4 种类型）。每个 batch 配置由二进制程序完成大小扫描。`--all` 可附加采样和设备参数，其中 `--iterations` 只作用于 latency 配置；不能同时指定 `--test`、`--op` 或 `--data-type`。任一配置失败后停止后续配置。
 
-跨机运行单个配置时，在两台主机分别指定 `--pe-id 0` 和 `--pe-id 1`，使用 `--gnpus 1` 和相同的 `--ipport tcp://<PE0主机IP>:8768`。两端测试参数须一致，并分别检查进程退出状态。
+跨机运行单个配置或 `--all` 时，在两台主机分别指定 `--pe-id 0` 和 `--pe-id 1`，使用 `--gnpus 1` 和相同的 `--ipport tcp://<PE0主机IP>:8768`，通过 `--fnpu` 选择各自的本地设备。两端脚本版本与测试参数须一致，并分别检查进程退出状态；任一端失败后，另一端可能等待通信超时。
 
 ## 计时与正确性校验
 
@@ -182,6 +185,15 @@ Ascend950 的 `cycles_per_us` 为 1000，启动日志打印实际使用的换算
 | `P95` | 排序后第 `ceil(0.95 × Samples)` 项，序号从 1 开始 |
 
 仅 `Verified=true` 的样本参与汇总。无有效样本时 `Samples=0`，统计值留空。默认 10 个样本时，按上述算法 P95 等于 Max。Batch 的耗时分位数反映整批耗时的波动；latency 的分位数反映多次平均时延的波动，不能作为单次请求的尾延迟。
+
+### `--all` 总表
+
+`bash run.sh --all` 成功完成全部配置后，在 PE0 所在主机的 `output/` 目录生成两张总表。每行对应一个原子操作，按上述 13 个操作的顺序排列，数值保留三位小数。
+
+| 文件 | 列 | 数值来源 |
+| --- | --- | --- |
+| `rdma_atomic_all_latency_us.csv` | `int32`、`uint32`、`int64`、`uint64` | 各 latency 分项的 `LatencyUs` / `Median`，单位 us/op |
+| `rdma_atomic_all_mops.csv` | 本轮实际测试的 BatchSize，从小到大 | 各 batch 分项的 `AtomicRateMops` / `Median`，类型 uint64、单位 Mops/s |
 
 ## 已知约束
 

@@ -80,15 +80,9 @@ protected:
 
     void ExpectVisibleNpus(const std::vector<uint32_t>& phy_ids)
     {
-        EXPECT_CALL(MockHal::instance(), get_user_id_from_phy_id(testing::_))
+        EXPECT_CALL(MockHal::instance(), get_visible_phy_ids())
             .Times(testing::AnyNumber())
-            .WillRepeatedly(testing::Invoke([phy_ids](uint32_t phy_id) -> std::optional<uint32_t> {
-                auto it = std::find(phy_ids.begin(), phy_ids.end(), phy_id);
-                if (it == phy_ids.end()) {
-                    return std::nullopt;
-                }
-                return static_cast<uint32_t>(std::distance(phy_ids.begin(), it));
-            }));
+            .WillRepeatedly(testing::Return(phy_ids));
     }
 
     void ExpectVisibleNpus(int count)
@@ -209,14 +203,9 @@ TEST_F(NpuNicAffinityTest, SupportsNonContiguousVisiblePhyIdsInPcieGroup)
     EXPECT_EQ(*ip, "172.16.0.4");
 }
 
-TEST_F(NpuNicAffinityTest, PcieVisibilityChecksAreBoundedBySystemCount)
+TEST_F(NpuNicAffinityTest, PcieQueriesOnlyVisiblePhysicalIds)
 {
-    EXPECT_CALL(MockHal::instance(), get_user_id_from_phy_id(testing::_))
-        .Times(17)
-        .WillRepeatedly(testing::Invoke([](uint32_t phy_id) -> std::optional<uint32_t> {
-            EXPECT_LT(phy_id, 16U);
-            return phy_id == 9U ? std::optional<uint32_t>(0U) : std::nullopt;
-        }));
+    ExpectVisibleNpus(std::vector<uint32_t>{9});
     EXPECT_CALL(MockHal::instance(), get_device_pcie_info(testing::_, testing::_))
         .Times(1)
         .WillOnce(testing::Invoke([](int phy_id, struct dcmi_pcie_info_all* info) {

@@ -83,6 +83,11 @@ std::optional<uint32_t> aclshmemi_hal_t::get_user_id_from_phy_id(uint32_t phy_id
     return MockHal::instance().get_user_id_from_phy_id(phy_id);
 }
 
+std::optional<std::vector<uint32_t>> aclshmemi_hal_t::get_visible_phy_ids()
+{
+    return MockHal::instance().get_visible_phy_ids();
+}
+
 std::optional<int> aclshmemi_hal_t::get_npu_count() { return MockHal::instance().get_npu_count(); }
 
 std::string aclshmemi_hal_t::get_server_id() { return MockHal::instance().get_server_id(); }
