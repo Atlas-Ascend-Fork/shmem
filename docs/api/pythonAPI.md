@@ -598,7 +598,7 @@
 
 ## shmem._pyshmem API
 
-#### 对外接口
+### 对外接口
 
 1. **aclshmem_init** — 初始化共享内存模块。这是一个集合（collective）操作。
 

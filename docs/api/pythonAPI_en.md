@@ -594,7 +594,7 @@
     |cycles|[out]|Read-only ``64 x 1024`` two-dimensional integer list of cycles|
 
 ## shmem._pyshmem API
-#### External APIs
+### External APIs
 1. **aclshmem_init** — Initialize the shared memory module. This is a collective operation.
     ```python
     def aclshmem_init(attributes: InitAttr) -> int
