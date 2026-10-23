@@ -587,6 +587,7 @@ ACLSHMEM_DEVICE void aclshmemi_hns_1825_post_send_read_write(
         (__gm__ aclshmemi_rdma_mem_info*)(mem_info_table + sizeof(aclshmemi_rdma_mem_info) * pe);
     __gm__ aclshmemi_rdma_mem_info* local_mem_info =
         (__gm__ aclshmemi_rdma_mem_info*)(mem_info_table + sizeof(aclshmemi_rdma_mem_info) * my_pe);
+    wr.remote_addr = aclshmemi_remote_mr_addr(wr.remote_addr, aclshmemi_get_state()->heap_base, remote_mem_info->addr);
     wr.rkey = remote_mem_info->rkey;
     wr.lkey = local_mem_info->lkey;
 

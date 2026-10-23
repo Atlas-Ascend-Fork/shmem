@@ -609,10 +609,12 @@ __aicore__ inline void udma_wrap_test_run_pipe_s(
     __gm__ uint8_t* pipe_s_ring = udma_wrap_test_pipe_s_ring(workspace);
     aclshmemi_udma_params_t<uint8_t, aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_NOTIFY> pipe_s_params{
         .sig_addr = signal_addr, .signal = UDMA_WRAP_TEST_PIPE_S_SIGNAL};
+    aclshmemi_udma_addr_ctx_t addr_ctx{
+        reinterpret_cast<uint64_t>(aclshmemi_get_state()->heap_base), udma_wrap_test_remote_mem(workspace)->addr};
     udma_wrap_test_prepare_fixture(workspace, pipe_s_ring);
     aclshmemi_udma_fill_post_send_wqe<uint8_t, aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_NOTIFY>(
         udma_wrap_test_qp(workspace), udma_wrap_test_remote_mem(workspace), local_addr, local_addr,
-        shm::UDMA_SQ_BASKBLK_CNT - 1, UDMA_WRAP_TEST_WQE_SIZE, MESSAGE_SIZE, pipe_s_params);
+        shm::UDMA_SQ_BASKBLK_CNT - 1, UDMA_WRAP_TEST_WQE_SIZE, MESSAGE_SIZE, pipe_s_params, addr_ctx);
     result[static_cast<uint32_t>(UdmaWrapTestResult::PIPE_S_LAYOUT_OK)] =
         udma_wrap_test_verify_layout(pipe_s_ring, UDMA_WRAP_TEST_PIPE_S_SIGNAL, reinterpret_cast<uint64_t>(local_addr));
     result[static_cast<uint32_t>(UdmaWrapTestResult::PIPE_S_GUARD_VALUE)] =
@@ -624,10 +626,12 @@ __aicore__ inline void udma_wrap_test_run_faa(GM_ADDR workspace, __gm__ uint8_t*
     __gm__ uint8_t* pipe_s_ring = udma_wrap_test_pipe_s_ring(workspace);
     aclshmemi_udma_params_t<uint64_t, aclshmemi_udma_opcode_t::UDMA_OPCODE_FAA> faa_params{
         .value = UDMA_WRAP_TEST_FAA_VALUE};
+    aclshmemi_udma_addr_ctx_t addr_ctx{
+        reinterpret_cast<uint64_t>(aclshmemi_get_state()->heap_base), udma_wrap_test_remote_mem(workspace)->addr};
     udma_wrap_test_prepare_fixture(workspace, pipe_s_ring);
     aclshmemi_udma_fill_post_send_wqe<uint64_t, aclshmemi_udma_opcode_t::UDMA_OPCODE_FAA>(
         udma_wrap_test_qp(workspace), udma_wrap_test_remote_mem(workspace), local_addr, local_addr,
-        shm::UDMA_SQ_BASKBLK_CNT - 1, UDMA_WRAP_TEST_WQE_SIZE, sizeof(uint64_t), faa_params);
+        shm::UDMA_SQ_BASKBLK_CNT - 1, UDMA_WRAP_TEST_WQE_SIZE, sizeof(uint64_t), faa_params, addr_ctx);
     result[static_cast<uint32_t>(UdmaWrapTestResult::FAA_LAYOUT_OK)] =
         udma_wrap_test_verify_faa_layout(pipe_s_ring, udma_wrap_test_qp(workspace)->amo_addr);
     result[static_cast<uint32_t>(UdmaWrapTestResult::FAA_GUARD_VALUE)] =
@@ -639,10 +643,12 @@ __aicore__ inline void udma_wrap_test_run_cas(GM_ADDR workspace, __gm__ uint8_t*
     __gm__ uint8_t* pipe_s_ring = udma_wrap_test_pipe_s_ring(workspace);
     aclshmemi_udma_params_t<uint64_t, aclshmemi_udma_opcode_t::UDMA_OP_CAS> cas_params{
         .value = UDMA_WRAP_TEST_CAS_SWAP, .cond = UDMA_WRAP_TEST_CAS_COND};
+    aclshmemi_udma_addr_ctx_t addr_ctx{
+        reinterpret_cast<uint64_t>(aclshmemi_get_state()->heap_base), udma_wrap_test_remote_mem(workspace)->addr};
     udma_wrap_test_prepare_fixture(workspace, pipe_s_ring);
     aclshmemi_udma_fill_post_send_wqe<uint64_t, aclshmemi_udma_opcode_t::UDMA_OP_CAS>(
         udma_wrap_test_qp(workspace), udma_wrap_test_remote_mem(workspace), local_addr, local_addr,
-        shm::UDMA_SQ_BASKBLK_CNT - 1, UDMA_WRAP_TEST_WQE_SIZE, sizeof(uint64_t), cas_params);
+        shm::UDMA_SQ_BASKBLK_CNT - 1, UDMA_WRAP_TEST_WQE_SIZE, sizeof(uint64_t), cas_params, addr_ctx);
     result[static_cast<uint32_t>(UdmaWrapTestResult::CAS_LAYOUT_OK)] =
         udma_wrap_test_verify_cas_layout(pipe_s_ring, udma_wrap_test_qp(workspace)->amo_addr);
     result[static_cast<uint32_t>(UdmaWrapTestResult::CAS_GUARD_VALUE)] =
@@ -656,12 +662,15 @@ __aicore__ inline void udma_wrap_test_run_pipe_mte3(
     __gm__ uint8_t* pipe_mte3_ring = udma_wrap_test_pipe_mte3_ring(workspace);
     aclshmemi_udma_params_t<uint8_t, aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_NOTIFY> pipe_mte3_params{
         .sig_addr = signal_addr, .signal = UDMA_WRAP_TEST_PIPE_MTE3_SIGNAL};
+    aclshmemi_udma_addr_ctx_t addr_ctx{
+        reinterpret_cast<uint64_t>(aclshmemi_get_state()->heap_base), udma_wrap_test_remote_mem(workspace)->addr};
     udma_wrap_test_prepare_fixture(workspace, pipe_mte3_ring);
     udma_wrap_test_flush_cleared_wqebbs(pipe_mte3_ring);
     __ubuf__ aclshmemi_sqe_ctx_t* sqe_ub = reinterpret_cast<__ubuf__ aclshmemi_sqe_ctx_t*>(wqe_scratch);
     aclshmemi_udma_fill_sqe_ctx<
         uint8_t, aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_NOTIFY, __ubuf__ aclshmemi_sqe_ctx_t*>(
-        sqe_ub, local_addr, udma_wrap_test_remote_mem(workspace), shm::UDMA_SQ_BASKBLK_CNT - 1, pipe_mte3_params);
+        sqe_ub, local_addr, udma_wrap_test_remote_mem(workspace), shm::UDMA_SQ_BASKBLK_CNT - 1, pipe_mte3_params,
+        addr_ctx);
     __ubuf__ aclshmemi_sge_ctx_t* sge_ub = reinterpret_cast<__ubuf__ aclshmemi_sge_ctx_t*>(
         wqe_scratch + sizeof(aclshmemi_sqe_ctx_t) + sizeof(aclshmemi_notify_ctx_t));
     aclshmemi_fill_sge_header_ctx(sge_ub, MESSAGE_SIZE, reinterpret_cast<uint64_t>(local_addr));

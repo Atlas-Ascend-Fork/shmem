@@ -539,8 +539,7 @@ ACLSHMEM_DEVICE void aclshmemi_highlevel_signal_set(
     ub_tensor_64.address_.bufferAddr = reinterpret_cast<uint64_t>(buf) + UB_ALIGN_SIZE;
     ub_tensor_64.address_.dataLen = UB_ALIGN_SIZE;
     aclshmemi_roce_write(
-        (__gm__ uint8_t*)aclshmem_roce_ptr(dst, pe), (__gm__ uint8_t*)src, pe, 0, sizeof(int32_t), ub_tensor_64,
-        ub_tensor_32, sync_id);
+        (__gm__ uint8_t*)dst, (__gm__ uint8_t*)src, pe, 0, sizeof(int32_t), ub_tensor_64, ub_tensor_32, sync_id);
     aclshmemi_roce_quiet(pe, 0, ub_tensor_64, ub_tensor_32, sync_id);
 }
 
@@ -558,8 +557,7 @@ ACLSHMEM_DEVICE void aclshmemi_highlevel_signal_set(__gm__ int32_t* dst, __gm__ 
     ub_tensor_64.address_.bufferAddr = reinterpret_cast<uint64_t>(copy_ub + UB_ALIGN_SIZE);
     ub_tensor_64.address_.dataLen = UB_ALIGN_SIZE;
     aclshmemi_roce_write(
-        (__gm__ uint8_t*)aclshmem_roce_ptr(dst, pe), (__gm__ uint8_t*)src, pe, 0, sizeof(int32_t), ub_tensor_64,
-        ub_tensor_32, sync_id);
+        (__gm__ uint8_t*)dst, (__gm__ uint8_t*)src, pe, 0, sizeof(int32_t), ub_tensor_64, ub_tensor_32, sync_id);
     aclshmemi_roce_quiet(pe, 0, ub_tensor_64, ub_tensor_32, sync_id);
 }
 

@@ -13,9 +13,12 @@
 #include "shmemi_def.h"
 #include "shmemi_device_common.hpp"
 
+ACLSHMEM_DEVICE __gm__ uint8_t* aclshmemi_remote_mr_addr(
+    __gm__ const void* local_symmetric_ptr, const void* local_heap_base, uint64_t remote_mr_base);
+
 constexpr int ub_limit = 192 * 1024;
 
-ACLSHMEM_DEVICE __gm__ aclshmem_device_host_state_t *aclshmemi_get_state();
+ACLSHMEM_DEVICE __gm__ aclshmem_device_host_state_t* aclshmemi_get_state();
 
 ACLSHMEM_DEVICE int aclshmemi_get_my_pe();
 
@@ -25,10 +28,10 @@ ACLSHMEM_DEVICE uint64_t aclshmemi_get_heap_size();
 
 ACLSHMEM_DEVICE void dcci_entire_cache();
 
-template<typename T>
-ACLSHMEM_DEVICE void aclshmemi_store(__gm__ T *addr, T val);
+template <typename T>
+ACLSHMEM_DEVICE void aclshmemi_store(__gm__ T* addr, T val);
 
-template<typename T>
-ACLSHMEM_DEVICE T aclshmemi_load(__gm__ T *cache);
+template <typename T>
+ACLSHMEM_DEVICE T aclshmemi_load(__gm__ T* cache);
 
 #endif

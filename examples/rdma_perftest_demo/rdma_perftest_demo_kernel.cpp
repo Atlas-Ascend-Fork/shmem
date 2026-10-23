@@ -105,10 +105,9 @@ extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void rdma_postsen
 
     if (rank == 0) {
         peer = 1;
-        GM_ADDR dest_addr = (GM_ADDR)(aclshmem_roce_ptr(src_addr, peer));
         int64_t start = AscendC::GetSystemCycle();
         for (uint32_t i = 0; i < 500; i++) {
-            aclshmemi_roce_write(dest_addr, src_addr, peer, 0, message_length, ubLocal64, ubLocal32, 0);
+            aclshmemi_roce_write(src_addr, src_addr, peer, 0, message_length, ubLocal64, ubLocal32, 0);
         }
         AscendC::PipeBarrier<PIPE_ALL>();
         int64_t end = AscendC::GetSystemCycle();

@@ -70,22 +70,23 @@ ACLSHMEM_DEVICE void aclshmemi_roce_fill_aggregate_cache(
     cache->sq_head_addr = sq_context->head_addr;
     cache->sq_tail_addr = sq_context->tail_addr;
     cache->sq_db_addr = sq_context->db_addr;
+    __gm__ aclshmemi_rdma_mem_info* remote_mem_info =
+        (__gm__ aclshmemi_rdma_mem_info*)(rdma_info->mem_ptr + sizeof(aclshmemi_rdma_mem_info) * pe);
+    cache->remote_mr_base = remote_mem_info->addr;
+    cache->remote_rkey = remote_mem_info->rkey;
     cache->sq_depth = sq_context->depth;
     cache->sq_wqn = sq_context->wqn;
     cache->sq_wqe_size = sq_context->wqe_size;
     if constexpr (B == aclshmemi_rdma_backend_t::IN_DIE) {
-        cache->backend.in_die.sq_sl = sq_context->sl;
+        cache->sq_sl = sq_context->sl;
     }
 
     dcci_cachelines((__gm__ uint8_t*)cache->sq_head_addr, 8);
     cache->base_head = *(__gm__ uint32_t*)(cache->sq_head_addr);
 
     auto mem_info_table = rdma_info->mem_ptr;
-    __gm__ aclshmemi_rdma_mem_info* remote_mem_info =
-        (__gm__ aclshmemi_rdma_mem_info*)(mem_info_table + sizeof(aclshmemi_rdma_mem_info) * pe);
     __gm__ aclshmemi_rdma_mem_info* local_mem_info =
         (__gm__ aclshmemi_rdma_mem_info*)(mem_info_table + sizeof(aclshmemi_rdma_mem_info) * aclshmemi_get_my_pe());
-    cache->remote_rkey = remote_mem_info->rkey;
     cache->local_lkey = local_mem_info->lkey;
 }
 
@@ -103,6 +104,7 @@ ACLSHMEM_DEVICE void aclshmemi_roce_stage_rma_wqe_ub(
         aclshmemi_roce_fill_aggregate_cache<B>(cache, aclshmemi_qp_info_fetch(), pe, qp_idx);
     }
     const uint32_t wqe_size = cache->sq_wqe_size;
+    remote_addr = aclshmemi_remote_mr_addr(remote_addr, aclshmemi_get_state()->heap_base, cache->remote_mr_base);
 
     // Build one WQE directly in the UB staging buffer using the backend stride.
     aclshmemi_roce_fill_wqe_ub<B, OP_CODE>(
@@ -154,6 +156,8 @@ ACLSHMEM_DEVICE void aclshmemi_roce_commit_rma_wqes(
         cache->base_head = cur_head;
     }
 
+    remote_addr = aclshmemi_remote_mr_addr(remote_addr, aclshmemi_get_state()->heap_base, cache->remote_mr_base);
+
     // Assemble the commit call's own WQE at position pending_count (0-indexed).
     // Earlier WQEs were already assembled in stage.
     aclshmemi_roce_fill_wqe_ub<B, OP_CODE>(
@@ -199,7 +203,7 @@ ACLSHMEM_DEVICE T aclshmemi_roce_atomic_fetch_and_add(
         (__gm__ aclshmemi_rdma_mem_info*)(mem_info_table + sizeof(aclshmemi_rdma_mem_info) * pe);
 
     aclshmemi_rdma_send_wr wr = {};
-    wr.remote_addr = (__gm__ uint8_t*)dst;
+    wr.remote_addr = aclshmemi_remote_mr_addr(dst, aclshmemi_get_state()->heap_base, remote_mem_info->addr);
     wr.local_addr = (__gm__ uint8_t*)sq_context->amo_addr;
     wr.message_len = 0;
     wr.atomic.masked_common.swap_add_data = add_val;
@@ -228,7 +232,7 @@ ACLSHMEM_DEVICE T aclshmemi_roce_atomic_compare_and_swap(
         (__gm__ aclshmemi_rdma_mem_info*)(mem_info_table + sizeof(aclshmemi_rdma_mem_info) * pe);
 
     aclshmemi_rdma_send_wr wr = {};
-    wr.remote_addr = (__gm__ uint8_t*)dst;
+    wr.remote_addr = aclshmemi_remote_mr_addr(dst, aclshmemi_get_state()->heap_base, remote_mem_info->addr);
     wr.local_addr = (__gm__ uint8_t*)sq_context->amo_addr;
     wr.message_len = 0;
     wr.atomic.masked_common.swap_add_data = swap_val;

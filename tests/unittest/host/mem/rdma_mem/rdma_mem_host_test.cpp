@@ -21,6 +21,7 @@
 #include "utils/exception/shmemi_device_rdma_exception_report_kernel.h"
 #include "utils/exception/shmem_exception_report.h"
 #include "utils/under_api/dl_hccp_def.h"
+#include "unittest_main_test.h"
 
 extern int test_gnpu_num;
 extern int test_first_npu;
@@ -30,6 +31,7 @@ extern void test_finalize(aclrtStream stream, int device_id);
 
 namespace {
 constexpr int TIMEOUT = 30;
+constexpr size_t RDMA_TEST_VA_GAP_GRANULARITY = 2UL * 1024UL * 1024UL;
 
 // Aggregate tests are available on the XSCALE and IN_DIE (default) backends.
 #if !defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
@@ -125,11 +127,36 @@ void test_aclshmem_rdma_mem(int rank_id, int n_ranks, uint64_t local_mem_size)
     test_finalize(stream, device_id);
 }
 
+void test_aclshmem_rdma_mem_with_different_va_base(int rank_id, int n_ranks, uint64_t local_mem_size)
+{
+    const int32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    void* va_gap = nullptr;
+    const size_t va_gap_size = RDMA_TEST_VA_GAP_GRANULARITY * (static_cast<uint32_t>(rank_id) + 1U);
+    aclrtStream stream;
+    ASSERT_EQ(
+        test_rdma_init_with_va_gap(rank_id, n_ranks, local_mem_size, va_gap_size, &stream, &va_gap), ACLSHMEM_SUCCESS);
+    ASSERT_NE(stream, nullptr);
+    void* ptr = aclshmem_malloc(1024);
+    ASSERT_NE(ptr, nullptr);
+    test_rdma_put_get(stream, static_cast<uint8_t*>(ptr), rank_id, n_ranks);
+    aclshmem_free(ptr);
+    EXPECT_EQ(aclrtReleaseMemAddress(va_gap), ACL_SUCCESS);
+    test_finalize(stream, device_id);
+}
+
 TEST(TestMemApi, TestShmemRDMAMem)
 {
     const int processCount = test_gnpu_num;
     uint64_t local_mem_size = 1024UL * 1024UL * 64;
     test_mutil_task(test_aclshmem_rdma_mem, local_mem_size, processCount);
+}
+
+TEST(TestMemApi, TestShmemRDMAMemWithDifferentVirtualBases)
+{
+    if (test_gnpu_num < 2) {
+        GTEST_SKIP() << "RDMA different-base test requires at least two ranks/devices";
+    }
+    test_mutil_task(test_aclshmem_rdma_mem_with_different_va_base, 1024UL * 1024UL * 1024UL, test_gnpu_num);
 }
 
 namespace {

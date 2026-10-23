@@ -202,10 +202,10 @@ ACLSHMEM_DEVICE void aclshmemi_roce_ring_sq_doorbell_from_cache<aclshmemi_rdma_b
 {
     // Snapshot cache fields before ub_local32/ub_local64 overwrite the shared UB workspace.
     uint64_t doorbell_info = 0;
-    doorbell_info |= cache->sq_wqn;                                 // [0:23] DB_TAG = qp_num
-    doorbell_info |= 0 << 24;                                       // [24:27] DB_CMD = HNS_ROCE_V2_SQ_DB(0)
-    doorbell_info |= ((uint64_t)cur_head % 65536) << 32;            // [32:47] DB_PI = sq.head
-    doorbell_info |= (uint64_t)(cache->backend.in_die.sq_sl) << 48; // [48:50] DB_SL = qp.sl
+    doorbell_info |= cache->sq_wqn;                      // [0:23] DB_TAG = qp_num
+    doorbell_info |= 0 << 24;                            // [24:27] DB_CMD = HNS_ROCE_V2_SQ_DB(0)
+    doorbell_info |= ((uint64_t)cur_head % 65536) << 32; // [32:47] DB_PI = sq.head
+    doorbell_info |= (uint64_t)(cache->sq_sl) << 48;     // [48:50] DB_SL = qp.sl
 
     uint64_t sq_head_addr = cache->sq_head_addr;
     uint64_t sq_db_addr = cache->sq_db_addr;
@@ -254,6 +254,7 @@ ACLSHMEM_DEVICE void aclshmemi_roce_post_send_read_write(
         (__gm__ aclshmemi_rdma_mem_info*)(mem_info_table + sizeof(aclshmemi_rdma_mem_info) * pe);
     __gm__ aclshmemi_rdma_mem_info* local_mem_info =
         (__gm__ aclshmemi_rdma_mem_info*)(mem_info_table + sizeof(aclshmemi_rdma_mem_info) * aclshmemi_get_my_pe());
+    wr.remote_addr = aclshmemi_remote_mr_addr(wr.remote_addr, aclshmemi_get_state()->heap_base, remote_mem_info->addr);
     wr.rkey = remote_mem_info->rkey;
     wr.lkey = local_mem_info->lkey;
 

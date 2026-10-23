@@ -177,20 +177,17 @@ struct aclshmemi_roce_aggregate_cache_t {
     uint64_t sq_head_addr;
     uint64_t sq_tail_addr;
     uint64_t sq_db_addr;
+    uint64_t remote_mr_base;
     uint32_t sq_depth;
     uint32_t sq_wqn;
-    uint32_t sq_wqe_size;
+    uint32_t sq_wqe_size : 29;
+    uint32_t sq_sl : 3;
     uint32_t base_head;
     uint32_t remote_rkey;
     uint32_t local_lkey;
-    union {
-        struct {
-            uint32_t sq_sl;
-            uint32_t reserved;
-        } in_die;
-        // Add backend-specific members here so their storage overlaps.
-    } backend;
 };
+
+static_assert(sizeof(aclshmemi_roce_aggregate_cache_t) == 64);
 
 static_assert(sizeof(aclshmemi_roce_aggregate_cache_t) <= UB_ALIGN_SIZE * 2);
 

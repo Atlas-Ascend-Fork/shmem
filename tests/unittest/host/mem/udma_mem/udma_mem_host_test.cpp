@@ -35,6 +35,7 @@ extern void test_udma_qp_data_path(
 constexpr size_t UDMA_TEST_MESSAGE_SIZE = 64;
 constexpr uint32_t UDMA_TEST_ACTION_BATCH_COUNT = 2;
 constexpr size_t UDMA_TEST_WRAP_WORKSPACE_SIZE = 5UL * 1024UL * 1024UL;
+constexpr size_t UDMA_TEST_VA_GAP_GRANULARITY = 2UL * 1024UL * 1024UL;
 constexpr uint64_t UDMA_TEST_WRAP_GUARD_VALUE = 0xC0FFEE1234567890ULL;
 constexpr size_t UDMA_TEST_WRAP_RESULT_COUNT = 8;
 constexpr size_t UDMA_TEST_WRAP_PIPE_S_LAYOUT_IDX = 0;
@@ -445,11 +446,39 @@ void test_aclshmem_udma_mem(int rank_id, int n_ranks, uint64_t local_mem_size)
     test_finalize(stream, device_id);
 }
 
+void test_aclshmem_udma_mem_with_different_va_base(int rank_id, int n_ranks, uint64_t local_mem_size)
+{
+    int32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    void* va_gap = nullptr;
+    const size_t va_gap_size = UDMA_TEST_VA_GAP_GRANULARITY * (static_cast<uint32_t>(rank_id) + 1U);
+    aclrtStream stream;
+    ASSERT_EQ(test_udma_init_with_va_gap(rank_id, n_ranks, local_mem_size, va_gap_size, &stream, &va_gap), 0);
+    ASSERT_NE(stream, nullptr);
+    void* ptr = aclshmem_malloc(1024);
+    ASSERT_NE(ptr, nullptr);
+    test_udma_put_get(stream, static_cast<uint8_t*>(ptr), rank_id, n_ranks);
+    aclshmem_free(ptr);
+    EXPECT_EQ(aclrtReleaseMemAddress(va_gap), ACL_SUCCESS);
+    test_finalize(stream, device_id);
+}
+
 TEST(TestMemApi, TestShmemUDMAMem)
 {
     const int processCount = test_gnpu_num;
     uint64_t local_mem_size = 1024UL * 1024UL * 1024UL;
     // test_mutil_task(test_aclshmem_udma_mem, local_mem_size, processCount);
+}
+
+TEST(TestMemApi, TestShmemUDMAMemWithDifferentVirtualBases)
+{
+    if (test_global_ranks < 2 || test_gnpu_num < test_global_ranks) {
+        GTEST_SKIP() << "UDMA different-base test requires at least two ranks/devices";
+    }
+    const char* soc_name = aclrtGetSocName();
+    if (soc_name == nullptr || std::string(soc_name).find("Ascend950") == std::string::npos) {
+        GTEST_SKIP() << "UDMA different-base test requires Ascend950";
+    }
+    test_mutil_task(test_aclshmem_udma_mem_with_different_va_base, 1024UL * 1024UL * 1024UL, test_global_ranks);
 }
 
 void test_aclshmem_udma_signal_overload(int rank_id, int n_ranks, uint64_t local_mem_size)
@@ -598,16 +627,25 @@ void test_aclshmem_udma_highlevel_put_signal_split(int rank_id, int n_ranks, uin
 
 TEST(TestMemApi, TestShmemUDMAHighLevelPutSignalSplit)
 {
-    constexpr int required_rank_size = 2;
-    if (test_gnpu_num < required_rank_size) {
-        GTEST_SKIP() << "UDMA split boundary test requires at least " << required_rank_size << " NPUs";
+    constexpr int min_rank_size = 2;
+    if (test_global_ranks < min_rank_size) {
+        GTEST_SKIP() << "UDMA split boundary test requires at least " << min_rank_size << " ranks";
+    }
+    if (test_gnpu_num < test_global_ranks) {
+        GTEST_SKIP() << "UDMA split boundary test requires at least " << test_global_ranks << " NPUs";
     }
     const char* soc_name = aclrtGetSocName();
     if (soc_name == nullptr || std::string(soc_name).find("Ascend950") == std::string::npos) {
         GTEST_SKIP() << "UDMA split boundary test requires Ascend950";
     }
-    const uint64_t local_mem_size = 1024UL * 1024UL * 1024UL;
-    test_mutil_task(test_aclshmem_udma_highlevel_put_signal_split, local_mem_size, required_rank_size);
+    // The test allocates one max-sized message region per rank, plus a signal
+    // array. Size the symmetric heap for the configured worker count instead
+    // of keeping the old two-rank 1 GiB budget.
+    constexpr size_t max_message_size = 256UL * 1024UL * 1024UL + 1;
+    const uint64_t requested_size = max_message_size * static_cast<size_t>(test_global_ranks) +
+                                    static_cast<size_t>(test_global_ranks) * sizeof(int32_t);
+    const uint64_t local_mem_size = ALIGN_UP(requested_size, ACLSHMEM_PAGE_SIZE);
+    test_mutil_task(test_aclshmem_udma_highlevel_put_signal_split, local_mem_size, test_global_ranks);
 }
 
 void test_aclshmem_udma_put_signal_sq_wrap(int rank_id, int n_ranks, uint64_t local_mem_size)

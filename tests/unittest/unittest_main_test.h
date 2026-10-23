@@ -30,6 +30,10 @@ void test_finalize(aclrtStream stream, int device_id);
 void test_multi_instance_finalize(aclrtStream stream, int device_id, int inst_count);
 const std::string& get_multi_instance_port_range();
 void test_mutil_task(std::function<void(int, int, uint64_t)> func, uint64_t local_mem_size, int process_count);
+int32_t test_rdma_init_with_va_gap(
+    int rank_id, int n_ranks, uint64_t local_mem_size, size_t va_gap_size, aclrtStream* st, void** va_gap);
+int32_t test_udma_init_with_va_gap(
+    int rank_id, int n_ranks, uint64_t local_mem_size, size_t va_gap_size, aclrtStream* st, void** va_gap);
 void test_mutil_task_with_uid(
     std::function<void(int, int, uint64_t, aclshmemx_uniqueid_t&)> func, uint64_t local_mem_size, int process_count);
 

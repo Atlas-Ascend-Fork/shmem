@@ -36,13 +36,18 @@ constexpr uint32_t ACLSHMEM_ROCE_QP_AGGREGATE_MAX_OPS = 1023;
  */
 
 /**
- * @brief Translate a local symmetric address to the corresponding symmetric address on the specified PE for RDMA
- *        operations.
+ * @brief Return the target PE's native RDMA address for a local DEVICE_SIDE symmetric address.
+ *        RDMA and the target PE's MR metadata must be initialized, @p pe must be a valid PE number,
+ *        and @p ptr must belong to the local symmetric DEVICE_SIDE heap.
+ *        Invalid inputs are not reported by returning nullptr; diagnostic builds may abort on invalid addresses.
+ * @deprecated Low-level RDMA operations now accept local symmetric pointers and derive the target MR address
+ *             internally. Use those operations instead of converting the pointer explicitly.
  *
  * @param ptr               [in] Symmetric address on local PE.
  * @param pe                [in] Target PE number.
- * @return The corresponding symmetric address on the specified PE for use by RDMA operations.
+ * @return The target PE's registered RDMA address at the same heap offset.
  */
+[[deprecated("aclshmem_roce_ptr is deprecated; pass local symmetric pointers to RDMA operations instead.")]]
 ACLSHMEM_DEVICE __gm__ void* aclshmem_roce_ptr(__gm__ void* ptr, int pe);
 #define shmem_roce_ptr aclshmem_roce_ptr
 
@@ -57,7 +62,7 @@ ACLSHMEM_DEVICE __gm__ void* aclshmem_roce_ptr(__gm__ void* ptr, int pe);
  * @param buf               [in] Pointer on local UB. Must be at least 128 bytes.
  * @param elem_size         [in] Number of elements in the destination and source arrays.
  * @param pe                [in] PE number of the remote PE.
- * @note Address requirements: src is translated to the corresponding address on pe; dst is the local RDMA operand.
+ * @note Both operands are local symmetric addresses; the RDMA engine derives the target network address internally.
  *       Both operands must point to symmetric memory, and each complete transfer range must remain within its
  *       corresponding allocation.
  */
@@ -76,7 +81,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(__gm__ T* dst, __gm__ T* src, __ubuf
  * @param elem_size         [in] Number of elements in the destination and source arrays.
  * @param pe                [in] PE number of the remote PE.
  * @param sync_id           [in] Hardware event ID for MTE3 pipeline synchronization.
- * @note Address requirements: src is translated to the corresponding address on pe; dst is the local RDMA operand.
+ * @note Both operands are local symmetric addresses; the RDMA engine derives the target network address internally.
  *       Both operands must point to symmetric memory, and each complete transfer range must remain within its
  *       corresponding allocation.
  */
@@ -97,7 +102,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  * @param pe                [in] PE number of the remote PE.
  * @param qp_idx            [in] QP index for the target PE. Must be less than the configured RDMA QP count.
  * @param sync_id           [in] Hardware event ID for MTE3 pipeline synchronization.
- * @note Address requirements: src is translated to the corresponding address on pe; dst is the local RDMA operand.
+ * @note Both operands are local symmetric addresses; the RDMA engine derives the target network address internally.
  *       Both operands must point to symmetric memory, and each complete transfer range must remain within its
  *       corresponding allocation.
  */
@@ -118,7 +123,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_qp_get_nbi(
  * @param pe                [in] PE number of the remote PE.
  * @param qp_idx            [in] QP index for the target PE. Must be less than the configured RDMA QP count.
  * @param sync_id           [in] Hardware event ID for MTE3 pipeline synchronization.
- * @note Address requirements: src is translated to the corresponding address on pe; dst is the local RDMA operand.
+ * @note Both operands are local symmetric addresses; the RDMA engine derives the target network address internally.
  *       Both operands must point to symmetric memory, and each complete transfer range must remain within its
  *       corresponding allocation.
  */
