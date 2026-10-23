@@ -65,7 +65,7 @@ function delete_empty_recursion()
 
 function delete_latest()
 {
-    cd $1/..
+    cd $1/.. || return 1
     print "INFO" "SHMEM delete latest!"
     if [ -d "latest" ]; then
         rm -rf latest
@@ -95,5 +95,5 @@ function uninstall_process()
 }
 
 
-install_dir=$(cd ${CUR_DIR}/../../${VERSION};pwd)
+install_dir=$(cd ${CUR_DIR}/../../${VERSION} 2>/dev/null && pwd) || { echo "ERROR: install dir ${CUR_DIR}/../../${VERSION} not found." >&2; exit 1; }
 uninstall_process ${install_dir}
