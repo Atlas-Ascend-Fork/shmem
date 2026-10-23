@@ -56,7 +56,7 @@ sync_config.jsonc
 3rdparty/
 install/
 oat_reports/
-log/
+/log/
 
 # compile temp file
 ci/
