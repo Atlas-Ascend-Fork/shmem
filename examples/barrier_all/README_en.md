@@ -12,7 +12,7 @@ The launch script selects the engines to initialize based on the topology, and t
 
 With no engine flag, the executable initializes MTE only. For cross-server runs, the launch script explicitly passes `--roce` to initialize MTE and ROCE. Single-server runs work with the default build; cross-server runs require RDMA support.
 
-Multi-card communication on a single server requires MTE support; cross-server communication additionally requires RDMA. Refer to [rdma_demo](../rdma_demo/README.md) for environment configuration.
+Multi-card communication on a single server requires MTE support; cross-server communication additionally requires RDMA. Refer to [rdma_demo](../rdma_demo/README_en.md) for environment configuration.
 
 ## Environment Requirements
 
@@ -20,7 +20,7 @@ Multi-card communication on a single server requires MTE support; cross-server c
 
 ### Ascend950 CANN Version Requirement
 
-RDMA examples on Ascend950 are verified with CANN 9.1.0. CANN 9.1.0 and later are supported; refer to the version table in [quickstart](../../docs/quickstart.md) for the full requirement. Download the corresponding package from the [CANN resources](https://www.hiascend.com/developer/download/community/result?module=cann&cann=9.1.0).
+RDMA examples on Ascend950 are verified with CANN 9.1.0. CANN 9.1.0 and later are supported; refer to the version table in [quickstart](../../docs/quickstart_en.md) for the full requirement. Download the corresponding package from the [CANN resources](https://www.hiascend.com/developer/download/community/result?module=cann&cann=9.1.0).
 
 ## Instructions
 

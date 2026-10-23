@@ -8,19 +8,19 @@ The PyTorch extensions and the corresponding C++ operators share the same kernel
 
 | Script| PyTorch Operator Class| Corresponding C++ Example Document|
 |------|-------------|-------------------|
-| `allgather.py` | `torch.classes.ShmemOps.AllGather` | [examples/allgather/README.md](../../allgather/README.md) |
-| `kv_shuffle.py` | `torch.classes.ShmemOps.KVShuffle` | [examples/kv_shuffle/README.md](../../kv_shuffle/README.md) |
+| `allgather.py` | `torch.classes.ShmemOps.AllGather` | [examples/allgather/README_en.md](../../allgather/README_en.md) |
+| `kv_shuffle.py` | `torch.classes.ShmemOps.KVShuffle` | [examples/kv_shuffle/README_en.md](../../kv_shuffle/README_en.md) |
 
 ### Running Constraints of allgather.py
 
-The constraints are the same as those of the [allgather C++ example](../../allgather/README.md). Key constraints are as follows:
+The constraints are the same as those of the [allgather C++ example](../../allgather/README_en.md). Key constraints are as follows:
 
 - **PEs**: only `[2, 4, 8]` are supported.
 - **dtype (supported by the operator)**: `torch.int32`, `torch.float16`, and `torch.bfloat16`. The example script uses `float16` by default and does not provide a data type switching option.
 
 ### Running Constraints of kv_shuffle.py
 
-The constraints are the same as those of the [kv_shuffle C++ example](../../kv_shuffle/README.md). Key constraints are as follows:
+The constraints are the same as those of the [kv_shuffle C++ example](../../kv_shuffle/README_en.md). Key constraints are as follows:
 
 - **PEs**: specified by `--pes`. The only constraint is that the value cannot exceed the number of available devices. The example uses 8 devices by default.
 - **dtype (supported by the operator)**: The KV cache is `torch.int8`; `global_shuffle_tensor`, `src_block_tensor`, and `dst_block_tensor` are `torch.int64`. The example script uses the preceding types and does not provide a data type switching option.

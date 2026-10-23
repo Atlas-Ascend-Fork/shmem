@@ -28,7 +28,7 @@ The sample measures the following UDMA data-transfer operations:
 
 ## Build
 
-UDMA is available only on Ascend 950 and requires CANN 9.1.0 or later with the HCOMM resource APIs. For installation requirements and CANN resource APIs, see [UDMA Sample Version and Platform Support](../../udma_demo/README.md#版本和平台支持说明).
+UDMA is available only on Ascend 950 and requires CANN 9.1.0 or later with the HCOMM resource APIs. For installation requirements and CANN resource APIs, see [UDMA Sample Version and Platform Support](../../udma_demo/README_en.md#version-and-platform-support).
 
 ```bash
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
@@ -80,7 +80,7 @@ bash run.sh -t bi_put -pes 16 -gnpus 8 -fpe 8 -fnpu 0 -ipport tcp://192.168.1.10
 
 ### DRAM / D2H Memory Constraint
 
-This sample covers HBM (`DEVICE_SIDE`) memory paths only. It **does not support D2H / `HOST_SIDE` (DRAM)** because the UDMA engine currently provides no RMA path to host DRAM. To measure DRAM, use [rma_d2h_demo](../../rma_d2h_demo/README.md).
+This sample covers HBM (`DEVICE_SIDE`) memory paths only. It **does not support D2H / `HOST_SIDE` (DRAM)** because the UDMA engine currently provides no RMA path to host DRAM. To measure DRAM, use [rma_d2h_demo](../../rma_d2h_demo/README_en.md).
 
 The default local memory size is 1 GB. For large payloads, the program automatically increases `local_mem_size` up to 40 GB.
 

@@ -8,7 +8,7 @@ Each PE uses a single AIV to call the RDMA atomic APIs sequentially. Do not conc
 
 - Ascend950 with an XSCALE or HNS_1825 NIC.
 - At least two NPU devices with the RDMA NIC and driver configured.
-- See the [RDMA sample (Chinese)](../rdma_demo/README.md#环境要求) for CANN version requirements, RDMA environment checks, and NIC provider configuration.
+- See the [RDMA sample](../rdma_demo/README_en.md#environment-requirements) for CANN version requirements, RDMA environment checks, and NIC provider configuration.
 
 ## Usage
 
@@ -18,7 +18,7 @@ Follow the [RDMA sample build instructions](../rdma_demo/README_en.md#instructio
 
 ### Run
 
-Set `IBV_EXTEND_DRIVERS` as described in the [RDMA sample environment variables (Chinese)](../rdma_demo/README.md#ibv_extend_drivers-环境变量). For manual execution, configure `LD_LIBRARY_PATH` as described in the [RDMA sample run instructions](../rdma_demo/README_en.md#instructions).
+Set `IBV_EXTEND_DRIVERS` as described in the [RDMA sample environment variables](../rdma_demo/README_en.md#ibv_extend_drivers-environment-variable). For manual execution, configure `LD_LIBRARY_PATH` as described in the [RDMA sample run instructions](../rdma_demo/README_en.md#instructions).
 
 #### Single-Machine Execution
 

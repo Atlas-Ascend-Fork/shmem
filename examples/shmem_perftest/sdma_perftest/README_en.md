@@ -29,7 +29,7 @@ Ascend950 does not support SDMA remote WRITE, so `put` and `bi_put` are rejected
 
 ## Environment Requirements
 
-CANN version and ops package requirements follow the [CANN version description](../../../docs/quickstart.md#431-cann-版本说明) in the quick start guide (see the [SDMA example](../../sdma/README.md) for details). Build from the repository root:
+CANN version and ops package requirements follow the [CANN version description](../../../docs/quickstart_en.md#software-and-hardware-versions) in the quick start guide (see the [SDMA example](../../sdma/README_en.md) for details). Build from the repository root:
 
 ```bash
 # A2/A3 platforms

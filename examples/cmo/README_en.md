@@ -111,7 +111,7 @@ The example does not scale a symmetric data region with the PE count; each proce
 - Architecture compatibility: AArch64 and x86
 
 ### Software Dependencies
-Refer to [CANN Version Description](../../docs/quickstart.md#43-cann) and [Compilation and Build Guide](../../docs/compilation_build_guide.md) to configure a CANN version that supports CMO.
+Refer to [CANN Version Description](../../docs/quickstart_en.md#software-and-hardware-versions) and [Compilation and Build Guide](../../docs/compilation_build_guide_en.md) to configure a CANN version that supports CMO.
 
 | Platform | CANN Version Required for CMO | Toolkit Package | Ops Package |
 | --- | --- | --- | --- |

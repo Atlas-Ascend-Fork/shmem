@@ -36,7 +36,7 @@ The sample demonstrates the basic flow for concurrent UDMA Put, Get, and Put-wit
 
 ## Build and Run
 
-For environment setup, see [Quick Start](../../docs/quickstart.md). Run the following commands from the repository root after the environment is ready.
+For environment setup, see [Quick Start](../../docs/quickstart_en.md). Run the following commands from the repository root after the environment is ready.
 
 ### Default Link Mode
 
