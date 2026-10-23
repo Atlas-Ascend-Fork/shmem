@@ -33,8 +33,10 @@
 #endif
 #include "lib/std/tuple.h"
 #include "shmem.h"
+#include "mstx_example_report.h"
 #include "shmem_mega_moe_tiling.h"
 #include "common/shmem_mega_moe_math.h"
+#include "common/shmem_mega_moe_routing_report.h"
 #include "shmem_mega_moe_memory_layout.h"
 
 namespace AscendC {
@@ -71,6 +73,18 @@ using AscendC::GetBlockIdx;
 using AscendC::GetBlockNum;
 using AscendC::ShmemMegaMoeReadGmBypassDCache;
 using AscendC::ShmemMegaMoeWriteGmBypassDCache;
+
+__aicore__ inline void WaitForReadinessCounter(__gm__ int32_t* readinessFlag, int32_t targetValue)
+{
+    EXAMPLE_MSTX_SIGNAL_WAIT_REPORT(readinessFlag, ACLSHMEM_CMP_GE, targetValue);
+    EXAMPLE_MSTX_FUSE_SCOPE_START();
+    while (targetValue != ShmemMegaMoeReadGmBypassDCache(readinessFlag)) {
+        int64_t startCycle = AscendC::GetSystemCycle();
+        while (AscendC::GetSystemCycle() - startCycle < 100) {
+        }
+    }
+    EXAMPLE_MSTX_FUSE_SCOPE_END();
+}
 
 #if defined(__CCE__)
 #define SHMEM_MEGA_MOE_HOST_DEVICE __forceinline__[host, aicore]
@@ -215,6 +229,9 @@ __aicore__ inline void WaitForRankGeneration(__gm__ int32_t* signal, int32_t gen
         // forever after the value has advanced past generation.
         if (ShmemMegaMoeReadGmBypassDCache(signal) >= generation) {
             return;
+        }
+        int64_t startCycle = AscendC::GetSystemCycle();
+        while (AscendC::GetSystemCycle() - startCycle < 100) {
         }
     } while (true);
 }

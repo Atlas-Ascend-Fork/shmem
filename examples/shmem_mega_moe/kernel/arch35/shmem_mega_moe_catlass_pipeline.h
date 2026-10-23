@@ -39,6 +39,7 @@ constexpr uint32_t ALIGN32 = 32U;
 constexpr uint32_t L1_TILE_M_256 = 256U;
 constexpr uint32_t L1_TILE_M_128 = 128U;
 constexpr uint32_t L1_TILE_N = 256U;
+static_assert(L1_TILE_N == ROUTING_REPORT_TILE_N, "Routing report IDs must match the output tile width");
 constexpr uint32_t L1_TILE_K = 256U;
 constexpr uint32_t L0_TILE_K = 128U;
 constexpr uint32_t SCALE_K_L1_RATE = 2U;
@@ -187,11 +188,8 @@ __aicore__ inline void RunFirstProjection(
             if (waveIndex != lastReadyWave) {
                 uint32_t targetValue = min(L1_TILE_M_256, m - rowOffset);
                 __gm__ int32_t* readinessFlag = matmulBuffers.waveReadyFlags + waveIndex;
-                while (targetValue != AscendC::ShmemMegaMoeReadGmBypassDCache(readinessFlag)) {
-                    int64_t startCycle = AscendC::GetSystemCycle();
-                    while (AscendC::GetSystemCycle() - startCycle < 100) {
-                    }
-                }
+                // Import the producers before polling or issuing GEMM operand loads.
+                WaitForReadinessCounter(readinessFlag, targetValue);
                 lastReadyWave = waveIndex;
             }
             if (vectorSyncState) {
@@ -333,11 +331,7 @@ __aicore__ inline void RunSecondProjection(
                     Catlass::GemmCoord{m, k, n}, Catlass::MatrixCoord{L1_TILE_M_256, L1_TILE_N});
                 uint32_t targetLoops = firstProjectionScheduler.GetCoreLoops();
                 __gm__ int32_t* readinessFlag = matmulBuffers.readyFlags;
-                while (targetLoops != AscendC::ShmemMegaMoeReadGmBypassDCache(readinessFlag)) {
-                    int64_t startCycle = AscendC::GetSystemCycle();
-                    while (AscendC::GetSystemCycle() - startCycle < 100) {
-                    }
-                }
+                WaitForReadinessCounter(readinessFlag, targetLoops);
             }
 
             auto tensorBlockA = tla::GetTile(
@@ -410,6 +404,26 @@ __aicore__ inline void RunSecondProjection(
             LocalTensor<ElementC> secondProjectionOutput =
                 bufferIndex == 0 ? secondProjectionOutputFirst : secondProjectionOutputSecond;
             WaitForCube(bufferIndex);
+            // Routing metadata is written by dispatch AIVs before publishing the
+            // wave counter. Acquire it directly on the consuming AIV instead of
+            // relying only on synchronization propagated through both GEMMs.
+            const uint32_t firstRoutingWave = rowOffset / L1_TILE_M_256;
+            const uint32_t endRoutingWave = (rowOffset + actualShape.m() + L1_TILE_M_256 - 1) / L1_TILE_M_256;
+            for (uint32_t waveIndex = firstRoutingWave; waveIndex < endRoutingWave; ++waveIndex) {
+                const uint32_t targetRows = min(L1_TILE_M_256, m - waveIndex * L1_TILE_M_256);
+                __gm__ int32_t* routingReadyFlag = matmulBuffers.waveReadyFlags + waveIndex;
+                WaitForReadinessCounter(routingReadyFlag, targetRows);
+            }
+#ifdef __MSTX_DFX_REPORT__
+            // The completed wave wait covers all these routing rows. Import each
+            // producer independently using the cross-core events supported by 26.2.0.
+            for (uint32_t row = 0; row < actualShape.m(); ++row) {
+                EXAMPLE_MSTX_CROSS_CORE_WAIT_FLAG_REPORT(
+                    RoutingReportEvent(processedRows + rowOffset + row, blockCoord.n(), n), -1, false);
+            }
+#endif
+            AscendC::SetFlag<AscendC::HardEvent::S_MTE2>(0);
+            AscendC::WaitFlag<AscendC::HardEvent::S_MTE2>(0);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(0);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(0);
             AscendC::GlobalTensor<int32_t> routingMetadataGlobal;

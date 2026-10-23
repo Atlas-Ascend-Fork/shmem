@@ -21,6 +21,16 @@
 
 #define EXAMPLE_MSTX_FUSE_SCOPE_END() Sanitizer::SanitizerFuseScopeEnd()
 
+#define EXAMPLE_MSTX_CROSS_NPU_BARRIER_REPORT(device_num_, core_num_, aiv_only_, pipe_barrier_all_) \
+    do {                                                                                            \
+        Sanitizer::MstxCrossNpuBarrier mstx_barrier__{};                                            \
+        mstx_barrier__.usedDeviceNum = (device_num_);                                               \
+        mstx_barrier__.usedCoreNum = (core_num_);                                                   \
+        mstx_barrier__.isAIVOnly = (aiv_only_);                                                     \
+        mstx_barrier__.pipeBarrierAll = (pipe_barrier_all_);                                        \
+        Sanitizer::SanitizerReport(mstx_barrier__);                                                 \
+    } while (0)
+
 #define EXAMPLE_MSTX_CROSS_CORE_SET_FLAG_REPORT(event_id_, peer_core_id_, pipe_barrier_all_) \
     do {                                                                                     \
         Sanitizer::MstxCrossCoreSetFlag mstx_set__{};                                        \
@@ -39,6 +49,14 @@
         Sanitizer::SanitizerReport(mstx_wait__);                                              \
     } while (0)
 
+#define EXAMPLE_MSTX_SIGNAL_SET_REPORT(addr_, val_) \
+    do {                                            \
+        Sanitizer::MstxSignalSet mstx_set__{};      \
+        mstx_set__.addr = (uint64_t)(addr_);        \
+        mstx_set__.value = (val_);                  \
+        Sanitizer::SanitizerReport(mstx_set__);     \
+    } while (0)
+
 #define EXAMPLE_MSTX_SIGNAL_WAIT_REPORT(addr_, cmp_, val_) \
     do {                                                   \
         Sanitizer::MstxSignalWait mstx_wait__{};           \
@@ -52,8 +70,10 @@
 
 #define EXAMPLE_MSTX_FUSE_SCOPE_START()
 #define EXAMPLE_MSTX_FUSE_SCOPE_END()
+#define EXAMPLE_MSTX_CROSS_NPU_BARRIER_REPORT(device_num_, core_num_, aiv_only_, pipe_barrier_all_)
 #define EXAMPLE_MSTX_CROSS_CORE_SET_FLAG_REPORT(event_id_, peer_core_id_, pipe_barrier_all_)
 #define EXAMPLE_MSTX_CROSS_CORE_WAIT_FLAG_REPORT(event_id_, peer_core_id_, pipe_barrier_all_)
+#define EXAMPLE_MSTX_SIGNAL_SET_REPORT(addr_, val_)
 #define EXAMPLE_MSTX_SIGNAL_WAIT_REPORT(addr_, cmp_, val_)
 
 #endif

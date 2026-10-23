@@ -687,6 +687,19 @@ __aicore__ inline void ShmemMegaMoePipeline<SHMEM_MEGA_MOE_TEMPLATE_ARGS>::Build
         if (rowsThisCore > 0) {
             SyncFuncStatic<AscendC::HardEvent::MTE3_S, SYNC_EVENT_ID5>();
 
+#ifdef __MSTX_DFX_REPORT__
+            if constexpr (CombineQuantMode == COMBINE_NO_QUANT) {
+                // Match combine's explicit cross-core reports. A SET is consumed
+                // by one WAIT, so each output column tile needs its own event.
+                // MTE3_S above establishes completion; do not invent an all-pipe barrier.
+                for (int32_t row = destinationRowOffset; row < destinationRowOffset + rowsThisCore; ++row) {
+                    for (uint32_t column = 0; column < RoutingReportColumnCount(modelDim_); ++column) {
+                        EXAMPLE_MSTX_CROSS_CORE_SET_FLAG_REPORT(RoutingReportEvent(row, column, modelDim_), -1, false);
+                    }
+                }
+            }
+#endif
+
             int32_t localRowStart = destinationRowOffset - priorExpertTokenCount;
             int32_t localRowEnd = localRowStart + rowsThisCore;
             int32_t firstWaveIndex = localRowStart / L1_TILE_M_I32;
@@ -698,7 +711,20 @@ __aicore__ inline void ShmemMegaMoePipeline<SHMEM_MEGA_MOE_TEMPLATE_ARGS>::Build
                 int32_t lo = localRowStart > waveRowStart ? localRowStart : waveRowStart;
                 int32_t hi = localRowEnd < waveRowEnd ? localRowEnd : waveRowEnd;
                 int32_t dispatchedRows = hi - lo;
+#ifdef __MSTX_DFX_REPORT__
+                // Only fuse the synchronization counter access, not the dispatch data copies.
+                EXAMPLE_MSTX_FUSE_SCOPE_START();
+                int32_t previousRows = AtomicAdd(waveReadyFlags + w, dispatchedRows);
+                EXAMPLE_MSTX_FUSE_SCOPE_END();
+                // Replay publications in the order observed by AtomicAdd. Otherwise a
+                // terminal SET can satisfy consumers before earlier producers are replayed.
+                if (previousRows > 0) {
+                    EXAMPLE_MSTX_SIGNAL_WAIT_REPORT(waveReadyFlags + w, ACLSHMEM_CMP_GE, previousRows);
+                }
+                EXAMPLE_MSTX_SIGNAL_SET_REPORT(waveReadyFlags + w, previousRows + dispatchedRows);
+#else
                 AtomicAdd(waveReadyFlags + w, dispatchedRows);
+#endif
             }
         }
     }
@@ -1043,6 +1069,9 @@ __aicore__ inline void ShmemMegaMoePipeline<SHMEM_MEGA_MOE_TEMPLATE_ARGS>::Synch
     __gm__ int32_t* syncRank = (__gm__ int32_t*)(params_.symmetricMemory.localBase);
     __gm__ int32_t* syncCount =
         (__gm__ int32_t*)(params_.symmetricMemory.localBase + 48 * 1024 + vectorCoreIndex_ * 64);
+    // This scope contains only the barrier protocol. Report its completed all-AIV
+    // semantics below, rather than exposing the polling accesses as data races.
+    EXAMPLE_MSTX_FUSE_SCOPE_START();
     int count = ShmemMegaMoeReadGmBypassDCache(syncCount) + 1;
     for (int i = vectorCoreIndex_; i < rankCount_; i += vectorCoreCount_) {
         __gm__ int32_t* remoteSynchronizationFlag =
@@ -1054,6 +1083,10 @@ __aicore__ inline void ShmemMegaMoePipeline<SHMEM_MEGA_MOE_TEMPLATE_ARGS>::Synch
     ShmemMegaMoeWriteGmBypassDCache(syncCount, count);
     PipeBarrier<PIPE_ALL>();
     SyncAll<true>();
+    EXAMPLE_MSTX_FUSE_SCOPE_END();
+    // Every AIV participates, including those that do not poll a rank slot.
+    // The real PIPE_ALL and SyncAll above justify the all-pipe barrier report.
+    EXAMPLE_MSTX_CROSS_NPU_BARRIER_REPORT(rankCount_, vectorCoreCount_, true, true);
 }
 
 template <SHMEM_MEGA_MOE_TEMPLATE_DECL>
@@ -1104,7 +1137,7 @@ __aicore__ inline void ShmemMegaMoePipeline<SHMEM_MEGA_MOE_TEMPLATE_ARGS>::Proce
     }
     FinishFirstProjectionSync(vectorSyncState_);
     if constexpr (g_coreType == AIV) {
-        if (vectorSubBlockIndex_ == 1) {
+        if (vectorSubBlockIndex_ == 1 && vectorCoreIndex_ == 1) {
             CopyExpertTokenCounts();
         }
     }

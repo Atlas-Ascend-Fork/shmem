@@ -705,7 +705,17 @@ __aicore__ inline void ShmemMegaMoeSwiGluEpilogue<SHMEM_MEGA_MOE_SWIGLU_EPILOGUE
     AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(0);
     AscendC::SetFlag<AscendC::HardEvent::MTE3_S>(0);
     AscendC::WaitFlag<AscendC::HardEvent::MTE3_S>(0);
+#ifdef __MSTX_DFX_REPORT__
+    EXAMPLE_MSTX_FUSE_SCOPE_START();
+    int32_t previousLoops = AscendC::AtomicAdd(readyFlags_, 1);
+    EXAMPLE_MSTX_FUSE_SCOPE_END();
+    if (previousLoops > 0) {
+        EXAMPLE_MSTX_SIGNAL_WAIT_REPORT(readyFlags_, ACLSHMEM_CMP_GE, previousLoops);
+    }
+    EXAMPLE_MSTX_SIGNAL_SET_REPORT(readyFlags_, previousLoops + 1);
+#else
     AscendC::AtomicAdd(readyFlags_, 1);
+#endif
     return;
 }
 

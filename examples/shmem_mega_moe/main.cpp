@@ -376,6 +376,13 @@ bool ResolveAndValidateShape(ShmemMegaMoeExample::RunConfig& cfg)
         return false;
     }
 
+#if defined(ACLSHMEM_MSSANITIZER_BUILD) || defined(__MSTX_DFX_REPORT__)
+    if (!ShmemMegaMoeKernel::RoutingReportFits(cfg.maxReceivedTokens, cfg.modelDim)) {
+        std::cerr << "[shmem_mega_moe] shape exceeds routing synchronization report event ID capacity" << std::endl;
+        return false;
+    }
+#endif
+
     size_t workspaceTerm = 0;
     if (!CheckedProduct({cfg.maxReceivedTokens, cfg.modelDim, sizeof(int32_t)}, workspaceTerm) ||
         workspaceTerm > static_cast<size_t>(std::numeric_limits<int64_t>::max()) ||
