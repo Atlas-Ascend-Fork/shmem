@@ -12,6 +12,10 @@
 
 constexpr uint32_t ACLSHMEM_SYNC_STRESS_AIV_COUNT = 32;
 constexpr uint32_t ACLSHMEM_SYNC_STRESS_ITERATIONS = 64;
+constexpr uint32_t ACLSHMEM_SYNC_MIXED_SLOTS_PER_SIDE = 128;
+
+void sync_mixed_stress_do(
+    uint32_t block_num, void* stream, uint64_t config, uint8_t* reports, aclshmem_team_t team, uint32_t iterations);
 
 void sync_increase_do(void* stream, uint64_t config, uint8_t* addr, int rank_id, int rank_size);
 void sync_increase_vec_do(void* stream, uint64_t config, uint8_t* addr, int rank_id, int rank_size);

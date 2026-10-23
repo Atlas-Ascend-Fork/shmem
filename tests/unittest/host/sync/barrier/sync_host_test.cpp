@@ -10,6 +10,7 @@
 #include <iostream>
 #include <limits>
 #include <string>
+#include <vector>
 #include <unistd.h>
 #include <gtest/gtest.h>
 
@@ -322,4 +323,46 @@ TEST(TEST_SYNC_API, test_sync_core_soft_mixed)
     const int32_t process_count = test_gnpu_num;
     uint64_t local_mem_size = 1024UL * 1024UL * 16;
     test_mutil_task(test_sync_core_soft_mixed, local_mem_size, process_count);
+}
+
+static void test_sync_mixed_stress(int32_t rank_id, int32_t n_ranks, uint64_t local_mem_size)
+{
+    const int32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    aclrtStream stream;
+    test_init(rank_id, n_ranks, local_mem_size, &stream);
+    ASSERT_NE(stream, nullptr);
+    alarm(ACLSHMEM_SYNC_TIMEOUT_SECONDS);
+
+    constexpr size_t report_bytes = 2 * ACLSHMEM_SYNC_MIXED_SLOTS_PER_SIDE * ACLSHMEM_SYNCBIT_SIZE;
+    uint8_t* reports = nullptr;
+    ASSERT_EQ(aclrtMalloc(reinterpret_cast<void**>(&reports), report_bytes, ACL_MEM_MALLOC_NORMAL_ONLY), ACL_SUCCESS);
+    std::vector<int32_t> host(report_bytes / sizeof(int32_t));
+    // Change the worker budget across launches while reusing the same team's
+    // generations. Check completion on every AIC/AIV, including non-polling AIVs.
+    // With four PEs, two logical blocks expose the old MIX 1:2 V4 round mismatch.
+    for (uint32_t blocks : {1U, 2U, 8U, 1U}) {
+        ASSERT_EQ(aclrtMemset(reports, report_bytes, 0xff, report_bytes), ACL_SUCCESS);
+        sync_mixed_stress_do(
+            blocks, stream, util_get_ffts_config(), reports, ACLSHMEM_TEAM_WORLD, ACLSHMEM_SYNC_STRESS_ITERATIONS);
+        ASSERT_EQ(aclrtSynchronizeStream(stream), ACL_SUCCESS);
+        ASSERT_EQ(
+            aclrtMemcpy(host.data(), report_bytes, reports, report_bytes, ACL_MEMCPY_DEVICE_TO_HOST), ACL_SUCCESS);
+        for (uint32_t side = 0; side < 2; ++side) {
+            const uint32_t cores = side == 0 ? blocks : blocks * 2;
+            for (uint32_t core = 0; core < cores; ++core) {
+                const size_t offset =
+                    (side * ACLSHMEM_SYNC_MIXED_SLOTS_PER_SIDE + core) * ACLSHMEM_SYNCBIT_SIZE / sizeof(int32_t);
+                EXPECT_EQ(host[offset], ACLSHMEM_SYNC_STRESS_ITERATIONS) << "side=" << side << " core=" << core;
+            }
+        }
+        ASSERT_EQ(aclshmemi_control_barrier_all(), ACLSHMEM_SUCCESS);
+    }
+    ASSERT_EQ(aclrtFree(reports), ACL_SUCCESS);
+    test_finalize(stream, device_id);
+    alarm(0);
+}
+
+TEST(TEST_SYNC_API, test_sync_mixed_stress)
+{
+    test_mutil_task(test_sync_mixed_stress, 16UL * 1024UL * 1024UL, test_gnpu_num);
 }
