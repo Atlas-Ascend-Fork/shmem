@@ -878,7 +878,7 @@
     |BITS|-|数据位宽：``8`` / ``16`` / ``32`` / ``64`` / ``128``|
     |dst|[in]|远程 PE 对称地址的指针|
     |src|[in]|本地源数据内存的指针|
-    |elem_size|[in]|目标地址和源地址中元素的总字节数|
+    |elem_size|[in]|BITS 位元素的个数；实际传输字节数为 elem_size * (BITS / 8)|
     |pe|[in]|远程 PE 编号|
     |返回值|-|无返回值|
 
@@ -893,7 +893,7 @@
     |BITS|-|数据位宽：``8`` / ``16`` / ``32`` / ``64`` / ``128``|
     |dst|[in]|本地目标内存的指针|
     |src|[in]|远程 PE 对称地址的指针|
-    |elem_size|[in]|目标地址和源地址中元素的总字节数|
+    |elem_size|[in]|BITS 位元素的个数；实际传输字节数为 elem_size * (BITS / 8)|
     |pe|[in]|远程 PE 编号|
     |返回值|-|无返回值|
 
@@ -1046,7 +1046,7 @@
     |BITS|-|数据位宽：``8`` / ``16`` / ``32`` / ``64`` / ``128``|
     |dst|[in]|远程 PE 对称地址的指针|
     |src|[in]|本地源数据内存的指针|
-    |elem_size|[in]|目标地址和源地址中元素的总字节数|
+    |elem_size|[in]|BITS 位元素的个数；实际传输字节数为 elem_size * (BITS / 8)|
     |pe|[in]|远程 PE 编号|
     |返回值|-|无返回值|
 
@@ -1061,7 +1061,7 @@
     |BITS|-|数据位宽：``8`` / ``16`` / ``32`` / ``64`` / ``128``|
     |dst|[in]|本地目标内存的指针|
     |src|[in]|远程 PE 对称地址的指针|
-    |elem_size|[in]|目标地址和源地址中元素的总字节数|
+    |elem_size|[in]|BITS 位元素的个数；实际传输字节数为 elem_size * (BITS / 8)|
     |pe|[in]|远程 PE 编号|
     |返回值|-|无返回值|
 
@@ -1102,7 +1102,7 @@
 40. **aclshmemx_put{BITS}_signal_nbi** — 从本地 PE 复制连续数据到指定 PE 对称地址并更新远程信号（位宽版本）。异步（non-blocking）接口。
 
     ```python
-    def aclshmemx_put{BITS}_signal_nbi(dst, src, elem_size, sig, signal, sig_op, pe)
+    def aclshmemx_put{BITS}_signal_nbi(dst, src, nelems, sig, signal, sig_op, pe)
     ```
 
     |参数/返回值|方向|含义|
@@ -1110,7 +1110,7 @@
     |BITS|-|数据位宽：``8`` / ``16`` / ``32`` / ``64`` / ``128``|
     |dst|[in]|远程 PE 对称地址的指针|
     |src|[in]|本地源数据内存的指针|
-    |elem_size|[in]|目标地址和源地址中元素的总字节数|
+    |nelems|[in]|BITS 位元素的个数；实际传输字节数为 nelems * (BITS / 8)|
     |sig|[in]|待更新信号字的对称地址|
     |signal|[in]|用于更新信号的值|
     |sig_op|[in]|信号更新操作。支持：``SIGNAL_SET`` / ``SIGNAL_ADD``|
@@ -1120,7 +1120,7 @@
 41. **aclshmemx_put{BITS}_signal** — 从本地 PE 复制连续数据到指定 PE 对称地址并更新远程信号（位宽版本）。同步（blocking）接口。
 
     ```python
-    def aclshmemx_put{BITS}_signal(dst, src, elem_size, sig, signal, sig_op, pe)
+    def aclshmemx_put{BITS}_signal(dst, src, nelems, sig, signal, sig_op, pe)
     ```
 
     |参数/返回值|方向|含义|
@@ -1128,7 +1128,7 @@
     |BITS|-|数据位宽：``8`` / ``16`` / ``32`` / ``64`` / ``128``|
     |dst|[in]|远程 PE 对称地址的指针|
     |src|[in]|本地源数据内存的指针|
-    |elem_size|[in]|目标地址和源地址中元素的总字节数|
+    |nelems|[in]|BITS 位元素的个数；实际传输字节数为 nelems * (BITS / 8)|
     |sig|[in]|待更新信号字的对称地址|
     |signal|[in]|用于更新信号的值|
     |sig_op|[in]|信号更新操作。支持：``SIGNAL_SET`` / ``SIGNAL_ADD``|

@@ -850,7 +850,7 @@
     |BITS|-|Data bit width. Supported option: `8`, `16`, `32`, `64`, or `128`|
     |dst|[in]|Pointer to the symmetric address of the remote PE|
     |src|[in]|Pointer to the local source data memory|
-    |elem_size|[in]|Total number of bytes of elements in the target and source addresses|
+    |elem_size|[in]|Number of BITS-bit elements; the transferred byte count is elem_size * (BITS / 8)|
     |pe|[in]|Remote PE ID|
     |Return Value|-|No return value.|
 
@@ -864,7 +864,7 @@
     |BITS|-|Data bit width. Supported option: `8`, `16`, `32`, `64`, or `128`|
     |dst|[in]|Pointer to the local target memory|
     |src|[in]|Pointer to the symmetric address of the remote PE|
-    |elem_size|[in]|Total number of bytes of elements in the target and source addresses|
+    |elem_size|[in]|Number of BITS-bit elements; the transferred byte count is elem_size * (BITS / 8)|
     |pe|[in]|Remote PE ID|
     |Return Value|-|No return value.|
 
@@ -1005,7 +1005,7 @@
     |BITS|-|Data bit width. Supported option: `8`, `16`, `32`, `64`, or `128`|
     |dst|[in]|Pointer to the symmetric address of the remote PE|
     |src|[in]|Pointer to the local source data memory|
-    |elem_size|[in]|Total number of bytes of elements in the target and source addresses|
+    |elem_size|[in]|Number of BITS-bit elements; the transferred byte count is elem_size * (BITS / 8)|
     |pe|[in]|Remote PE ID|
     |Return Value|-|No return value.|
 
@@ -1019,7 +1019,7 @@
     |BITS|-|Data bit width. Supported option: `8`, `16`, `32`, `64`, or `128`|
     |dst|[in]|Pointer to the local target memory|
     |src|[in]|Pointer to the symmetric address of the remote PE|
-    |elem_size|[in]|Total number of bytes of elements in the target and source addresses|
+    |elem_size|[in]|Number of BITS-bit elements; the transferred byte count is elem_size * (BITS / 8)|
     |pe|[in]|Remote PE ID|
     |Return Value|-|No return value.|
 
@@ -1057,7 +1057,7 @@
 
 40. **aclshmemx_put{BITS}_signal_nbi** — Copy contiguous data from the local PE to the symmetric address of a specified PE and update the remote signal (bit width version). This is an asynchronous (non-blocking) API.
     ```python
-    def aclshmemx_put{BITS}_signal_nbi(dst, src, elem_size, sig, signal, sig_op, pe)
+    def aclshmemx_put{BITS}_signal_nbi(dst, src, nelems, sig, signal, sig_op, pe)
     ```
 
     |Parameter/Return Value|Direction|Meaning|
@@ -1065,7 +1065,7 @@
     |BITS|-|Data bit width. Supported option: `8`, `16`, `32`, `64`, or `128`|
     |dst|[in]|Pointer to the symmetric address of the remote PE|
     |src|[in]|Pointer to the local source data memory|
-    |elem_size|[in]|Total number of bytes of elements in the target and source addresses|
+    |nelems|[in]|Number of BITS-bit elements; the transferred byte count is nelems * (BITS / 8)|
     |sig|[in]|Symmetric address of the signal word to be updated|
     |signal|[in]|Value of the signal to be updated|
     |sig_op|[in]|Signal update operation. Supported operation: `SIGNAL_SET` / `SIGNAL_ADD`|
@@ -1074,7 +1074,7 @@
 
 41. **aclshmemx_put{BITS}_signal** — Copy contiguous data from the local PE to the symmetric address of a specified PE and update the remote signal (bit width version). This is a synchronous (blocking) API.
     ```python
-    def aclshmemx_put{BITS}_signal(dst, src, elem_size, sig, signal, sig_op, pe)
+    def aclshmemx_put{BITS}_signal(dst, src, nelems, sig, signal, sig_op, pe)
     ```
 
     |Parameter/Return Value|Direction|Meaning|
@@ -1082,7 +1082,7 @@
     |BITS|-|Data bit width. Supported option: `8`, `16`, `32`, `64`, or `128`|
     |dst|[in]|Pointer to the symmetric address of the remote PE|
     |src|[in]|Pointer to the local source data memory|
-    |elem_size|[in]|Total number of bytes of elements in the target and source addresses|
+    |nelems|[in]|Number of BITS-bit elements; the transferred byte count is nelems * (BITS / 8)|
     |sig|[in]|Symmetric address of the signal word to be updated|
     |signal|[in]|Value of the signal to be updated|
     |sig_op|[in]|Signal update operation. Supported operation: `SIGNAL_SET` / `SIGNAL_ADD`|
