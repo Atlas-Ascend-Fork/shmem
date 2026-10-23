@@ -15,6 +15,24 @@
 #include "rdma_device_backend_base.h"
 #include "host_device/shmemi_rdma_cqe_layout.h"
 
+// Standalone kernels may select legacy firmware with ACLSHMEMI_HNS_1825_PI_ON_CHIP=0.
+#ifndef ACLSHMEMI_HNS_1825_PI_ON_CHIP
+#define ACLSHMEMI_HNS_1825_PI_ON_CHIP 1
+#endif
+
+// Only the literal 0 selects legacy; empty or invalid definitions fall back without a preprocessing error.
+#if defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
+#define ACLSHMEMI_HNS_1825_MODE_TEXT_IMPL(...) #__VA_ARGS__
+#define ACLSHMEMI_HNS_1825_MODE_TEXT(...) ACLSHMEMI_HNS_1825_MODE_TEXT_IMPL(__VA_ARGS__)
+constexpr bool aclshmemi_hns_1825_use_pi_on_chip =
+    sizeof(ACLSHMEMI_HNS_1825_MODE_TEXT(ACLSHMEMI_HNS_1825_PI_ON_CHIP)) != 2 ||
+    ACLSHMEMI_HNS_1825_MODE_TEXT(ACLSHMEMI_HNS_1825_PI_ON_CHIP)[0] != '0';
+#undef ACLSHMEMI_HNS_1825_MODE_TEXT
+#undef ACLSHMEMI_HNS_1825_MODE_TEXT_IMPL
+#else
+constexpr bool aclshmemi_hns_1825_use_pi_on_chip = false;
+#endif
+
 // WQE control segment (16B). Multi-byte fields are converted before the WQE is posted.
 struct aclshmemi_hns_1825_wqe_ctrl_seg_t {
     uint8_t owner_sl; // dw0[31:24]: owner(1) + ctrl_section_length(2) + csl(2) + difsl(3)
@@ -471,13 +489,13 @@ aclshmemi_roce_fill_wqe<aclshmemi_rdma_backend_t::HNS_1825, aclshmemi_rdma_opcod
 /**
  * @brief Ring the HNS_1825 Send Queue (SQ) doorbell.
  *
- * This function updates the SHMEM-owned SQ producer-index mirror, publishes the NIC-visible software
- * doorbell, and writes the hardware doorbell register with st_dev.
+ * This function updates the SHMEM-owned SQ producer-index mirror and writes the hardware doorbell
+ * register with st_dev. Legacy firmware also requires publishing the NIC-visible software doorbell.
  *
  * @param sq_context SQ context containing queue addresses, QPN and doorbell registers
  * @param cur_head The next SQ producer index in 64B WQEBBs
  * @param ub_local64 64-bit UB workspace, unused by this backend
- * @param ub_local32 32-bit UB workspace used for the software doorbell record
+ * @param ub_local32 32-bit UB workspace used for the legacy software doorbell record
  * @param sync_id Hardware synchronization event ID
  */
 template <>
@@ -492,16 +510,27 @@ ACLSHMEM_DEVICE void aclshmemi_roce_ring_sq_doorbell<aclshmemi_rdma_backend_t::H
     constexpr uint32_t ACLSHMEMI_HNS_1825_SQ_DB_CNTX_SIZE = 1;
 
     (void)ub_local64;
-    AscendC::DataCopyExtParams copy_params{1, sizeof(uint32_t), 0, 0, 0};
-    AscendC::GlobalTensor<uint32_t> sq_sw_db;
-    sq_sw_db.SetGlobalBuffer((__gm__ uint32_t*)sq_context->db_sw_addr, 1);
-    ub_local32.SetValue(0, aclshmemi_hns_1825_htobe32(cur_head));
-    aclshmemi_hns_1825_sync_func<AscendC::HardEvent::S_MTE3>(sync_id);
-    AscendC::DataCopyPad(sq_sw_db, ub_local32, copy_params);
+    uint64_t db_addr;
+    if constexpr (aclshmemi_hns_1825_use_pi_on_chip) {
+        (void)ub_local32;
+        // head_addr is SHMEM's host-order PI mirror, not the NIC-visible software doorbell.
+        aclshmemi_hns_1825_write_u32_gm(sq_context->head_addr, cur_head);
+        // The low PI byte selects an 8-byte slot in the 2KB-aligned doorbell window.
+        // Keep db_addr in the SQ context as the base; the payload already carries the high PI byte.
+        db_addr = sq_context->db_addr + ((uint64_t)(cur_head & 0xffU) << 3);
+    } else {
+        AscendC::DataCopyExtParams copy_params{1, sizeof(uint32_t), 0, 0, 0};
+        AscendC::GlobalTensor<uint32_t> sq_sw_db;
+        sq_sw_db.SetGlobalBuffer((__gm__ uint32_t*)sq_context->db_sw_addr, 1);
+        ub_local32.SetValue(0, aclshmemi_hns_1825_htobe32(cur_head));
+        aclshmemi_hns_1825_sync_func<AscendC::HardEvent::S_MTE3>(sync_id);
+        AscendC::DataCopyPad(sq_sw_db, ub_local32, copy_params);
 
-    // Update the independent SHMEM PI mirror while MTE3 publishes the software doorbell.
-    aclshmemi_hns_1825_write_u32_gm(sq_context->head_addr, cur_head);
-    AscendC::PipeBarrier<PIPE_MTE3>();
+        // Update the independent SHMEM PI mirror while MTE3 publishes the software doorbell.
+        aclshmemi_hns_1825_write_u32_gm(sq_context->head_addr, cur_head);
+        AscendC::PipeBarrier<PIPE_MTE3>();
+        db_addr = sq_context->db_addr;
+    }
 
     // Program the hardware doorbell register with a single st_dev write.
     aclshmemi_hns_1825_sq_db_t sq_db;
@@ -521,7 +550,7 @@ ACLSHMEM_DEVICE void aclshmemi_roce_ring_sq_doorbell<aclshmemi_rdma_backend_t::H
                                        << ACLSHMEMI_HNS_1825_SQ_DB_PI_FIELD_SHIFT);
 
     AscendC::GlobalTensor<uint32_t> db_gm;
-    db_gm.SetGlobalBuffer((__gm__ uint32_t*)sq_context->db_addr, sizeof(uint64_t) / sizeof(uint32_t));
+    db_gm.SetGlobalBuffer((__gm__ uint32_t*)db_addr, sizeof(uint64_t) / sizeof(uint32_t));
     aclshmemi_hns_1825_sync_func<AscendC::HardEvent::MTE3_S>(sync_id);
     st_dev(db_value, (__gm__ uint64_t*)db_gm.GetPhyAddr(), 0);
 }
