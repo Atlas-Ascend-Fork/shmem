@@ -821,7 +821,7 @@ int main(int argc, char* argv[])
     } else if (std::string(data_type) == "fp32") {
         CHECK_RET(test_copy_perf<float>(my_pe, n_pes));
     } else {
-        printf("ERROR: Unsupport type\n");
+        printf("ERROR: Unsupported type\n");
         return -1;
     }
 

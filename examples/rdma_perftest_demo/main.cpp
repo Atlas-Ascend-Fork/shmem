@@ -263,7 +263,7 @@ int main(int argc, char* argv[])
 {
     const int expected_argc = 9;
     if (argc != expected_argc) {
-        std::cout << "[ERROR] Paramater number mismatch." << std::endl;
+        std::cout << "[ERROR] Parameter number mismatch." << std::endl;
         std::cout << "[USAGE] ./rdma_perftest_demo <n_pes> <pe_id> <ipport> <g_npus> <f_pe> <f_npu> "
                   << "<test_type> <msg_len>. See README for more details." << std::endl;
     }

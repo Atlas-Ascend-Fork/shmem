@@ -343,7 +343,7 @@ inline Result AccTcpLinkComplexDefault::HandlePollIn() noexcept
                 return ACC_LINK_EAGAIN;
             }
         } else {                            /* ECONNRESET is broken during io, SUCCESS is broken during idle time. */
-            const auto errorNumber = errno; // avoid errno writed by log
+            const auto errorNumber = errno; // avoid errno wrote by log
             if (errorNumber == ECONNRESET || errorNumber == 0) {
                 LOG_WARN("Link " << id_ << " receive header failed, reset by peer, errno " << errorNumber);
                 return ACC_LINK_ERROR; /* socket is closed by peer, socket is error */
