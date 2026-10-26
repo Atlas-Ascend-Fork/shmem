@@ -231,13 +231,15 @@ ACLSHMEM_DEVICE void aclshmemi_udma_poll_cq_update_info(
     __gm__ aclshmemi_udma_queue_state_t* state)
 {
     // Ring CQ Doorbell (reference URMA implementation)
-    auto cq_db_addr = cq_ctx_entry->db_addr;
     // For JFC, we write the consumer index (cur_tail) directly
     __gm__ uint32_t* db_addr = (__gm__ uint32_t*)cq_ctx_entry->db_addr;
     st_dev((uint32_t)(cur_tail & 0xFFFFFF), db_addr, 0);
+
     // Update WQ tail: unwrap the 16-bit CQE entry_idx into the monotonic tail. The state is shared
-    // per jetty group, so this stays coherent for slots landing on the same physical queue.
+    // per jetty group, so this stays coherent for slots landing on the same physical queue. The CQ
+    // doorbell carries cur_tail directly, so ring it before updating and publishing the state mirrors.
     state->sq_tail = aclshmemi_udma_unwrap_wq_tail(state->sq_tail, entry_idx);
+    dcci_cachelines((__gm__ uint8_t*)state, sizeof(*state));
 }
 
 ACLSHMEM_DEVICE void aclshmemi_dump_sqe_ctx(__gm__ aclshmemi_sqe_ctx_t* sqe_ctx)
@@ -919,32 +921,42 @@ ACLSHMEM_DEVICE void aclshmemi_udma_post_send(
     aclshmemi_udma_fill_post_send_wqe<T, OP_CODE, CONFIG>(
         qp_ctx_entry, remote_mem_info, remote_addr, local_addr, cur_head, wqe_size, message_len, params, addr_ctx);
     cur_head += WQE_BB_CNT;
-    aclshmemi_udma_post_send_update_info(cur_head, qp_ctx_entry, state);
     // Only advance the group-wide CQE counter when this op actually requests a CQE.
     if constexpr (CONFIG.cqe != 0) {
         cqe_cnt++;
     }
     state->cqe_cnt = cqe_cnt;
-    if constexpr (ACLSHMEM_RELAY_SUPPORTED) {
-        // wq_ctx is read-only static data now; only the mutable queue state needs flushing.
-        dcci_cachelines((__gm__ uint8_t*)state, sizeof(aclshmemi_udma_queue_state_t));
-    }
+    aclshmemi_udma_post_send_update_info(cur_head, qp_ctx_entry, state);
     ACLSHMEM_DEBUG_FUNC(aclshmemi_dump_sq_wqe, qp_ctx_entry, posted_head, wqe_size, (uint32_t)sizeof(T));
 }
 
-// Rings the SQ doorbell and records the new producer index in the shared queue state. Callers
-// resolve state once; the doorbell address still comes from the wq_ctx, so both are passed in.
-ACLSHMEM_DEVICE void aclshmemi_udma_post_send_update_info(
-    uint32_t cur_head, __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, __gm__ aclshmemi_udma_queue_state_t* state)
+ACLSHMEM_DEVICE void aclshmemi_udma_ring_sq_doorbell(uint32_t cur_head, __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry)
 {
     // Ring SQ Doorbell (reference udma_update_sq_db in UDMA)
     // Note: db address is 64-bit, but we only update 32-bit value
     __gm__ uint32_t* door_bell_addr = (__gm__ uint32_t*)qp_ctx_entry->db_addr;
     st_dev(cur_head, door_bell_addr, 0);
-    state->sq_head = cur_head;
 }
 
-ACLSHMEM_DEVICE void aclshmemi_udma_copy_wqe_from_ub(
+ACLSHMEM_DEVICE void aclshmemi_udma_post_send_update_info(
+    uint32_t cur_head, __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, __gm__ aclshmemi_udma_queue_state_t* state)
+{
+    state->sq_head = cur_head;
+    // One flush covers the complete state and publishes sq_head with the CQE target before the
+    // SQ doorbell is issued.
+    dcci_cachelines((__gm__ uint8_t*)state, sizeof(aclshmemi_udma_queue_state_t));
+    aclshmemi_udma_ring_sq_doorbell(cur_head, qp_ctx_entry);
+}
+
+ACLSHMEM_DEVICE void aclshmemi_udma_publish_queue_state(
+    __gm__ aclshmemi_udma_queue_state_t* state, uint32_t new_head, uint32_t cqe_cnt)
+{
+    state->sq_head = new_head;
+    state->cqe_cnt = cqe_cnt;
+    dcci_cachelines((__gm__ uint8_t*)state, sizeof(aclshmemi_udma_queue_state_t));
+}
+
+ACLSHMEM_DEVICE void aclshmemi_udma_copy_wqe_from_ub_async(
     __gm__ uint8_t* dst_gm, AscendC::LocalTensor<uint8_t>& ub_local, uint32_t copy_len, uint32_t sync_id)
 {
     AscendC::GlobalTensor<uint8_t> gm_tensor;
@@ -955,8 +967,63 @@ ACLSHMEM_DEVICE void aclshmemi_udma_copy_wqe_from_ub(
     AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(sync_id);
     AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(sync_id);
     AscendC::DataCopyPad(gm_tensor, ub_local, copyParams);
+}
+
+ACLSHMEM_DEVICE void aclshmemi_udma_wait_wqe_copy_from_ub(uint32_t sync_id)
+{
     AscendC::SetFlag<AscendC::HardEvent::MTE3_S>(sync_id);
     AscendC::WaitFlag<AscendC::HardEvent::MTE3_S>(sync_id);
+}
+
+template <uint32_t WQE_BB_CNT>
+ACLSHMEM_DEVICE void aclshmemi_udma_copy_wrapped_wqe_from_ub_async(
+    __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, uint32_t cur_head, __ubuf__ uint8_t* ub_scratch, uint32_t wqe_size,
+    uint32_t sync_id)
+{
+    static_assert(WQE_BB_CNT > 1, "wrapped WQE helper requires a multi-BB WQE");
+    AscendC::LocalTensor<uint8_t> ub_local;
+    ub_local.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
+    aclshmemi_udma_sq_span_t span = aclshmemi_udma_get_sq_span<WQE_BB_CNT>(cur_head);
+    ub_local.address_.bufferAddr = reinterpret_cast<uint64_t>(ub_scratch);
+    aclshmemi_udma_copy_wqe_from_ub_async(
+        aclshmemi_udma_get_sq_wqebb_addr(qp_ctx_entry, cur_head, wqe_size), ub_local, span.first_wqebb_cnt * wqe_size,
+        sync_id);
+}
+
+template <uint32_t WQE_BB_CNT>
+ACLSHMEM_DEVICE void aclshmemi_udma_copy_wqe_from_ub_to_sq_async(
+    __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, uint32_t cur_head, __ubuf__ uint8_t* ub_scratch, uint32_t wqe_size,
+    uint32_t sync_id)
+{
+    if constexpr (WQE_BB_CNT == 1) {
+        AscendC::LocalTensor<uint8_t> ub_local;
+        ub_local.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
+        ub_local.address_.bufferAddr = reinterpret_cast<uint64_t>(ub_scratch);
+        aclshmemi_udma_copy_wqe_from_ub_async(
+            aclshmemi_udma_get_sq_wqebb_addr(qp_ctx_entry, cur_head, wqe_size), ub_local, wqe_size, sync_id);
+    } else {
+        aclshmemi_udma_copy_wrapped_wqe_from_ub_async<WQE_BB_CNT>(
+            qp_ctx_entry, cur_head, ub_scratch, wqe_size, sync_id);
+    }
+}
+
+template <uint32_t WQE_BB_CNT>
+ACLSHMEM_DEVICE void aclshmemi_udma_wait_wqe_copy_from_ub_to_sq(
+    __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, uint32_t cur_head, __ubuf__ uint8_t* ub_scratch, uint32_t wqe_size,
+    uint32_t sync_id)
+{
+    aclshmemi_udma_wait_wqe_copy_from_ub(sync_id);
+    if constexpr (WQE_BB_CNT > 1) {
+        aclshmemi_udma_sq_span_t span = aclshmemi_udma_get_sq_span<WQE_BB_CNT>(cur_head);
+        if (span.second_wqebb_cnt != 0) {
+            AscendC::LocalTensor<uint8_t> ub_local;
+            ub_local.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
+            ub_local.address_.bufferAddr = reinterpret_cast<uint64_t>(ub_scratch) + span.first_wqebb_cnt * wqe_size;
+            aclshmemi_udma_copy_wqe_from_ub_async(
+                (__gm__ uint8_t*)qp_ctx_entry->buf_addr, ub_local, span.second_wqebb_cnt * wqe_size, sync_id);
+            aclshmemi_udma_wait_wqe_copy_from_ub(sync_id);
+        }
+    }
 }
 
 template <uint32_t WQE_BB_CNT>
@@ -964,24 +1031,8 @@ ACLSHMEM_DEVICE void aclshmemi_udma_copy_wqe_from_ub_to_sq(
     __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, uint32_t cur_head, __ubuf__ uint8_t* ub_scratch, uint32_t wqe_size,
     uint32_t sync_id)
 {
-    AscendC::LocalTensor<uint8_t> ub_local;
-    ub_local.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
-    if constexpr (WQE_BB_CNT == 1) {
-        ub_local.address_.bufferAddr = reinterpret_cast<uint64_t>(ub_scratch);
-        aclshmemi_udma_copy_wqe_from_ub(
-            aclshmemi_udma_get_sq_wqebb_addr(qp_ctx_entry, cur_head, wqe_size), ub_local, wqe_size, sync_id);
-    } else {
-        aclshmemi_udma_sq_span_t span = aclshmemi_udma_get_sq_span<WQE_BB_CNT>(cur_head);
-        ub_local.address_.bufferAddr = reinterpret_cast<uint64_t>(ub_scratch);
-        aclshmemi_udma_copy_wqe_from_ub(
-            aclshmemi_udma_get_sq_wqebb_addr(qp_ctx_entry, cur_head, wqe_size), ub_local,
-            span.first_wqebb_cnt * wqe_size, sync_id);
-        if (span.second_wqebb_cnt != 0) {
-            ub_local.address_.bufferAddr = reinterpret_cast<uint64_t>(ub_scratch) + span.first_wqebb_cnt * wqe_size;
-            aclshmemi_udma_copy_wqe_from_ub(
-                (__gm__ uint8_t*)qp_ctx_entry->buf_addr, ub_local, span.second_wqebb_cnt * wqe_size, sync_id);
-        }
-    }
+    aclshmemi_udma_copy_wqe_from_ub_to_sq_async<WQE_BB_CNT>(qp_ctx_entry, cur_head, ub_scratch, wqe_size, sync_id);
+    aclshmemi_udma_wait_wqe_copy_from_ub_to_sq<WQE_BB_CNT>(qp_ctx_entry, cur_head, ub_scratch, wqe_size, sync_id);
 }
 
 static_assert(
@@ -990,11 +1041,12 @@ static_assert(
 static_assert(ACLSHMEM_UDMA_DATA_MOVER_WQE_SIZE == 64, "UDMA aggregate data mover WQE must be one 64B WQEBB");
 
 ACLSHMEM_DEVICE void aclshmemi_udma_poll_before_aggregate_flush(
-    __gm__ aclshmemi_udma_queue_state_t* state, uint32_t slot, uint32_t qp_idx, uint32_t staged_bb_cnt)
+    __gm__ aclshmemi_udma_queue_state_t* state, uint32_t slot, uint32_t qp_idx, uint32_t staged_bb_cnt,
+    uint32_t poll_cqe_cnt)
 {
     uint32_t used_after_flush = state->sq_head + staged_bb_cnt - state->sq_tail;
     if (used_after_flush + ACLSHMEM_UDMA_AGGREGATE_CREDIT_GUARD >= shm::UDMA_SQ_BASKBLK_CNT) {
-        (void)aclshmemi_udma_poll_cq(slot, qp_idx, state->cqe_cnt);
+        (void)aclshmemi_udma_poll_cq(slot, qp_idx, poll_cqe_cnt);
     }
 }
 
@@ -1010,6 +1062,8 @@ ACLSHMEM_DEVICE void aclshmemi_udma_flush_aggregate_wqes(
     constexpr uint32_t depth = shm::UDMA_SQ_BASKBLK_CNT;
     constexpr uint32_t max_copy_wqe_cnt = depth - ACLSHMEM_UDMA_AGGREGATE_CREDIT_GUARD;
     __gm__ aclshmemi_udma_queue_state_t* state = (__gm__ aclshmemi_udma_queue_state_t*)qp_ctx_entry->state_addr;
+    const uint32_t prev_cqe_cnt = state->cqe_cnt;
+    const uint32_t batch_cqe_cnt = prev_cqe_cnt + 1U;
     ACLSHMEM_DEBUG_FUNC(aclshmemi_udma_debug_check_aggregate_batch_size, pending_wqe_cnt);
     uint32_t cur_head = state->sq_head;
     uint32_t ub_slot = 0;
@@ -1022,7 +1076,7 @@ ACLSHMEM_DEVICE void aclshmemi_udma_flush_aggregate_wqes(
         if (copy_wqe_cnt > max_copy_wqe_cnt) {
             copy_wqe_cnt = max_copy_wqe_cnt;
         }
-        aclshmemi_udma_poll_before_aggregate_flush(state, pe, qp_idx, copy_wqe_cnt);
+        aclshmemi_udma_poll_before_aggregate_flush(state, pe, qp_idx, copy_wqe_cnt, prev_cqe_cnt);
         ACLSHMEM_DEBUG_FUNC(aclshmemi_udma_debug_ensure_sq_capacity, state, pe, qp_idx, copy_wqe_cnt);
 
         __gm__ uint8_t* sq_addr = (__gm__ uint8_t*)(qp_ctx_entry->buf_addr + sq_slot * wqe_size);
@@ -1030,17 +1084,16 @@ ACLSHMEM_DEVICE void aclshmemi_udma_flush_aggregate_wqes(
         AscendC::LocalTensor<uint8_t> ub_local;
         ub_local.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
         ub_local.address_.bufferAddr = reinterpret_cast<uint64_t>(ub_wqe);
-        aclshmemi_udma_copy_wqe_from_ub(sq_addr, ub_local, copy_wqe_cnt * wqe_size, sync_id);
 
         cur_head += copy_wqe_cnt;
+        aclshmemi_udma_copy_wqe_from_ub_async(sq_addr, ub_local, copy_wqe_cnt * wqe_size, sync_id);
+        aclshmemi_udma_publish_queue_state(state, cur_head, batch_cqe_cnt);
+        aclshmemi_udma_wait_wqe_copy_from_ub(sync_id);
+        aclshmemi_udma_ring_sq_doorbell(cur_head, qp_ctx_entry);
+
         ub_slot += copy_wqe_cnt;
         remaining_wqe_cnt -= copy_wqe_cnt;
-        aclshmemi_udma_post_send_update_info(cur_head, qp_ctx_entry, state);
     }
-    // One CQE per flushed aggregate batch (submit ops always request a CQE, checked by
-    // aclshmemi_udma_require_submit_cqe). The counter lives in the shared state so the
-    // group-wide poll target stays monotonic.
-    state->cqe_cnt++;
 }
 
 template <
@@ -1154,19 +1207,15 @@ ACLSHMEM_DEVICE void aclshmemi_udma_post_send_mte3(
     // DMA UB -> SQ ring entry. The helper keeps the one-BB path as one copy and
     // splits only when a multi-BB WQE reaches the ring end.
     uint32_t posted_head = cur_head;
-    aclshmemi_udma_copy_wqe_from_ub_to_sq<WQE_BB_CNT>(qp_ctx_entry, cur_head, ub_scratch, wqe_size, sync_id);
-
     cur_head += WQE_BB_CNT;
-    aclshmemi_udma_post_send_update_info(cur_head, qp_ctx_entry, state);
     // Only advance the group-wide CQE counter when this op actually requests a CQE.
     if constexpr (CONFIG.cqe != 0) {
         cqe_cnt++;
     }
-    state->cqe_cnt = cqe_cnt;
-    if constexpr (ACLSHMEM_RELAY_SUPPORTED) {
-        // wq_ctx is read-only static data now; only the mutable queue state needs flushing.
-        dcci_cachelines((__gm__ uint8_t*)state, sizeof(aclshmemi_udma_queue_state_t));
-    }
+    aclshmemi_udma_copy_wqe_from_ub_to_sq_async<WQE_BB_CNT>(qp_ctx_entry, posted_head, ub_scratch, wqe_size, sync_id);
+    aclshmemi_udma_publish_queue_state(state, cur_head, cqe_cnt);
+    aclshmemi_udma_wait_wqe_copy_from_ub_to_sq<WQE_BB_CNT>(qp_ctx_entry, posted_head, ub_scratch, wqe_size, sync_id);
+    aclshmemi_udma_ring_sq_doorbell(cur_head, qp_ctx_entry);
     ACLSHMEM_DEBUG_FUNC(aclshmemi_dump_sq_wqe, qp_ctx_entry, posted_head, wqe_size, (uint32_t)sizeof(T));
 }
 
