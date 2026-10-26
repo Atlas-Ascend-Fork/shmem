@@ -354,7 +354,7 @@ try {
 Result AclMemSegmentDevice::RegisterMemory(const void* addr, uint64_t size, std::shared_ptr<MemSlice>& slice) noexcept
 {
     SHM_LOG_INFO("MemSegmentDevice NOT SUPPORT RegisterMemory");
-    return ACLSHMEM_SUCCESS;
+    return ACLSHMEM_NOT_SUPPORTED;
 }
 
 Result AclMemSegmentDevice::ReleaseSliceMemory(const std::shared_ptr<MemSlice>& slice) noexcept

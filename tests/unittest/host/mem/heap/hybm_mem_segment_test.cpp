@@ -69,6 +69,19 @@ TEST_F(MemSegmentTest, GetInvalidServerIdBySocType_ReturnsSentinelForEachSocType
     EXPECT_EQ(MemSegmentTestHelper::GetInvalidServerIdBySocType(AscendSocType::ASCEND_UNKNOWN), invalidServerId);
 }
 
+#ifdef HAS_ACLRT_MEM_FABRIC_HANDLE
+TEST_F(MemSegmentTest, FabricRegisterMemoryReturnsNotSupported)
+{
+    const MemSegmentOptions options{};
+    AclMemSegmentDevice segment(options, 0);
+    int memory = 0;
+    std::shared_ptr<MemSlice> slice;
+
+    EXPECT_EQ(segment.RegisterMemory(&memory, sizeof(memory), slice), ACLSHMEM_NOT_SUPPORTED);
+    EXPECT_EQ(slice, nullptr);
+}
+#endif
+
 TEST_F(MemSegmentTest, GetDeviceInfo_ServerIdMatchesCurrentMachineDesign)
 {
     const int processCount = test_gnpu_num;
