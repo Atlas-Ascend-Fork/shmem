@@ -51,6 +51,10 @@ jobs:
           export repo_name=${{env.repo_name}}
           export pr_id=${{ env.MERGE_ID }}
           export task_name=${{ inputs.task_name }}
+          chown -R root:root /usr/local/Ascend/cann-9.0.0
+          chmod -R go-w /usr/local/Ascend/cann-9.0.0/lib64
           bash -x $WORKSPACE/ut.sh
     if: "${{ default() }}"
-    runs-on: ['self-hosted','os=ubuntu','arch=arm', 'repo=ascend']
+    runs-on: ['self-hosted','npu=2','smoke=204']
+    container:
+      image: swr.cn-north-4.myhuaweicloud.com/hw-ascend/${{ inputs.image_version }}
