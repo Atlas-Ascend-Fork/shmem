@@ -9,6 +9,7 @@
  */
 
 #include <cstdint>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -25,9 +26,8 @@
 namespace shm {
 namespace {
 
-constexpr uint64_t kGiB = 1024ULL * 1024ULL * 1024ULL;
-constexpr uint32_t kRankCount = 8;
-constexpr uint32_t kHbmHalfDivisor = 2;
+constexpr uint32_t kHbmLimitNumerator = 3;
+constexpr uint32_t kHbmLimitDenominator = 4;
 
 class UserBufferVaReserveTest : public testing::Test {
 protected:
@@ -36,21 +36,22 @@ protected:
         deviceId_ = test_first_npu;
         ASSERT_EQ(aclInit(nullptr), ACL_SUCCESS);
         aclInitialized_ = true;
-        ASSERT_EQ(aclrtSetDevice(deviceId_), ACL_SUCCESS);
-        deviceSet_ = true;
 
-        size_t hbmFree = 0;
-        size_t hbmTotal = 0;
-        ASSERT_EQ(aclrtGetMemInfo(ACL_HBM_MEM, &hbmFree, &hbmTotal), ACL_SUCCESS);
-        const size_t hbmSafeLimit = hbmTotal / kHbmHalfDivisor;
-        if (hbmSafeLimit < HYBM_MAX_SINGLE_RESERVE_SIZE) {
-            GTEST_SKIP() << "Skip large virtual-address reservation: total HBM=" << hbmTotal
-                         << " bytes, 50% limit=" << hbmSafeLimit << " bytes, required=" << HYBM_MAX_SINGLE_RESERVE_SIZE
-                         << " bytes.";
+        ASSERT_GT(test_gnpu_num, 0);
+        rankCount_ = static_cast<uint32_t>(test_gnpu_num);
+        for (int index = 0; index < test_gnpu_num; ++index) {
+            const int32_t deviceId = test_first_npu + index;
+            ASSERT_EQ(aclrtSetDevice(deviceId), ACL_SUCCESS);
+            size_t hbmFree = 0;
+            size_t hbmTotal = 0;
+            const auto queryStatus = aclrtGetMemInfo(ACL_HBM_MEM, &hbmFree, &hbmTotal);
+            const auto resetStatus = aclrtResetDevice(deviceId);
+            ASSERT_EQ(queryStatus, ACL_SUCCESS);
+            ASSERT_EQ(resetStatus, ACL_SUCCESS);
+            const size_t hbmSafeLimit = hbmTotal / kHbmLimitDenominator * kHbmLimitNumerator +
+                                        hbmTotal % kHbmLimitDenominator * kHbmLimitNumerator / kHbmLimitDenominator;
+            hbmSafeLimits_.push_back(hbmSafeLimit);
         }
-
-        ASSERT_EQ(hybm_init(deviceId_, 0), ACLSHMEM_SUCCESS);
-        hybmInitialized_ = true;
     }
 
     void TearDown() override
@@ -72,6 +73,21 @@ protected:
 
     void ReserveAndVerify(uint64_t heapSize, bool expectFixedBase)
     {
+        const uint64_t slotSize = ALIGN_UP(heapSize, DEVMM_HEAP_SIZE);
+        for (uint32_t index = 0; index < rankCount_; ++index) {
+            if (slotSize > hbmSafeLimits_[index]) {
+                GTEST_SKIP() << "Skip large virtual-address reservation: device=" << test_first_npu + index
+                             << ", 75% HBM limit=" << hbmSafeLimits_[index]
+                             << " bytes, required per rank slot=" << slotSize << " bytes, rank slots=" << rankCount_
+                             << ", total VA=" << slotSize * rankCount_ << " bytes.";
+            }
+        }
+        if (!hybmInitialized_) {
+            // hybm_init selects the device; TearDown releases that device reference.
+            ASSERT_EQ(hybm_init(deviceId_, 0), ACLSHMEM_SUCCESS);
+            deviceSet_ = true;
+            hybmInitialized_ = true;
+        }
         UserBufferHeapInput input;
         MemSegmentOptions options{};
         options.devId = deviceId_;
@@ -81,7 +97,7 @@ protected:
         options.infoExType = HYBM_INFO_EXG_IN_NODE;
         options.size = heapSize;
         options.rankId = 0;
-        options.rankCnt = kRankCount;
+        options.rankCnt = rankCount_;
         options.userBufferHeapInput = &input;
 
         segment_ = MemSegment::Create(options, 0);
@@ -104,9 +120,8 @@ protected:
             EXPECT_EQ(reinterpret_cast<uint64_t>(base), HYBM_GVM_START_ADDR);
         }
 
-        const uint64_t slotSize = ALIGN_UP(heapSize, DEVMM_HEAP_SIZE);
-        for (uint32_t rank = 0; rank < kRankCount; ++rank) {
-            uint32_t resolvedRank = kRankCount;
+        for (uint32_t rank = 0; rank < rankCount_; ++rank) {
+            uint32_t resolvedRank = rankCount_;
             const auto* slotBase = static_cast<const uint8_t*>(base) + rank * slotSize;
             EXPECT_TRUE(segment_->GetRankIdByAddr(slotBase, 1, resolvedRank));
             EXPECT_EQ(resolvedRank, rank);
@@ -116,7 +131,12 @@ protected:
         segment_.reset();
     }
 
+    uint64_t BoundarySlotUnits() const { return HYBM_MAX_SINGLE_RESERVE_SIZE / DEVMM_HEAP_SIZE / rankCount_; }
+
+    uint32_t rankCount_{0};
+
 private:
+    std::vector<size_t> hbmSafeLimits_;
     int32_t deviceId_{0};
     bool aclInitialized_{false};
     bool deviceSet_{false};
@@ -124,19 +144,39 @@ private:
     MemSegmentPtr segment_;
 };
 
-TEST_F(UserBufferVaReserveTest, ReserveBelow128GiBBoundary) { ReserveAndVerify(15 * kGiB, false); }
-
-TEST_F(UserBufferVaReserveTest, ReserveAt128GiBBoundary) { ReserveAndVerify(16 * kGiB, true); }
-
-TEST_F(UserBufferVaReserveTest, ReserveEightSlotsAbove128GiB)
+TEST_F(UserBufferVaReserveTest, ReserveBelow128GiBBoundary)
 {
-    ReserveAndVerify(16 * kGiB + 6 * 1024ULL * 1024ULL, true);
+    const uint64_t slotUnits = (HYBM_MAX_SINGLE_RESERVE_SIZE / DEVMM_HEAP_SIZE - 1) / rankCount_;
+    if (slotUnits == 0) {
+        GTEST_SKIP() << "No positive aligned slot size produces total VA below 128 GiB for " << rankCount_ << " ranks.";
+    }
+    ASSERT_LT(slotUnits * DEVMM_HEAP_SIZE * rankCount_, HYBM_MAX_SINGLE_RESERVE_SIZE);
+    ReserveAndVerify(slotUnits * DEVMM_HEAP_SIZE, false);
+}
+
+TEST_F(UserBufferVaReserveTest, ReserveAt128GiBBoundary)
+{
+    if (HYBM_MAX_SINGLE_RESERVE_SIZE % (DEVMM_HEAP_SIZE * rankCount_) != 0) {
+        GTEST_SKIP() << "Equal aligned rank slots cannot produce exactly 128 GiB for " << rankCount_ << " ranks.";
+    }
+    ASSERT_EQ(BoundarySlotUnits() * DEVMM_HEAP_SIZE * rankCount_, HYBM_MAX_SINGLE_RESERVE_SIZE);
+    ReserveAndVerify(BoundarySlotUnits() * DEVMM_HEAP_SIZE, true);
+}
+
+TEST_F(UserBufferVaReserveTest, ReserveAbove128GiBBoundary)
+{
+    const uint64_t slotSize = (BoundarySlotUnits() + 1) * DEVMM_HEAP_SIZE;
+    ASSERT_GT(slotSize * rankCount_, HYBM_MAX_SINGLE_RESERVE_SIZE);
+    ReserveAndVerify(slotSize, true);
 }
 
 TEST_F(UserBufferVaReserveTest, ReserveAfterRelease)
 {
     for (uint32_t iteration = 0; iteration < 10; ++iteration) {
-        ReserveAndVerify(16 * kGiB + 6 * 1024ULL * 1024ULL, true);
+        ReserveAndVerify((BoundarySlotUnits() + 1) * DEVMM_HEAP_SIZE, true);
+        if (IsSkipped() || HasFatalFailure() || HasFailure()) {
+            return;
+        }
     }
 }
 
