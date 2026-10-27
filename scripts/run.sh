@@ -14,7 +14,7 @@ readonly PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
 readonly BUILD_PATH="$PROJECT_ROOT/build"
 readonly COVERAGE_PATH="$BUILD_PATH/coverage"
 
-lcov --version > /dev/null 2>&1
+lcov_version=$(lcov --version 2>/dev/null)
 lcov_not_found=$?
 
 cd ${PROJECT_ROOT}
@@ -159,12 +159,34 @@ bash "$PROJECT_ROOT/tests/unittest/scripts/hbm_leak_check.sh" after "$FIRST_NPU"
 if [[ $lcov_not_found -ne 0 ]]; then
     echo "lcov not found, code coverage generation will skipped."
 else
+    echo "Using $lcov_version"
+    if [[ ! $lcov_version =~ ([0-9]+)\.([0-9]+) ]]; then
+        echo "Unable to determine lcov version: $lcov_version" >&2
+        exit 1
+    fi
+    lcov_major=$((10#${BASH_REMATCH[1]}))
+    lcov_minor=$((10#${BASH_REMATCH[2]}))
+    coverage_rc=(--rc lcov_branch_coverage=1)
+    capture_errors=()
+    remove_errors=()
+    if (( lcov_major >= 2 )); then
+        coverage_rc=(--rc branch_coverage=1)
+        remove_errors=(--ignore-errors unused)
+        # Function end-line conflicts changed category in lcov 2.1.
+        if (( lcov_major == 2 && lcov_minor == 0 )); then
+            capture_errors=(--ignore-errors mismatch)
+        else
+            capture_errors=(--ignore-errors inconsistent)
+        fi
+    fi
     mkdir -p "$COVERAGE_PATH"
     cd "$COVERAGE_PATH"
-    lcov -d "$BUILD_PATH" --c --output-file "$COVERAGE_PATH/coverage.info" -rc lcov_branch_coverage=1 --rc lcov_excl_br_line="LCOV_EXCL_BR_LINE|SHM_LOG_*|SHM_ASSERT*|ACLSHMEM_CHECK_RET"
-    lcov -e "$COVERAGE_PATH/coverage.info" "*/src/host/*" -o "$COVERAGE_PATH/coverage.info" --rc lcov_branch_coverage=1
-    lcov -r "$COVERAGE_PATH/coverage.info" "*src/host/common/*" -o "$COVERAGE_PATH/coverage.info" --rc lcov_branch_coverage=1
-    genhtml -o "$COVERAGE_PATH/result" "$COVERAGE_PATH/coverage.info" --show-details --legend --rc lcov_branch_coverage=1
+    # GCC/gcov may report conflicting end lines for GoogleTest macro-generated functions.
+    # Limit error-category suppression to capture and the optional exclusion pattern.
+    lcov -d "$BUILD_PATH" --c --output-file "$COVERAGE_PATH/coverage.info" "${capture_errors[@]}" "${coverage_rc[@]}" --rc lcov_excl_br_line="LCOV_EXCL_BR_LINE|SHM_LOG_*|SHM_ASSERT*|ACLSHMEM_CHECK_RET"
+    lcov -e "$COVERAGE_PATH/coverage.info" "*/src/host/*" -o "$COVERAGE_PATH/coverage.info" "${coverage_rc[@]}"
+    lcov -r "$COVERAGE_PATH/coverage.info" "*src/host/common/*" -o "$COVERAGE_PATH/coverage.info" "${remove_errors[@]}" "${coverage_rc[@]}"
+    genhtml -o "$COVERAGE_PATH/result" "$COVERAGE_PATH/coverage.info" --show-details --legend "${coverage_rc[@]}"
 fi
 
 cd ${CURRENT_DIR}
