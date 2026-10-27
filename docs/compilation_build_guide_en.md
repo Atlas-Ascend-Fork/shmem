@@ -28,7 +28,7 @@ The basic SHMEM build command is `bash build.sh`. The default build mode generat
 - `-examples`: displays all cases in the `examples` directory.
 - `-python_example`: provides the PyTorch access capability for some cases in the `examples` directory.
 - `-enable_rdma`: builds and enables RDMA capabilities. By default, the RDMA backend type is configured for Ascend 910B/C. For Ascend 950, you need to use `-rdma_backend` to specify the backend type.
-- `-rdma_backend`: specifies the RDMA backend type (not supported by Ascend 910B/C). The value can be `XSCALE` (Yunsilicon NICs are used). This option must be used together with `-enable_rdma`. Otherwise, an error is returned. The parameter sequence is not limited.
+- `-rdma_backend`: specifies the RDMA backend type (not supported by Ascend 910B/C). The value can be `XSCALE` (Yunsilicon NICs) or `HNS_1825` (1825 NICs). This option must be used together with `-enable_rdma`. Otherwise, an error is returned. The parameter sequence is not limited.
 - `-enable_ascendc_dump`: enables the `AscendC_Dump` mode for debugging the operator kernel code.
 - `-package`: builds the installation package for delivery, and generates the run package and Python wheel at the same time (including the behavior of `-python_extension`)
     * generates the run package `SHMEM\_{version}\_linux-{arch}.run` in the `{project_root}/package/{arch}/` directory.
@@ -68,6 +68,9 @@ To use the RDMA function, enable the `-enable_rdma` parameter during build. Then
 # Enabling RDMA on the Ascend 950PR&950DT products platform and specifying XSCALE as the backend (parameter sequence example 1)
 bash scripts/build.sh -soc_type Ascend950 -enable_rdma -rdma_backend XSCALE
 
+# Enabling RDMA on the Ascend 950PR&950DT products platform with an HNS_1825 NIC
+bash scripts/build.sh -soc_type Ascend950 -enable_rdma -rdma_backend HNS_1825
+
 # Enabling RDMA on the Ascend 950PR&950DT products platform and specifying XSCALE as the backend (parameter sequence example 2)
 bash scripts/build.sh -enable_rdma -soc_type Ascend950 -rdma_backend XSCALE
 
@@ -94,13 +97,15 @@ bash scripts/build.sh -enable_rdma -rdma_backend XSCALE
 
 The `-rdma_backend` parameter supports the following backend types:
 - `XSCALE`: Yunsilicon NIC (supported only by Ascend 950)
+- `HNS_1825`: 1825 NIC (supported only by Ascend 950)
 
 **⚠️ Important**:
 
 1. **Automatically-generated compilation definitions**:
    - CMake automatically generates the compilation definitions below based on the value of `-rdma_backend`. You do not need to manually set them.
      - When `-rdma_backend` is set to `XSCALE`, `-DACLSHMEMI_RDMA_K_BACKEND_XSCALE=1` is automatically added.
-     - When no backend is specified, `-DACLSHMEMI_RDMA_K_BACKEND_IN_DIE=1` is automatically added.
+     - When `-rdma_backend` is set to `HNS_1825`, `-DACLSHMEMI_RDMA_K_BACKEND_HNS_1825=1` is automatically added.
+     - When no backend is specified, neither backend macro is added; the device defaults to `IN_DIE`.
    - Manually defining these macros may cause compilation conflicts or function exceptions.
 
 2. **Internal macros that cannot be manually defined**:
