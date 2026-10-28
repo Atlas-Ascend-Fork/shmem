@@ -1,6 +1,8 @@
 # SDMA使用说明
 
 > **平台限制**：A2/A3 支持 SDMA put/get；Ascend950 仅支持 SDMA get，不支持 SDMA put。
+>
+> **用例运行限制**：本用例仅支持在 A2/A3 平台运行。用例包含 SDMA put 操作，因此不支持在 Ascend950 上运行。
 
 ## 环境要求和准备
 

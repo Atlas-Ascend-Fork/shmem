@@ -1,6 +1,8 @@
 # SDMA Usage Description
 
 > **Platform limitation**: A2/A3 support SDMA put/get; Ascend950 supports only SDMA get, not SDMA put.
+>
+> **Example runtime limitation**: This example runs only on A2/A3 platforms. It includes SDMA put operations and therefore cannot run on Ascend950.
 
 ## Environment Requirements and Preparations
 
