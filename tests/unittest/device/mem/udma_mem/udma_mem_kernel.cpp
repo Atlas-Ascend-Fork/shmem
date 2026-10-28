@@ -212,6 +212,170 @@ void test_udma_highlevel_local_rma(uint32_t block_dim, void* stream, uint8_t* sy
     UDMAHighLevelLocalRmaTest<<<block_dim, nullptr, stream>>>(symmetric, config);
 }
 
+ACLSHMEM_DEVICE bool check_highlevel_get_result(__gm__ uint8_t* dst, uint32_t peer, uint32_t offset, uint32_t length)
+{
+    for (uint32_t i = 0; i < length; ++i) {
+        const uint8_t expected =
+            static_cast<uint8_t>((peer * 17 + UDMA_HIGHLEVEL_SEMANTICS_PREFIX_BYTES + offset + i + 3) & 0xFF);
+        if (dst[i] != expected) {
+            return false;
+        }
+    }
+    return true;
+}
+
+extern "C" ACLSHMEM_GLOBAL_VECTOR void udma_highlevel_get_semantics_test(
+    GM_ADDR symmetric, GM_ADDR status, uint64_t config)
+{
+    util_set_ffts_config(config);
+    const uint32_t my_pe = static_cast<uint32_t>(aclshmem_my_pe());
+    const uint32_t n_pes = static_cast<uint32_t>(aclshmem_n_pes());
+    if (n_pes < 2) {
+        return;
+    }
+    const uint32_t peer = (my_pe + 1) % n_pes;
+    const uint32_t region_bytes = UDMA_HIGHLEVEL_GET_SEMANTICS_REGION_BYTES;
+    __gm__ uint8_t* source_bank = reinterpret_cast<__gm__ uint8_t*>(symmetric);
+    __gm__ uint8_t* destination_bank = source_bank + static_cast<size_t>(n_pes) * region_bytes;
+    __gm__ uint8_t* source =
+        source_bank + static_cast<size_t>(peer) * region_bytes + UDMA_HIGHLEVEL_SEMANTICS_PREFIX_BYTES;
+    __gm__ uint8_t* destination =
+        destination_bank + static_cast<size_t>(my_pe) * region_bytes + UDMA_HIGHLEVEL_SEMANTICS_PREFIX_BYTES;
+    uint32_t errors = 0;
+
+    aclshmem_getmem(destination, source, UDMA_HIGHLEVEL_GET_SEMANTICS_BYTES, static_cast<int32_t>(peer));
+    if (!check_highlevel_get_result(destination, peer, 0, UDMA_HIGHLEVEL_GET_SEMANTICS_BYTES)) {
+        errors |= 1U;
+    }
+
+    aclshmem_getmem_nbi(
+        destination + UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, source + UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES,
+        UDMA_HIGHLEVEL_GET_SEMANTICS_BYTES, static_cast<int32_t>(peer));
+    aclshmem_quiet();
+    if (!check_highlevel_get_result(
+            destination + UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, peer, UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES,
+            UDMA_HIGHLEVEL_GET_SEMANTICS_BYTES)) {
+        errors |= 2U;
+    }
+
+    aclshmem_get32(
+        destination + 2 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, source + 2 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES,
+        UDMA_HIGHLEVEL_GET_SEMANTICS_SIZE_NELEMS, static_cast<int32_t>(peer));
+    if (!check_highlevel_get_result(
+            destination + 2 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, peer, 2 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES,
+            UDMA_HIGHLEVEL_GET_SEMANTICS_SIZE_NELEMS * sizeof(uint32_t))) {
+        errors |= 4U;
+    }
+
+    aclshmem_get32_nbi(
+        destination + 3 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, source + 3 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES,
+        UDMA_HIGHLEVEL_GET_SEMANTICS_SIZE_NELEMS, static_cast<int32_t>(peer));
+    aclshmem_quiet();
+    if (!check_highlevel_get_result(
+            destination + 3 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, peer, 3 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES,
+            UDMA_HIGHLEVEL_GET_SEMANTICS_SIZE_NELEMS * sizeof(uint32_t))) {
+        errors |= 8U;
+    }
+
+    aclshmem_uint32_get(
+        reinterpret_cast<__gm__ uint32_t*>(destination + 4 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES),
+        reinterpret_cast<__gm__ uint32_t*>(source + 4 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES),
+        UDMA_HIGHLEVEL_SEMANTICS_TYPED_NELEMS, static_cast<int32_t>(peer));
+    if (!check_highlevel_get_result(
+            destination + 4 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, peer, 4 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES,
+            UDMA_HIGHLEVEL_SEMANTICS_TYPED_NELEMS * sizeof(uint32_t))) {
+        errors |= 16U;
+    }
+
+    aclshmem_uint32_get_nbi(
+        reinterpret_cast<__gm__ uint32_t*>(destination + 5 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES),
+        reinterpret_cast<__gm__ uint32_t*>(source + 5 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES),
+        UDMA_HIGHLEVEL_SEMANTICS_TYPED_NELEMS, static_cast<int32_t>(peer));
+    aclshmem_quiet();
+    if (!check_highlevel_get_result(
+            destination + 5 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, peer, 5 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES,
+            UDMA_HIGHLEVEL_SEMANTICS_TYPED_NELEMS * sizeof(uint32_t))) {
+        errors |= 32U;
+    }
+
+    __gm__ uint32_t* status_ptr = reinterpret_cast<__gm__ uint32_t*>(status);
+    status_ptr[my_pe] = errors;
+    dcci_cacheline(reinterpret_cast<__gm__ uint8_t*>(&status_ptr[my_pe]));
+}
+
+void test_udma_highlevel_get_semantics(
+    uint32_t block_dim, void* stream, uint8_t* symmetric, uint8_t* status, uint64_t config)
+{
+    udma_highlevel_get_semantics_test<<<block_dim, nullptr, stream>>>(symmetric, status, config);
+}
+
+ACLSHMEM_DEVICE void reuse_highlevel_put_source(__gm__ uint8_t* source, uint32_t length)
+{
+    for (uint32_t i = 0; i < length; ++i) {
+        source[i] = static_cast<uint8_t>(source[i] ^ 0xFF);
+    }
+    // Publish scalar stores so a transfer that reads the source too late observes the new values.
+    dcci_cachelines(source, length);
+}
+
+extern "C" ACLSHMEM_GLOBAL_VECTOR void udma_highlevel_put_semantics_test(GM_ADDR symmetric, uint64_t config)
+{
+    util_set_ffts_config(config);
+    const uint32_t my_pe = static_cast<uint32_t>(aclshmem_my_pe());
+    const uint32_t n_pes = static_cast<uint32_t>(aclshmem_n_pes());
+    if (n_pes < 2) {
+        return;
+    }
+    const uint32_t peer = (my_pe + 1) % n_pes;
+    const uint32_t region_bytes = UDMA_HIGHLEVEL_PUT_SEMANTICS_REGION_BYTES;
+    __gm__ uint8_t* source_bank = reinterpret_cast<__gm__ uint8_t*>(symmetric);
+    __gm__ uint8_t* destination_bank = source_bank + static_cast<size_t>(n_pes) * region_bytes;
+    __gm__ uint8_t* source =
+        source_bank + static_cast<size_t>(my_pe) * region_bytes + UDMA_HIGHLEVEL_SEMANTICS_PREFIX_BYTES;
+    __gm__ uint8_t* destination =
+        destination_bank + static_cast<size_t>(my_pe) * region_bytes + UDMA_HIGHLEVEL_SEMANTICS_PREFIX_BYTES;
+
+    aclshmem_putmem(destination, source, UDMA_HIGHLEVEL_PUT_SEMANTICS_BYTES, static_cast<int32_t>(peer));
+    // Blocking return must allow source reuse before any subsequent quiet.
+    reuse_highlevel_put_source(source, UDMA_HIGHLEVEL_PUT_SEMANTICS_BYTES);
+    aclshmem_putmem_nbi(
+        destination + UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, source + UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES,
+        UDMA_HIGHLEVEL_PUT_SEMANTICS_BYTES, static_cast<int32_t>(peer));
+    aclshmem_quiet();
+    reuse_highlevel_put_source(source + UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, UDMA_HIGHLEVEL_PUT_SEMANTICS_BYTES);
+
+    aclshmem_put32(
+        destination + 2 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, source + 2 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES,
+        UDMA_HIGHLEVEL_PUT_SEMANTICS_SIZE_NELEMS, static_cast<int32_t>(peer));
+    reuse_highlevel_put_source(
+        source + 2 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, UDMA_HIGHLEVEL_PUT_SEMANTICS_SIZE_NELEMS * sizeof(uint32_t));
+    aclshmem_put32_nbi(
+        destination + 3 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, source + 3 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES,
+        UDMA_HIGHLEVEL_PUT_SEMANTICS_SIZE_NELEMS, static_cast<int32_t>(peer));
+    aclshmem_quiet();
+    reuse_highlevel_put_source(
+        source + 3 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, UDMA_HIGHLEVEL_PUT_SEMANTICS_SIZE_NELEMS * sizeof(uint32_t));
+    aclshmem_uint32_put(
+        reinterpret_cast<__gm__ uint32_t*>(destination + 4 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES),
+        reinterpret_cast<__gm__ uint32_t*>(source + 4 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES),
+        UDMA_HIGHLEVEL_SEMANTICS_TYPED_NELEMS, static_cast<int32_t>(peer));
+    reuse_highlevel_put_source(
+        source + 4 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, UDMA_HIGHLEVEL_SEMANTICS_TYPED_NELEMS * sizeof(uint32_t));
+    aclshmem_uint32_put_nbi(
+        reinterpret_cast<__gm__ uint32_t*>(destination + 5 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES),
+        reinterpret_cast<__gm__ uint32_t*>(source + 5 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES),
+        UDMA_HIGHLEVEL_SEMANTICS_TYPED_NELEMS, static_cast<int32_t>(peer));
+    aclshmem_quiet();
+    reuse_highlevel_put_source(
+        source + 5 * UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES, UDMA_HIGHLEVEL_SEMANTICS_TYPED_NELEMS * sizeof(uint32_t));
+    // The host waits for all senders before checking inbound data.
+}
+
+void test_udma_highlevel_put_semantics(uint32_t block_dim, void* stream, uint8_t* symmetric, uint64_t config)
+{
+    udma_highlevel_put_semantics_test<<<block_dim, nullptr, stream>>>(symmetric, config);
+}
+
 extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void UDMAPutActionPointerTest(GM_ADDR gva)
 {
     AscendC::TPipe pipe;

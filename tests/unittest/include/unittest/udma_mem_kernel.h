@@ -22,6 +22,17 @@ constexpr int32_t UDMA_SIGNAL_INITIAL = 17;
 constexpr uint8_t UDMA_SIGNAL_GUARD = 0xA5;
 constexpr uint32_t UDMA_SIGNAL_COPY_BYTES = 8;
 
+// Six slots: mem, sized and typed, each blocking/NBI, with independent prefix/tail guards.
+constexpr uint32_t UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES = 128;
+constexpr uint32_t UDMA_HIGHLEVEL_SEMANTICS_PREFIX_BYTES = 32;
+constexpr uint32_t UDMA_HIGHLEVEL_GET_SEMANTICS_BYTES = 64;
+constexpr uint32_t UDMA_HIGHLEVEL_GET_SEMANTICS_SIZE_NELEMS = 8;
+constexpr uint32_t UDMA_HIGHLEVEL_GET_SEMANTICS_REGION_BYTES = UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES * 6;
+constexpr uint32_t UDMA_HIGHLEVEL_PUT_SEMANTICS_BYTES = 64;
+constexpr uint32_t UDMA_HIGHLEVEL_PUT_SEMANTICS_SIZE_NELEMS = 8;
+constexpr uint32_t UDMA_HIGHLEVEL_PUT_SEMANTICS_REGION_BYTES = UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES * 6;
+constexpr uint32_t UDMA_HIGHLEVEL_SEMANTICS_TYPED_NELEMS = 8;
+
 // Non-contiguous Tensor signal coverage: four slots exercise sync/NBI and
 // SIGNAL_SET/SIGNAL_ADD while leaving row gaps and guard bytes visible.
 constexpr uint32_t UDMA_SIGNAL_NONCONTIG_SLOT_COUNT = 4;
@@ -59,5 +70,8 @@ void test_udma_highlevel_put_signal_split(
     uint32_t block_dim, void* stream, uint8_t* gva, uint8_t* sig_addr, uint64_t elem_size, int32_t signal,
     uint32_t family, bool nbi, bool use_tensor);
 void test_udma_highlevel_local_rma(uint32_t block_dim, void* stream, uint8_t* symmetric, uint64_t config);
+void test_udma_highlevel_get_semantics(
+    uint32_t block_dim, void* stream, uint8_t* symmetric, uint8_t* status, uint64_t config);
+void test_udma_highlevel_put_semantics(uint32_t block_dim, void* stream, uint8_t* symmetric, uint64_t config);
 
 #endif // UDMA_MEM_KERNEL_H

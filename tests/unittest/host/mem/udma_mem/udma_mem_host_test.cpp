@@ -757,6 +757,173 @@ TEST(TestMemApi, TestShmemUDMAHighLevelLocalRma)
     test_mutil_task(test_aclshmem_udma_highlevel_local_rma, local_mem_size, process_count);
 }
 
+static bool udma_highlevel_peers_ready(int rank_id, int n_ranks)
+{
+    const int peer = (rank_id + 1) % n_ranks;
+    aclshmemx_net_layer_t net_layer{};
+    const int ready = (g_state.topo_list[peer] & ACLSHMEM_TRANSPORT_UDMA) != 0 &&
+                      (g_state.topo_list[peer] & ACLSHMEM_TRANSPORT_SDMA) == 0 &&
+                      aclshmemx_get_qp_net_layer(ACLSHMEM_DATA_OP_UDMA, peer, 0, &net_layer) == ACLSHMEM_SUCCESS;
+    if (!ready) {
+        std::cout << "UDMA NOT COVERED: local_pe=" << rank_id << ", peer=" << peer
+                  << " requires UDMA topology, an established QP route and no higher-priority SDMA" << std::endl;
+    }
+    // All PEs must make the same decision before allocating buffers or entering test barriers.
+    std::vector<int> readiness(static_cast<size_t>(n_ranks), 0);
+    const int ret = g_boot_handle.allgather(&ready, readiness.data(), sizeof(ready), &g_boot_handle);
+    EXPECT_EQ(ret, 0) << "Failed to exchange UDMA test preconditions";
+    return ret == 0 && std::all_of(readiness.begin(), readiness.end(), [](int value) { return value != 0; });
+}
+
+void test_aclshmem_udma_highlevel_get_semantics(int rank_id, int n_ranks, uint64_t local_mem_size)
+{
+    const int32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    aclrtStream stream = nullptr;
+    ASSERT_EQ(test_udma_init(rank_id, n_ranks, local_mem_size, &stream), 0);
+    ASSERT_NE(stream, nullptr);
+
+    constexpr size_t region_bytes = UDMA_HIGHLEVEL_GET_SEMANTICS_REGION_BYTES;
+    if (!udma_highlevel_peers_ready(rank_id, n_ranks)) {
+        test_finalize(stream, device_id);
+        GTEST_SKIP() << "UDMA NOT COVERED: at least one tested peer lacks the required UDMA configuration";
+    }
+    const size_t data_bytes = 2 * static_cast<size_t>(n_ranks) * region_bytes;
+    const size_t status_bytes = static_cast<size_t>(n_ranks) * sizeof(uint32_t);
+    auto* symmetric = static_cast<uint8_t*>(aclshmem_malloc(data_bytes + status_bytes));
+    ASSERT_NE(symmetric, nullptr);
+    auto* status = reinterpret_cast<uint32_t*>(symmetric + data_bytes);
+
+    std::vector<uint8_t> host_data(data_bytes, 0xCD);
+    // Only the owning PE populates its source slot, so a GET from the wrong PE reads guard bytes.
+    for (uint32_t offset = 0; offset < region_bytes; ++offset) {
+        host_data[static_cast<size_t>(rank_id) * region_bytes + offset] =
+            static_cast<uint8_t>((static_cast<uint32_t>(rank_id) * 17 + offset + 3) & 0xFF);
+    }
+    std::vector<uint32_t> status_host(static_cast<size_t>(n_ranks), 0xFFFFFFFFU);
+    ASSERT_EQ(aclrtMemcpy(symmetric, data_bytes, host_data.data(), data_bytes, ACL_MEMCPY_HOST_TO_DEVICE), 0);
+    ASSERT_EQ(aclrtMemcpy(status, status_bytes, status_host.data(), status_bytes, ACL_MEMCPY_HOST_TO_DEVICE), 0);
+    aclshmemi_control_barrier_all();
+
+    test_udma_highlevel_get_semantics(1, stream, symmetric, reinterpret_cast<uint8_t*>(status), util_get_ffts_config());
+    ASSERT_EQ(aclrtSynchronizeStream(stream), 0);
+    aclshmemi_control_barrier_all();
+
+    ASSERT_EQ(aclrtMemcpy(status_host.data(), status_bytes, status, status_bytes, ACL_MEMCPY_DEVICE_TO_HOST), 0);
+    for (uint32_t rank = 0; rank < static_cast<uint32_t>(n_ranks); ++rank) {
+        if (rank == static_cast<uint32_t>(rank_id)) {
+            EXPECT_EQ(status_host[rank], 0U) << "get semantic errors on local_pe=" << rank_id;
+        }
+    }
+
+    std::vector<uint8_t> result(data_bytes, 0);
+    ASSERT_EQ(aclrtMemcpy(result.data(), data_bytes, symmetric, data_bytes, ACL_MEMCPY_DEVICE_TO_HOST), 0);
+    const size_t destination_base = static_cast<size_t>(n_ranks) * region_bytes;
+    for (uint32_t rank = 0; rank < static_cast<uint32_t>(n_ranks); ++rank) {
+        const uint32_t peer = (rank + 1) % static_cast<uint32_t>(n_ranks);
+        for (uint32_t offset = 0; offset < region_bytes; ++offset) {
+            const uint32_t chunk = offset / UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES;
+            const uint32_t inner = offset % UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES;
+            const uint32_t bytes = chunk < 2 ?
+                                       UDMA_HIGHLEVEL_GET_SEMANTICS_BYTES :
+                                       (chunk < 4 ? UDMA_HIGHLEVEL_GET_SEMANTICS_SIZE_NELEMS * sizeof(uint32_t) :
+                                                    UDMA_HIGHLEVEL_SEMANTICS_TYPED_NELEMS * sizeof(uint32_t));
+            const uint8_t expected = rank == static_cast<uint32_t>(rank_id) &&
+                                             inner >= UDMA_HIGHLEVEL_SEMANTICS_PREFIX_BYTES &&
+                                             inner < UDMA_HIGHLEVEL_SEMANTICS_PREFIX_BYTES + bytes ?
+                                         static_cast<uint8_t>((peer * 17 + offset + 3) & 0xFF) :
+                                         0xCD;
+            EXPECT_EQ(result[destination_base + static_cast<size_t>(rank) * region_bytes + offset], expected)
+                << "rank=" << rank << " offset=" << offset;
+        }
+    }
+
+    aclshmem_free(symmetric);
+    test_finalize(stream, device_id);
+}
+
+TEST(TestMemApi, TestShmemUDMAHighLevelGetSemantics)
+{
+    const int process_count = test_gnpu_num;
+    if (test_global_ranks < 2) {
+        GTEST_SKIP() << "UDMA high-level get semantic test requires at least 2 NPUs";
+    }
+    const char* soc_name = aclrtGetSocName();
+    if (soc_name == nullptr || std::string(soc_name).find("Ascend950") == std::string::npos) {
+        GTEST_SKIP() << "UDMA high-level get semantic test requires Ascend950";
+    }
+    const uint64_t local_mem_size = ALIGN_UP(64UL * 1024UL * 1024UL, ACLSHMEM_PAGE_SIZE);
+    test_mutil_task(test_aclshmem_udma_highlevel_get_semantics, local_mem_size, process_count);
+}
+
+void test_aclshmem_udma_highlevel_put_semantics(int rank_id, int n_ranks, uint64_t local_mem_size)
+{
+    const int32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    aclrtStream stream = nullptr;
+    ASSERT_EQ(test_udma_init(rank_id, n_ranks, local_mem_size, &stream), 0);
+    ASSERT_NE(stream, nullptr);
+
+    constexpr size_t region_bytes = UDMA_HIGHLEVEL_PUT_SEMANTICS_REGION_BYTES;
+    if (!udma_highlevel_peers_ready(rank_id, n_ranks)) {
+        test_finalize(stream, device_id);
+        GTEST_SKIP() << "UDMA NOT COVERED: at least one tested peer lacks the required UDMA configuration";
+    }
+    const size_t data_bytes = 2 * static_cast<size_t>(n_ranks) * region_bytes;
+    auto* symmetric = static_cast<uint8_t*>(aclshmem_malloc(data_bytes));
+    ASSERT_NE(symmetric, nullptr);
+
+    std::vector<uint8_t> host_data(data_bytes, UDMA_SIGNAL_GUARD);
+    for (uint32_t rank = 0; rank < static_cast<uint32_t>(n_ranks); ++rank) {
+        for (uint32_t offset = 0; offset < region_bytes; ++offset) {
+            host_data[static_cast<size_t>(rank) * region_bytes + offset] =
+                static_cast<uint8_t>((rank * 23 + offset + 5) & 0xFF);
+        }
+    }
+    ASSERT_EQ(aclrtMemcpy(symmetric, data_bytes, host_data.data(), data_bytes, ACL_MEMCPY_HOST_TO_DEVICE), 0);
+    aclshmemi_control_barrier_all();
+
+    test_udma_highlevel_put_semantics(1, stream, symmetric, util_get_ffts_config());
+    ASSERT_EQ(aclrtSynchronizeStream(stream), 0);
+    aclshmemi_control_barrier_all();
+
+    std::vector<uint8_t> result(data_bytes, 0);
+    ASSERT_EQ(aclrtMemcpy(result.data(), data_bytes, symmetric, data_bytes, ACL_MEMCPY_DEVICE_TO_HOST), 0);
+    const size_t destination_base = static_cast<size_t>(n_ranks) * region_bytes;
+    for (uint32_t rank = 0; rank < static_cast<uint32_t>(n_ranks); ++rank) {
+        const uint32_t received_slot = (static_cast<uint32_t>(rank_id) + n_ranks - 1) % n_ranks;
+        for (uint32_t offset = 0; offset < region_bytes; ++offset) {
+            const uint32_t chunk = offset / UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES;
+            const uint32_t inner = offset % UDMA_HIGHLEVEL_SEMANTICS_SLOT_BYTES;
+            const uint32_t bytes = chunk < 2 ?
+                                       UDMA_HIGHLEVEL_PUT_SEMANTICS_BYTES :
+                                       (chunk < 4 ? UDMA_HIGHLEVEL_PUT_SEMANTICS_SIZE_NELEMS * sizeof(uint32_t) :
+                                                    UDMA_HIGHLEVEL_SEMANTICS_TYPED_NELEMS * sizeof(uint32_t));
+            const uint8_t expected = rank == received_slot && inner >= UDMA_HIGHLEVEL_SEMANTICS_PREFIX_BYTES &&
+                                             inner < UDMA_HIGHLEVEL_SEMANTICS_PREFIX_BYTES + bytes ?
+                                         static_cast<uint8_t>((rank * 23 + offset + 5) & 0xFF) :
+                                         UDMA_SIGNAL_GUARD;
+            EXPECT_EQ(result[destination_base + static_cast<size_t>(rank) * region_bytes + offset], expected)
+                << "rank=" << rank << ", offset=" << offset;
+        }
+    }
+
+    aclshmem_free(symmetric);
+    test_finalize(stream, device_id);
+}
+
+TEST(TestMemApi, TestShmemUDMAHighLevelPutSemantics)
+{
+    const int process_count = test_gnpu_num;
+    if (test_global_ranks < 2) {
+        GTEST_SKIP() << "UDMA high-level put semantic test requires at least 2 NPUs";
+    }
+    const char* soc_name = aclrtGetSocName();
+    if (soc_name == nullptr || std::string(soc_name).find("Ascend950") == std::string::npos) {
+        GTEST_SKIP() << "UDMA high-level put semantic test requires Ascend950";
+    }
+    const uint64_t local_mem_size = ALIGN_UP(64UL * 1024UL * 1024UL, ACLSHMEM_PAGE_SIZE);
+    test_mutil_task(test_aclshmem_udma_highlevel_put_semantics, local_mem_size, process_count);
+}
+
 namespace {
 
 #ifndef ACLSHMEM_RELAY_SUPPORT
