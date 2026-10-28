@@ -122,6 +122,15 @@ endif()
 add_library(aclshmem_unittest_host OBJECT ${ACLSHMEM_HOST_FILES} ${TEST_HOST_FILES} ${CONFIG_STORE_FILES} ${TOPO_SOURCE_FILES} ${UNDER_API_FILES} ${MOCK_TOPO_FILES})
 target_compile_definitions(aclshmem_unittest_host PRIVATE ACLSHMEM_UNIT_TEST=1)
 
+# Test the real dispatcher while keeping the device implementation in its original header.
+set(SYNC_DISPATCH_SOURCE "${PROJECT_SOURCE_DIR}/src/device/gm2gm/shmemi_device_cc.h")
+set(SYNC_DISPATCH_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/sync_dispatch_test/sync_dispatch_under_test.inc")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${SYNC_DISPATCH_SOURCE}")
+include("${CMAKE_CURRENT_SOURCE_DIR}/sync/barrier/extract_sync_dispatch.cmake")
+target_include_directories(aclshmem_unittest_host PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/sync_dispatch_test")
+unset(SYNC_DISPATCH_SOURCE)
+unset(SYNC_DISPATCH_OUTPUT)
+
 if(SOC_TYPE STREQUAL "Ascend950")
     target_compile_definitions(aclshmem_unittest_host PRIVATE ACLSHMEM_UT_ASCEND950=1)
 endif()

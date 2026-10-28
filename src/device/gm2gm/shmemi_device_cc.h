@@ -350,6 +350,8 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v3(aclshmem_team_t team_idx)
 {
     aclshmemx_team_t* team = aclshmemi_get_state()->team_pools[team_idx];
     int32_t vec_id = AscendC::GetBlockIdx();
+    // V3 has a fixed local-barrier sequence, so AIVs can use the full worker
+    // count even though GetTaskRation() differs between AIC and AIV in MIX.
     int32_t vec_size = AscendC::GetBlockNum() * AscendC::GetTaskRation();
 
     MSTX_FUSE_SCOPE_START();
@@ -410,7 +412,9 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v4(aclshmem_team_t team_idx)
 {
     aclshmemx_team_t* team = aclshmemi_get_state()->team_pools[team_idx];
     int32_t vec_id = AscendC::GetBlockIdx();
-    int32_t vec_size = AscendC::GetBlockNum() * AscendC::GetTaskRation();
+    // AIC and AIV must derive identical radices and local-barrier round counts.
+    // Use logical blocks for communication work, not the core-dependent ratio.
+    int32_t vec_size = AscendC::GetBlockNum();
 
     MSTX_FUSE_SCOPE_START();
 
@@ -499,7 +503,9 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v4(aclshmem_team_t team_idx)
     }
 
     MSTX_FUSE_SCOPE_END();
-    MSTX_BARRIER_NPU_REPORT(size, vec_size);
+    // All launched cores participate in the barrier, including AIVs outside
+    // the communication worker budget. Report their actual per-side count.
+    MSTX_BARRIER_NPU_REPORT(size, AscendC::GetBlockNum() * AscendC::GetTaskRation());
 }
 
 template <bool IS_AIV_ONLY = true>
@@ -509,7 +515,8 @@ ACLSHMEM_DEVICE void aclshmemi_sync(aclshmem_team_t team)
         return; // not in team
     }
     aclshmemx_team_t* sync_team = aclshmemi_get_state()->team_pools[team];
-    int32_t vec_size = AscendC::GetBlockNum() * AscendC::GetTaskRation();
+    // GetBlockNum is identical on AIC/AIV, keeping MIX on the same path.
+    int32_t vec_size = AscendC::GetBlockNum();
     if (sync_team->size <= SYNC_V3_SMALL_TEAM_SIZE || vec_size >= sync_team->size) {
         aclshmemi_sync_npu_v3<IS_AIV_ONLY>(team);
     } else {
