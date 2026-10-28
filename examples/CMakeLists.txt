@@ -208,6 +208,11 @@ foreach(
 )
     add_subdirectory(${EXAMPLE})
 endforeach()
+# SIMT UDMA QP demo requires CANN >= 9.2.0;
+# only build it when the top-level CMakeLists.txt detects a qualifying CANN.
+if(ACLSHMEM_SIMT_UDMA_SUPPORT)
+    add_subdirectory(simt_udma_qp_demo)
+endif()
 endif()
 
 if(ACLSHMEM_RDMA_SUPPORT)

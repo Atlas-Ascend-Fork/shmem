@@ -33,6 +33,7 @@
 #include "device_simt/gm2gm/shmem_device_simt_rma.h"
 #include "device_simt/gm2gm/shmem_device_simt_amo.h"
 #include "device_simt/gm2gm/engine/shmem_device_simt_mte.h"
+#include "device_simt/gm2gm/engine/shmem_device_simt_udma.h"
 #include "device_simt/ub2gm/shmem_device_simt_rma.h"
 #include "device_simt/ub2gm/engine/shmem_device_simt_mte.h"
 #include "device_simt/team/shmem_device_simt_team.h"

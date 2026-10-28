@@ -10,6 +10,14 @@
 
 file(GLOB_RECURSE TEST_KERNEL_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*_kernel.cpp")
 
+# SIMT UDMA device kernels require CANN >= 9.2.0.
+# Exclude them when the CANN version does not qualify so the remaining kernels
+# still compile; this also drops the kernels from the test binary so the
+# corresponding cases are not registered for batch execution.
+if(NOT ACLSHMEM_SIMT_UDMA_SUPPORT OR ACLSHMEM_RELAY_SUPPORT)
+    list(FILTER TEST_KERNEL_FILES EXCLUDE REGEX "simt_udma")
+endif()
+
 set(CMAKE_C_COMPILER bisheng)
 set(CMAKE_CXX_COMPILER bisheng)
 

@@ -10,6 +10,7 @@ shmem_perftest是用于测试AscendC::DataCopy、shmem MTE/UDMA/RDMA引擎以及
 - **rdma_atomic_perftest**：测试单 QP RoCE atomic 的批量完成时间、操作速率与单次完成时延（固定 2 PE，当前启用云脉 XSCALE 用例）
 - **simt_rma_perftest**：测试SIMT RMA gm2gm接口性能（仅Ascend950，需开启SIMT支持编译）
 - **simt_rma_ub2gm_perftest**：测试SIMT RMA ub2gm接口性能（仅Ascend950，需开启SIMT支持编译）
+- **simt_udma_perftest**：测试SIMT UDMA QP-specific接口性能（仅Ascend950，需开启SIMT支持编译）
 
 该示例可以帮助用户对比多种数据传输方式的性能表现。**该脚本测试结果仅做参考，性能以实际场景为准**
 
@@ -114,6 +115,8 @@ bash run.sh -m all -t put -d float -fpe 0 -a md
 
 > 注：`rdma_perftest` 不包含在上述运行模式中，需单独进入 `rdma_perftest/` 目录运行，且编译时需启用 `-enable_rdma` 参数，详见 [rdma_perftest/README.md](./rdma_perftest/README.md)。
 
+> 注：`simt_udma_perftest` 具有独立的 `--scope`（warp/block）执行域维度，默认 `all` 会依次展开 8 种执行域 × 操作组合，参数模型与顶层 `run.sh` 的 `-t`/`-d`/`-b` 展开方式不同，不参与顶层模式展开，需单独进入 `simt_udma_perftest/` 目录运行，详见 [simt_udma_perftest/README.md](./simt_udma_perftest/README.md)。
+
 ### SIMT RMA测试约束
 
 `simt_rma_perftest` 固定使用两卡进行性能测试，`-pes` 和 `-gnpus` 必须为 2。该子示例的 `OP_TYPE` 和 `DATA_SIZE` 由 `simt_rma_perftest/main.cpp` 中的编译期常量决定；外层 `-t` / `-d` 只有在用户显式传入时才会转发给SIMT子脚本进行一致性校验，不会改变实际测试的操作类型或数据位宽。
@@ -187,3 +190,4 @@ examples/shmem_perftest/output/
 - **rdma_atomic_perftest**：请参考 [rdma_atomic_perftest/README.md](./rdma_atomic_perftest/README.md)
 - **simt_rma_perftest**：请参考 [simt_rma_perftest/README.md](./simt_rma_perftest/README.md)
 - **simt_rma_ub2gm_perftest**：请参考 [simt_rma_ub2gm_perftest/README.md](./simt_rma_ub2gm_perftest/README.md)
+- **simt_udma_perftest**：请参考 [simt_udma_perftest/README.md](./simt_udma_perftest/README.md)

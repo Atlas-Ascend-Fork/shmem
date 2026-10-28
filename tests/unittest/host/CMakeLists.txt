@@ -39,6 +39,18 @@ if(NOT SOC_TYPE STREQUAL "Ascend950")
 else()
     list(FILTER TEST_HOST_FILES EXCLUDE REGEX "topo/")
 endif()
+
+# SIMT UDMA host tests require CANN >= 9.2.0.
+# Exclude them from the host test object library when the CANN version does
+# not qualify so the remaining host tests still build. Excluding the
+# *_test.cpp also drops the TEST() registrations, so the cases are not
+# collected by the test runner during batch execution.
+# The QP-specific data plane is direct-mode only; relay builds reject qp_num != 1
+# at OpenDevice, so these tests would fail to initialize under relay.
+if(NOT ACLSHMEM_SIMT_UDMA_SUPPORT OR ACLSHMEM_RELAY_SUPPORT)
+    list(FILTER TEST_HOST_FILES EXCLUDE REGEX "simt_udma/")
+endif()
+
 file(GLOB_RECURSE CONFIG_STORE_FILES ${PROJECT_SOURCE_DIR}/src/host/bootstrap/config_store/*.cpp)
 file(GLOB_RECURSE UNDER_API_FILES ${PROJECT_SOURCE_DIR}/src/host/utils/under_api/*.cpp)
 set(CMAKE_C_COMPILER gcc)

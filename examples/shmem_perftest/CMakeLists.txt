@@ -20,5 +20,11 @@ if (USE_EXAMPLES)
     if (ACLSHMEM_SIMT_SUPPORT)
         add_subdirectory(simt_rma_perftest)
         add_subdirectory(simt_rma_ub2gm_perftest)
+        # SIMT UDMA perftest requires CANN >= 9.2.0;
+        # skip the subdirectory when the top-level CMakeLists.txt detects a
+        # non-qualifying CANN.
+        if (ACLSHMEM_SIMT_UDMA_SUPPORT)
+            add_subdirectory(simt_udma_perftest)
+        endif()
     endif()
 endif()

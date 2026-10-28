@@ -71,4 +71,5 @@
 | `device_simt/gm2gm/shmem_device_simt_rma.h` | 无 | SIMT 作用域下的 GM↔GM RMA | 需 `USE_SIMT`；依赖 CANN |
 | `device_simt/gm2gm/shmem_device_simt_amo.h` | 无 | SIMT 作用域下的 GM↔GM 原子操作（compare swap） | 需 `USE_SIMT`；依赖 CANN |
 | `device_simt/gm2gm/engine/shmem_device_simt_mte.h` | 无 | SIMT MTE：thread/block/warp 作用域异步拷贝 | 需 `USE_SIMT`；依赖 CANN |
+| `device_simt/gm2gm/engine/shmem_device_simt_udma.h` | 无 | SIMT UDMA：QP-specific 异步 put/get 与 quiet（warp / block 作用域） | 需 `USE_SIMT`；仅面向 Ascend950 direct 模式，需 CANN 9.2.0 及以上版本 |
 | `device_simt/team/shmem_device_simt_team.h` | 无 | SIMT 侧 Team 相关接口 | 需 `USE_SIMT`；依赖 CANN |

@@ -620,6 +620,64 @@ else()
     message(STATUS "aclrtMemMapSelectedLink symbol not found, disabling ACLSHMEM_HCCS_SIO_LINK support")
 endif()
 
+# Detect the installed CANN version so feature gates that depend on a specific
+# CANN release can use a single source of truth.
+#
+# version.info lives under $ASCEND_HOME_PATH/opp/version.info on standard
+# installs (the OPP subdir is always present in a full CANN installation);
+# $ASCEND_HOME_PATH/version.info is checked as a fallback for slimmed-down
+# installs. This matches the lookup order used by
+# _get_cann_build_version() in scripts/build.sh so both code paths agree on
+# the same source of truth.
+#
+# version.info carries a line like "Version=9.2.0" (with optional surrounding
+# quotes and pre-release suffix; the regex below tolerates them). The numeric
+# triple (major.minor.patch) is captured into CANN_VERSION; the optional suffix
+# is captured into CANN_VERSION_SUFFIX for informational message display.
+set(_CANN_VERSION_INFO_FILE "")
+foreach(_candidate IN ITEMS
+        "${ASCEND_HOME_PATH}/opp/version.info"
+        "${ASCEND_HOME_PATH}/version.info")
+    if(EXISTS "${_candidate}")
+        set(_CANN_VERSION_INFO_FILE "${_candidate}")
+        break()
+    endif()
+endforeach()
+
+if(_CANN_VERSION_INFO_FILE)
+    file(READ "${_CANN_VERSION_INFO_FILE}" _cann_version_info)
+    string(REGEX MATCH "Version=\"?([0-9]+\\.[0-9]+\\.[0-9]+)(-[A-Za-z0-9.]+)?\"?"
+           _cann_version_match "${_cann_version_info}")
+    set(CANN_VERSION "${CMAKE_MATCH_1}")
+    set(CANN_VERSION_SUFFIX "${CMAKE_MATCH_2}")
+    unset(_cann_version_info)
+    unset(_cann_version_match)
+else()
+    set(CANN_VERSION "")
+    set(CANN_VERSION_SUFFIX "")
+    message(WARNING
+        "CANN version.info not found under $ASCEND_HOME_PATH (checked "
+        "${ASCEND_HOME_PATH}/opp/version.info and ${ASCEND_HOME_PATH}/version.info). "
+        "CANN version gating will treat the install as too old.")
+endif()
+unset(_CANN_VERSION_INFO_FILE)
+
+# SIMT UDMA requires CANN 9.2.0 and later. The flag follows the project
+# convention ACLSHMEM_<FEATURE>_SUPPORT (see ACLSHMEM_SIMT_SUPPORT,
+# ACLSHMEM_RDMA_SUPPORT, ACLSHMEM_HCCS_SIO_LINK) and gates the simt_udma*
+# test/example CMake targets and the corresponding test files in the
+# host/device test binaries.
+set(ACLSHMEM_SIMT_UDMA_SUPPORT OFF)
+if(CANN_VERSION AND NOT CANN_VERSION VERSION_LESS "9.2.0")
+    set(ACLSHMEM_SIMT_UDMA_SUPPORT ON)
+    add_definitions(-DACLSHMEM_SIMT_UDMA_SUPPORT)
+    message(STATUS
+        "CANN ${CANN_VERSION}${CANN_VERSION_SUFFIX} >= 9.2.0, enabling SIMT UDMA support")
+else()
+    message(STATUS
+        "CANN ${CANN_VERSION}${CANN_VERSION_SUFFIX} < 9.2.0, disabling SIMT UDMA support")
+endif()
+
 # 添加子目录
 add_subdirectory(src)
 add_subdirectory(tools)
