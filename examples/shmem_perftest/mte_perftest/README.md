@@ -54,7 +54,7 @@ bash scripts/build.sh -examples
 bash scripts/build.sh -soc_type Ascend950 -examples
 
 # 如需运行 --memory-type dram，需启用CANN模式编译
-# A2/A3 平台
+# A3 平台（A2 不支持 DRAM 测试）
 bash scripts/build.sh -examples -cann
 # Ascend950 平台
 bash scripts/build.sh -soc_type Ascend950 -examples -cann
@@ -84,7 +84,7 @@ cd examples/shmem_perftest/mte_perftest/
 | `--exponent <exponent>` | `-e <exponent>` | 设置数据量的幂数 (2^exponent) | - |
 | `--exponent-range <min> <max>` | - | 设置数据量的幂数范围 | 3-17 |
 | `--loop-count <count>` | - | 设置循环次数 | 1000 |
-| `--memory-type <hbm\|dram>` | - | 设置SHMEM内存类型，dram使用HOST_SIDE内存 | hbm |
+| `--memory-type <hbm\|dram>` | - | 设置SHMEM内存类型，dram使用HOST_SIDE内存，支持A3和Ascend950，不支持A2 | hbm |
 | `-pes <size>` | - | 设置PE数量，暂不支持修改 | 2 |
 | `-ipport <ip:port>` | - | 设置通信地址 | tcp://127.0.0.1:8764 |
 | `-gnpus <num>` | - | 设置NPU数量，暂不支持修改 | 2 |
@@ -93,10 +93,12 @@ cd examples/shmem_perftest/mte_perftest/
 
 ### DRAM内存测试约束
 
-`--memory-type dram` 会使用 `aclshmemx_malloc(..., HOST_SIDE)` 分配Host侧DRAM内存。该功能依赖CANN模式，编译时必须使用：
+`--memory-type dram` 会使用 `aclshmemx_malloc(..., HOST_SIDE)` 分配Host侧DRAM内存。该测试涉及远端 Host 内存访问，支持 A3 和 Ascend950，**A2 不支持**。A2 请使用默认的 `--memory-type hbm`。
+
+DRAM测试还需启用CANN模式，编译时使用：
 
 ```bash
-# A2/A3 平台
+# A3 平台（A2 不支持 DRAM 测试）
 bash scripts/build.sh -examples -cann
 # Ascend950 平台
 bash scripts/build.sh -soc_type Ascend950 -examples -cann

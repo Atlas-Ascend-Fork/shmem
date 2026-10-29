@@ -127,8 +127,6 @@ int test_rdma_perf_test_impl(
     PERFTEST_CHECK_GOTO(aclrtCreateStream(&stream), ret, cleanup);
     stream_created = true;
 
-    fftsAddr = util_get_ffts_config();
-
     test_set_attr(pe_id, n_pes, local_mem_size, ipport, default_flag_uid, &attributes);
     attributes.option_attr.data_op_engine_type = ACLSHMEM_DATA_OP_ROCE;
 #if defined(ACLSHMEM_RDMA_V2_SUPPORT)
@@ -139,6 +137,7 @@ int test_rdma_perf_test_impl(
 #endif
     PERFTEST_CHECK_GOTO(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes), ret, cleanup);
     shmem_initialized = true;
+    fftsAddr = util_get_ffts_config();
 
     for (int exponent = min_exponent; exponent <= max_exponent; exponent++) {
         size_t datasize = static_cast<size_t>(1) << exponent;

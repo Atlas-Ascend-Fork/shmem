@@ -571,13 +571,13 @@ static int run_perftest(const Options& opts)
     CHECK_GOTO(aclrtSetDevice(device));
     device_set = true;
     CHECK_GOTO(aclrtCreateStream(&stream));
-    ffts_addr = util_get_ffts_config();
     CHECK_GOTO(test_set_attr(opts.pe, opts.pes, heap_bytes, opts.ipport.c_str(), uid, &attributes));
     attributes.comm_args = &uid;
     attributes.option_attr.data_op_engine_type = ACLSHMEM_DATA_OP_ROCE;
     // The transport default is one QP. Reserve one WQE staging buffer for the only active AIV.
     CHECK_GOTO(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes));
     shmem_initialized = true;
+    ffts_addr = util_get_ffts_config();
     CHECK_GOTO(aclshmemx_set_rdma_config(0, ACLSHMEM_RDMA_MTE_STAGING_UB_SIZE, opts.sync_id));
     std::cout << "ROCE atomic PE" << opts.pe << " device=" << device
               << " QPCount=1 AIV=1 cycles_per_us=" << get_cycles_per_us() << std::endl;
