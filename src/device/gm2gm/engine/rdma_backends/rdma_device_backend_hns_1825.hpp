@@ -56,7 +56,7 @@ struct aclshmemi_hns_1825_wqe_rdma_task_seg_t {
     } dw3;
     uint64_t va;   // remote virtual address
     uint32_t rkey; // remote memory key
-    uint32_t ulp;  // upper-layer field; low 16 bits carry the local lkey
+    uint32_t ulp;  // upper-layer field; low 8 bits carry ULP flags, upper bits carry the local lkey
     /**** 32 bytes ****/
 };
 
@@ -378,7 +378,8 @@ ACLSHMEM_DEVICE __ubuf__ uint8_t* aclshmemi_roce_hns_1825_fill_wqe_task_seg(
     task->rkey = aclshmemi_hns_1825_htobe32(wr.rkey);
     // WriteReduce adds SUM (0xA) and INT32 (0x2) to the ULP local MPT index.
     constexpr uint32_t ACLSHMEMI_HNS_1825_REDUCE_SUM_INT32 = (0xAU << 4) | 0x2U;
-    task->ulp = aclshmemi_hns_1825_htobe32((wr.lkey & 0xffffU) | (reduce ? ACLSHMEMI_HNS_1825_REDUCE_SUM_INT32 : 0U));
+    task->ulp =
+        aclshmemi_hns_1825_htobe32((wr.lkey & 0xffffff00U) | (reduce ? ACLSHMEMI_HNS_1825_REDUCE_SUM_INT32 : 0U));
     return wqe_addr + sizeof(aclshmemi_hns_1825_wqe_rdma_task_seg_t);
 }
 
