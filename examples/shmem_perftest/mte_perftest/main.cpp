@@ -80,11 +80,10 @@ int test_shmem_mte_perf_test_impl(
     status = aclrtSetDevice(device_id);
     status = aclrtCreateStream(&stream);
 
-    uint64_t fftsAddr = util_get_ffts_config();
-
     aclshmemx_init_attr_t attributes;
     test_set_attr(pe_id, n_pes, local_mem_size, ipport, default_flag_uid, &attributes);
     status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes);
+    uint64_t fftsAddr = util_get_ffts_config();
 
     int frame_id = 0;
     for (int block_size : block_sizes) {
