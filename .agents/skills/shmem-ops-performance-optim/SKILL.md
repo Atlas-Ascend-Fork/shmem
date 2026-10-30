@@ -354,7 +354,7 @@ performance_report.md 由 `shmem-ops-performance-eval` 在每轮执行时维护�
 
 每步记录（Step 级，嵌套在 Round 内）：
 
-| Step | 变更 | Correctness | kernel_bus_bandwidth_GBps | e2e_us | kernel_us | 备注 |
+| Step | 变更 | Correctness | e2e_us | kernel_us | algo_bandwidth_GBps | kernel_bus_bandwidth_GBps | compute_utilization% | 备注 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1.1 | block_dim: 16→32 | PASS | ... | ... | ... | ... | N/A | 核利用率提升 |
 | 1.2 | block_dim: 32→48 | PASS | ... | ... | ... | ... | N/A | 无明显提升 |
