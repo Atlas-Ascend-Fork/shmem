@@ -1,7 +1,6 @@
 # RDMA aggregate 接口示例
 
 ## 示例简介
-
 本示例验证 RDMA aggregate NBI 的 8 个 Device API 重载，并额外验证一个 5 操作的 Put 指针 batch：
 
 | 方向 | 参数形式 | action 形式 |
@@ -15,8 +14,8 @@
 
 ## 支持范围和约束
 
-- 支持 `XSCALE`（Ascend950）和 `IN_DIE`（默认后端）两种 RDMA 后端，`HNS_1825` 不支持 aggregate。
-- 示例中每个 PE 使用 1 个 AI Core，通信使用 QP0。
+- 支持 `IN_DIE`（默认后端）、`XSCALE` 和 `HNS_1825` 三种 RDMA 后端。
+- 默认 2 个 PE；每个 PE 使用 1 个 AI Core，通信使用 QP0。
 - 每个 aggregate batch 必须复用同一个 submit state、peer、操作方向、UB buffer 和 `sync_id`。
 - 4 defer + 1 submit 的 Put 指针 batch 包含 5 条操作，需要 704B UB workspace，满足 `64 + 128 * n` 的容量要求。
 - Put 的源数据和 Get 的目标数据在 submit 后不能立即复用，示例使用 barrier 保证可见性。
@@ -26,6 +25,7 @@
 需要已经配置好的 RDMA 环境、CANN 环境以及对应网卡 provider。Ascend950 平台运行前需要根据网卡类型设置 `IBV_EXTEND_DRIVERS`：
 
 - XSCALE 使用云脉网卡对应的 provider。
+- HNS_1825 使用 1825 网卡对应的 provider。
 
 具体 RDMA 网卡检查和 provider 配置请参考 [`rdma_demo`](../rdma_demo/README.md)。
 
@@ -39,9 +39,12 @@ bash scripts/build.sh -enable_rdma -examples
 
 # XSCALE
 bash scripts/build.sh -soc_type Ascend950 -enable_rdma -rdma_backend XSCALE -examples
+
+# HNS_1825
+bash scripts/build.sh -soc_type Ascend950 -enable_rdma -rdma_backend HNS_1825 -examples
 ```
 
-`rdma_aggregate_demo` 在 `IN_DIE` 和 `XSCALE` 后端配置下加入 examples 构建目标，`HNS_1825` 后端下不构建。
+`rdma_aggregate_demo` 会在 `IN_DIE`、`XSCALE` 和 `HNS_1825` 后端配置下加入 examples 构建目标。
 
 ## 运行
 

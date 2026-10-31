@@ -12,24 +12,16 @@
 #include "shmem.h"
 
 namespace {
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
 constexpr uint32_t AGGREGATE_OP_COUNT = 8;
 constexpr uint32_t AGGREGATE_UB_BYTES = 64 + 128 * AGGREGATE_OP_COUNT;
-#else
-// VECOUT scratch space required by non-aggregate QP operations on HNS_1825.
-constexpr uint32_t HNS_1825_SCRATCH_BYTES = 192;
-#endif
 
 enum class DemoOperation : int32_t {
     PUT = 0,
     GET = 1,
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
     AGGREGATE_PUT = 2,
     AGGREGATE_GET = 3,
-#endif
 };
 
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
 template <typename T>
 __aicore__ inline void AggregatePut(
     __gm__ T* dst, __gm__ T* src, __ubuf__ T* buf, uint32_t slice_elements, int peer, uint32_t qp_idx, uint32_t sync_id)
@@ -67,12 +59,11 @@ __aicore__ inline void AggregateGet(
         }
     }
 }
-#endif
 } // namespace
 
 /**
  * @brief Execute a single-QP or multi-QP RDMA transfer demonstration.
- * @note @p elements must be divisible by the QP count. XSCALE aggregate operations additionally require each QP
+ * @note @p elements must be divisible by the QP count. Aggregate operations additionally require each QP
  * slice to be divisible by AGGREGATE_OP_COUNT.
  */
 extern "C" __global__ __vector__ void rdma_qp_demo_kernel(
@@ -90,11 +81,7 @@ extern "C" __global__ __vector__ void rdma_qp_demo_kernel(
 
     AscendC::TPipe pipe;
     AscendC::TBuf<AscendC::TPosition::VECOUT> scratch;
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
     pipe.InitBuffer(scratch, AGGREGATE_UB_BYTES);
-#else
-    pipe.InitBuffer(scratch, HNS_1825_SCRATCH_BYTES);
-#endif
     __ubuf__ uint8_t* ub = reinterpret_cast<__ubuf__ uint8_t*>(scratch.Get<uint8_t>().GetPhyAddr());
 
     if (core_idx == 0) {
@@ -107,12 +94,10 @@ extern "C" __global__ __vector__ void rdma_qp_demo_kernel(
         aclshmemx_roce_qp_put_nbi(dst, src, ub, slice_elements, peer, qp_idx, sync_id);
     } else if (op == DemoOperation::GET) {
         aclshmemx_roce_qp_get_nbi(dst, src, ub, slice_elements, peer, qp_idx, sync_id);
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
     } else if (op == DemoOperation::AGGREGATE_PUT) {
         AggregatePut(dst, src, ub, slice_elements, peer, qp_idx, sync_id);
     } else {
         AggregateGet(dst, src, ub, slice_elements, peer, qp_idx, sync_id);
-#endif
     }
     aclshmemx_roce_qp_quiet(peer, qp_idx, ub, sync_id);
     AscendC::SyncAll<true>();

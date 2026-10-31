@@ -375,8 +375,9 @@ ACLSHMEM_DEVICE void aclshmemx_roce_qp_get_nbi(
     aclshmemx_defer_t action)
 {
     static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE || sizeof(T) == 0,
-        "aclshmemx_roce_qp_get_nbi with aggregate stage/commit requires XSCALE backend");
+        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE ||
+            ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
+        "aclshmemx_roce_qp_get_nbi with aggregate stage/commit requires XSCALE or HNS_1825 backend");
     __ubuf__ uint8_t* wqes_buf = (__ubuf__ uint8_t*)buf + UB_ALIGN_SIZE * 2;
     aclshmemi_roce_stage_rma_wqe_ub<ACLSHMEMI_K_RDMA_BACKEND, aclshmemi_rdma_opcode_t::OP_RDMA_READ>(
         (__gm__ uint8_t*)src, (__gm__ uint8_t*)dst, pe, qp_idx, elem_size * sizeof(T), wqes_buf, sync_id, action);
@@ -388,8 +389,9 @@ ACLSHMEM_DEVICE void aclshmemx_roce_qp_get_nbi(
     aclshmemx_submit_t action)
 {
     static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE || sizeof(T) == 0,
-        "aclshmemx_roce_qp_get_nbi with aggregate stage/commit requires XSCALE backend");
+        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE ||
+            ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
+        "aclshmemx_roce_qp_get_nbi with aggregate stage/commit requires XSCALE or HNS_1825 backend");
     AscendC::LocalTensor<uint32_t> ub_tensor_32;
     ub_tensor_32.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
     ub_tensor_32.address_.bufferAddr = reinterpret_cast<uint64_t>(buf);
@@ -410,8 +412,9 @@ ACLSHMEM_DEVICE void aclshmemx_roce_qp_get_nbi(
     uint32_t qp_idx, uint32_t sync_id, aclshmemx_defer_t action)
 {
     static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE || sizeof(T) == 0,
-        "aclshmemx_roce_qp_get_nbi with aggregate stage/commit requires XSCALE backend");
+        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE ||
+            ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
+        "aclshmemx_roce_qp_get_nbi with aggregate stage/commit requires XSCALE or HNS_1825 backend");
     auto ptr = (__gm__ void*)src.GetPhyAddr();
     __ubuf__ uint8_t* wqes_buf = (__ubuf__ uint8_t*)buf.GetPhyAddr() + UB_ALIGN_SIZE * 2;
     aclshmemi_roce_stage_rma_wqe_ub<ACLSHMEMI_K_RDMA_BACKEND, aclshmemi_rdma_opcode_t::OP_RDMA_READ>(
@@ -425,8 +428,9 @@ ACLSHMEM_DEVICE void aclshmemx_roce_qp_get_nbi(
     uint32_t qp_idx, uint32_t sync_id, aclshmemx_submit_t action)
 {
     static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE || sizeof(T) == 0,
-        "aclshmemx_roce_qp_get_nbi with aggregate stage/commit requires XSCALE backend");
+        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE ||
+            ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
+        "aclshmemx_roce_qp_get_nbi with aggregate stage/commit requires XSCALE or HNS_1825 backend");
     auto ptr = (__gm__ void*)src.GetPhyAddr();
     AscendC::LocalTensor<uint32_t> ub_tensor_32;
     ub_tensor_32.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
@@ -486,9 +490,6 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
     __gm__ T* dst, __gm__ T* src, __ubuf__ T* buf, uint32_t elem_size, int pe, uint32_t sync_id,
     aclshmemx_defer_t action)
 {
-    static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND != aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
-        "aclshmemx_roce_get_nbi aggregate stage/commit requires a non-HNS_1825 backend");
     __ubuf__ uint8_t* wqes_buf = (__ubuf__ uint8_t*)buf + UB_ALIGN_SIZE * 2;
     aclshmemi_roce_stage_rma_wqe_ub<ACLSHMEMI_K_RDMA_BACKEND, aclshmemi_rdma_opcode_t::OP_RDMA_READ>(
         (__gm__ uint8_t*)src, (__gm__ uint8_t*)dst, pe, 0, elem_size * sizeof(T), wqes_buf, sync_id, action);
@@ -499,9 +500,6 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
     __gm__ T* dst, __gm__ T* src, __ubuf__ T* buf, uint32_t elem_size, int pe, uint32_t sync_id,
     aclshmemx_submit_t action)
 {
-    static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND != aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
-        "aclshmemx_roce_get_nbi aggregate stage/commit requires a non-HNS_1825 backend");
     AscendC::LocalTensor<uint32_t> ub_tensor_32;
     ub_tensor_32.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
     ub_tensor_32.address_.bufferAddr = reinterpret_cast<uint64_t>(buf);
@@ -521,9 +519,6 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
     AscendC::GlobalTensor<T> dst, AscendC::GlobalTensor<T> src, AscendC::LocalTensor<T> buf, uint32_t elem_size, int pe,
     uint32_t sync_id, aclshmemx_defer_t action)
 {
-    static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND != aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
-        "aclshmemx_roce_get_nbi aggregate stage/commit requires a non-HNS_1825 backend");
     auto ptr = (__gm__ void*)src.GetPhyAddr();
     __ubuf__ uint8_t* wqes_buf = (__ubuf__ uint8_t*)buf.GetPhyAddr() + UB_ALIGN_SIZE * 2;
     aclshmemi_roce_stage_rma_wqe_ub<ACLSHMEMI_K_RDMA_BACKEND, aclshmemi_rdma_opcode_t::OP_RDMA_READ>(
@@ -536,9 +531,6 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
     AscendC::GlobalTensor<T> dst, AscendC::GlobalTensor<T> src, AscendC::LocalTensor<T> buf, uint32_t elem_size, int pe,
     uint32_t sync_id, aclshmemx_submit_t action)
 {
-    static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND != aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
-        "aclshmemx_roce_get_nbi aggregate stage/commit requires a non-HNS_1825 backend");
     auto ptr = (__gm__ void*)src.GetPhyAddr();
     AscendC::LocalTensor<uint32_t> ub_tensor_32;
     ub_tensor_32.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
@@ -639,8 +631,9 @@ ACLSHMEM_DEVICE void aclshmemx_roce_qp_put_nbi(
     aclshmemx_defer_t action)
 {
     static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE || sizeof(T) == 0,
-        "aclshmemx_roce_qp_put_nbi with aggregate stage/commit requires XSCALE backend");
+        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE ||
+            ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
+        "aclshmemx_roce_qp_put_nbi with aggregate stage/commit requires XSCALE or HNS_1825 backend");
     __ubuf__ uint8_t* wqes_buf = (__ubuf__ uint8_t*)buf + UB_ALIGN_SIZE * 2;
     aclshmemi_roce_stage_rma_wqe_ub<ACLSHMEMI_K_RDMA_BACKEND, aclshmemi_rdma_opcode_t::OP_RDMA_WRITE>(
         (__gm__ uint8_t*)dst, (__gm__ uint8_t*)src, pe, qp_idx, elem_size * sizeof(T), wqes_buf, sync_id, action);
@@ -652,8 +645,9 @@ ACLSHMEM_DEVICE void aclshmemx_roce_qp_put_nbi(
     aclshmemx_submit_t action)
 {
     static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE || sizeof(T) == 0,
-        "aclshmemx_roce_qp_put_nbi with aggregate stage/commit requires XSCALE backend");
+        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE ||
+            ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
+        "aclshmemx_roce_qp_put_nbi with aggregate stage/commit requires XSCALE or HNS_1825 backend");
     AscendC::LocalTensor<uint32_t> ub_tensor_32;
     ub_tensor_32.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
     ub_tensor_32.address_.bufferAddr = reinterpret_cast<uint64_t>(buf);
@@ -674,8 +668,9 @@ ACLSHMEM_DEVICE void aclshmemx_roce_qp_put_nbi(
     uint32_t qp_idx, uint32_t sync_id, aclshmemx_defer_t action)
 {
     static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE || sizeof(T) == 0,
-        "aclshmemx_roce_qp_put_nbi with aggregate stage/commit requires XSCALE backend");
+        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE ||
+            ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
+        "aclshmemx_roce_qp_put_nbi with aggregate stage/commit requires XSCALE or HNS_1825 backend");
     auto ptr = (__gm__ void*)dst.GetPhyAddr();
     __ubuf__ uint8_t* wqes_buf = (__ubuf__ uint8_t*)buf.GetPhyAddr() + UB_ALIGN_SIZE * 2;
     aclshmemi_roce_stage_rma_wqe_ub<ACLSHMEMI_K_RDMA_BACKEND, aclshmemi_rdma_opcode_t::OP_RDMA_WRITE>(
@@ -689,8 +684,9 @@ ACLSHMEM_DEVICE void aclshmemx_roce_qp_put_nbi(
     uint32_t qp_idx, uint32_t sync_id, aclshmemx_submit_t action)
 {
     static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE || sizeof(T) == 0,
-        "aclshmemx_roce_qp_put_nbi with aggregate stage/commit requires XSCALE backend");
+        ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::XSCALE ||
+            ACLSHMEMI_K_RDMA_BACKEND == aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
+        "aclshmemx_roce_qp_put_nbi with aggregate stage/commit requires XSCALE or HNS_1825 backend");
     auto ptr = (__gm__ void*)dst.GetPhyAddr();
     AscendC::LocalTensor<uint32_t> ub_tensor_32;
     ub_tensor_32.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
@@ -752,9 +748,6 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
     AscendC::GlobalTensor<T> dst, AscendC::GlobalTensor<T> src, AscendC::LocalTensor<T> buf, uint32_t elem_size, int pe,
     uint32_t sync_id, aclshmemx_defer_t action)
 {
-    static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND != aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
-        "aclshmemx_roce_put_nbi aggregate stage/commit requires a non-HNS_1825 backend");
     auto ptr = (__gm__ void*)dst.GetPhyAddr();
     __ubuf__ uint8_t* wqes_buf = (__ubuf__ uint8_t*)buf.GetPhyAddr() + UB_ALIGN_SIZE * 2;
     aclshmemi_roce_stage_rma_wqe_ub<ACLSHMEMI_K_RDMA_BACKEND, aclshmemi_rdma_opcode_t::OP_RDMA_WRITE>(
@@ -767,9 +760,6 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
     AscendC::GlobalTensor<T> dst, AscendC::GlobalTensor<T> src, AscendC::LocalTensor<T> buf, uint32_t elem_size, int pe,
     uint32_t sync_id, aclshmemx_submit_t action)
 {
-    static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND != aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
-        "aclshmemx_roce_put_nbi aggregate stage/commit requires a non-HNS_1825 backend");
     auto ptr = (__gm__ void*)dst.GetPhyAddr();
     AscendC::LocalTensor<uint32_t> ub_tensor_32;
     ub_tensor_32.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
@@ -790,9 +780,6 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
     __gm__ T* dst, __gm__ T* src, __ubuf__ T* buf, uint32_t elem_size, int pe, uint32_t sync_id,
     aclshmemx_defer_t action)
 {
-    static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND != aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
-        "aclshmemx_roce_put_nbi aggregate stage/commit requires a non-HNS_1825 backend");
     __ubuf__ uint8_t* wqes_buf = (__ubuf__ uint8_t*)buf + UB_ALIGN_SIZE * 2;
     aclshmemi_roce_stage_rma_wqe_ub<ACLSHMEMI_K_RDMA_BACKEND, aclshmemi_rdma_opcode_t::OP_RDMA_WRITE>(
         (__gm__ uint8_t*)dst, (__gm__ uint8_t*)src, pe, 0, elem_size * sizeof(T), wqes_buf, sync_id, action);
@@ -803,9 +790,6 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
     __gm__ T* dst, __gm__ T* src, __ubuf__ T* buf, uint32_t elem_size, int pe, uint32_t sync_id,
     aclshmemx_submit_t action)
 {
-    static_assert(
-        ACLSHMEMI_K_RDMA_BACKEND != aclshmemi_rdma_backend_t::HNS_1825 || sizeof(T) == 0,
-        "aclshmemx_roce_put_nbi aggregate stage/commit requires a non-HNS_1825 backend");
     AscendC::LocalTensor<uint32_t> ub_tensor_32;
     ub_tensor_32.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
     ub_tensor_32.address_.bufferAddr = reinterpret_cast<uint64_t>(buf);

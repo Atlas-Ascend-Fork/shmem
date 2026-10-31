@@ -57,6 +57,24 @@ ACLSHMEM_DEVICE __ubuf__ aclshmemi_roce_aggregate_cache_t* aclshmemi_roce_aggreg
 }
 
 template <aclshmemi_rdma_backend_t B>
+ACLSHMEM_DEVICE uint32_t aclshmemi_roce_aggregate_wqe_size(__ubuf__ aclshmemi_roce_aggregate_cache_t* cache)
+{
+    if constexpr (B == aclshmemi_rdma_backend_t::IN_DIE) {
+        return cache->backend.in_die.sq_wqe_size;
+    } else {
+        return cache->backend.xscale.sq_wqe_size;
+    }
+}
+
+template <aclshmemi_rdma_backend_t B>
+ACLSHMEM_DEVICE void aclshmemi_roce_prepare_aggregate_commit(
+    __ubuf__ aclshmemi_roce_aggregate_cache_t* cache, uint32_t next_head)
+{
+    (void)cache;
+    (void)next_head;
+}
+
+template <aclshmemi_rdma_backend_t B>
 ACLSHMEM_DEVICE void aclshmemi_roce_fill_aggregate_cache(
     __ubuf__ aclshmemi_roce_aggregate_cache_t* cache, __gm__ aclshmemi_rdma_info* rdma_info, uint32_t pe,
     uint32_t qp_idx)
@@ -75,10 +93,17 @@ ACLSHMEM_DEVICE void aclshmemi_roce_fill_aggregate_cache(
     cache->remote_mr_base = remote_mem_info->addr;
     cache->remote_rkey = remote_mem_info->rkey;
     cache->sq_depth = sq_context->depth;
-    cache->sq_wqn = sq_context->wqn;
-    cache->sq_wqe_size = sq_context->wqe_size;
-    if constexpr (B == aclshmemi_rdma_backend_t::IN_DIE) {
-        cache->sq_sl = sq_context->sl;
+    if constexpr (B == aclshmemi_rdma_backend_t::HNS_1825) {
+        cache->backend.hns_1825.sq_wqn = sq_context->wqn;
+        cache->backend.hns_1825.sq_mtu_shift = sq_context->mtu_shift;
+        cache->backend.hns_1825.sq_db_cos = sq_context->db_cos;
+    } else if constexpr (B == aclshmemi_rdma_backend_t::IN_DIE) {
+        cache->backend.in_die.sq_wqn = sq_context->wqn;
+        cache->backend.in_die.sq_wqe_size = sq_context->wqe_size;
+        cache->backend.in_die.sq_sl = sq_context->sl;
+    } else {
+        cache->backend.xscale.sq_wqn = sq_context->wqn;
+        cache->backend.xscale.sq_wqe_size = sq_context->wqe_size;
     }
 
     dcci_cachelines((__gm__ uint8_t*)cache->sq_head_addr, 8);
@@ -96,14 +121,15 @@ ACLSHMEM_DEVICE void aclshmemi_roce_stage_rma_wqe_ub(
     __ubuf__ uint8_t* buf, uint32_t sync_id, aclshmemx_defer_t action)
 {
     static_assert(
-        B == aclshmemi_rdma_backend_t::IN_DIE || B == aclshmemi_rdma_backend_t::XSCALE,
-        "RDMA aggregation requires XSCALE or IN_DIE backend");
+        B == aclshmemi_rdma_backend_t::IN_DIE || B == aclshmemi_rdma_backend_t::XSCALE ||
+            B == aclshmemi_rdma_backend_t::HNS_1825,
+        "RDMA aggregation requires XSCALE, IN_DIE or HNS_1825 backend");
     auto* cache = aclshmemi_roce_aggregate_cache(buf);
     uint32_t pending_count = action.state.pending_count;
     if (pending_count == 0) {
         aclshmemi_roce_fill_aggregate_cache<B>(cache, aclshmemi_qp_info_fetch(), pe, qp_idx);
     }
-    const uint32_t wqe_size = cache->sq_wqe_size;
+    const uint32_t wqe_size = aclshmemi_roce_aggregate_wqe_size<B>(cache);
     remote_addr = aclshmemi_remote_mr_addr(remote_addr, aclshmemi_get_state()->heap_base, cache->remote_mr_base);
 
     // Build one WQE directly in the UB staging buffer using the backend stride.
@@ -123,14 +149,15 @@ ACLSHMEM_DEVICE void aclshmemi_roce_commit_rma_wqes(
 {
     constexpr uint32_t POLL_CQ_THRESHOLD = B == aclshmemi_rdma_backend_t::XSCALE ? 16 : 10;
     static_assert(
-        B == aclshmemi_rdma_backend_t::IN_DIE || B == aclshmemi_rdma_backend_t::XSCALE,
-        "RDMA aggregation requires XSCALE or IN_DIE backend");
+        B == aclshmemi_rdma_backend_t::IN_DIE || B == aclshmemi_rdma_backend_t::XSCALE ||
+            B == aclshmemi_rdma_backend_t::HNS_1825,
+        "RDMA aggregation requires XSCALE, IN_DIE or HNS_1825 backend");
     auto* cache = aclshmemi_roce_aggregate_cache(buf);
     uint32_t pending_count = action.state.pending_count;
     if (pending_count == 0) {
         aclshmemi_roce_fill_aggregate_cache<B>(cache, aclshmemi_qp_info_fetch(), pe, qp_idx);
     }
-    const uint32_t wqe_size = cache->sq_wqe_size;
+    const uint32_t wqe_size = aclshmemi_roce_aggregate_wqe_size<B>(cache);
 
     uint32_t cur_head = cache->base_head;
     uint32_t total_wqe_count = pending_count + 1;
@@ -165,6 +192,9 @@ ACLSHMEM_DEVICE void aclshmemi_roce_commit_rma_wqes(
         static_cast<uint32_t>(message_len), cache->remote_rkey, remote_addr, cache->local_lkey, local_addr, depth,
         true);
 
+    uint32_t next_head = cur_head + total_wqe_count;
+    aclshmemi_roce_prepare_aggregate_commit<B>(cache, next_head);
+
     // Bulk copy all WQEs from UB to GM SQ, splitting at the ring boundary when needed.
     // Each copy is fully synchronized (S_MTE3 -> DataCopyPad ->
     // PIPE_MTE3 barrier -> MTE3_S), so the doorbell below only rings after every WQE landed in GM.
@@ -184,8 +214,7 @@ ACLSHMEM_DEVICE void aclshmemi_roce_commit_rma_wqes(
         aclshmemi_roce_write_ub_to_gm_with_sync(cache->sq_base_addr, ub_wqe, second_bytes, sync_id);
     }
 
-    uint32_t next_head = cur_head + total_wqe_count;
-    aclshmemi_roce_ring_sq_doorbell_from_cache<B>(cache, next_head, ub_local64, ub_local32, sync_id);
+    aclshmemi_roce_ring_sq_doorbell_from_cache<B>(cache, pe, qp_idx, next_head, ub_local64, ub_local32, sync_id);
     action.state.pending_count = 0;
 }
 

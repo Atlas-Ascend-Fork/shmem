@@ -60,9 +60,7 @@ void PrintUsage(const char* program)
     std::cerr << "Usage: " << program
               << " -pe ID -pes N -gnpus N -fpe ID -fnpu ID [-qp N]"
                  " [-op put|get"
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
                  "|aggregate_put|aggregate_get"
-#endif
                  "|all] [-ipport tcp://IP:PORT]\n";
 }
 
@@ -198,7 +196,6 @@ bool ParseOperation(const std::string& operation, DemoOperation& parsed_operatio
         parsed_operation = DemoOperation::GET;
         return true;
     }
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
     if (operation == "aggregate_put") {
         parsed_operation = DemoOperation::AGGREGATE_PUT;
         return true;
@@ -207,17 +204,12 @@ bool ParseOperation(const std::string& operation, DemoOperation& parsed_operatio
         parsed_operation = DemoOperation::AGGREGATE_GET;
         return true;
     }
-#endif
     return false;
 }
 
 bool IsPut(DemoOperation operation)
 {
-    return operation == DemoOperation::PUT
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
-           || operation == DemoOperation::AGGREGATE_PUT
-#endif
-        ;
+    return operation == DemoOperation::PUT || operation == DemoOperation::AGGREGATE_PUT;
 }
 
 bool RunCase(
@@ -269,11 +261,8 @@ int main(int argc, char** argv)
         PrintUsage(argv[0]);
         return 1;
     }
-    const bool valid_op = options.op == "put" || options.op == "get" || options.op == "all"
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
-                          || options.op == "aggregate_put" || options.op == "aggregate_get"
-#endif
-        ;
+    const bool valid_op = options.op == "put" || options.op == "get" || options.op == "all" ||
+                          options.op == "aggregate_put" || options.op == "aggregate_get";
     const uint64_t local_pe_end = static_cast<uint64_t>(options.fpe) + static_cast<uint64_t>(options.gnpus);
     if (options.pes < 2 || options.pe < 0 || options.pe >= options.pes || options.gnpus <= 0 || options.fpe < 0 ||
         options.fnpu < 0 || local_pe_end > static_cast<uint64_t>(options.pes) || options.pe < options.fpe ||
@@ -339,16 +328,8 @@ int main(int argc, char** argv)
     const uint64_t ffts_addr = util_get_ffts_config();
     const std::vector<uint8_t> own_pattern = MakePattern(options.pe, elements);
     const std::vector<std::string> operations =
-        options.op == "all"
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
-            ?
-            std::vector<std::string>{"put", "get", "aggregate_put", "aggregate_get"}
-#else
-            ?
-            std::vector<std::string>{"put", "get"}
-#endif
-            :
-            std::vector<std::string>{options.op};
+        options.op == "all" ? std::vector<std::string>{"put", "get", "aggregate_put", "aggregate_get"} :
+                              std::vector<std::string>{options.op};
     bool passed = true;
     for (const auto& operation : operations) {
         passed = RunCase(options, resources, ffts_addr, operation, own_pattern) && passed;

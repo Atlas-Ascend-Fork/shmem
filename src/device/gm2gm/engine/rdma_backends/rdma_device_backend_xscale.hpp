@@ -889,12 +889,14 @@ aclshmemi_roce_fill_wqe_ub<aclshmemi_rdma_backend_t::XSCALE, aclshmemi_rdma_opco
 
 template <>
 ACLSHMEM_DEVICE void aclshmemi_roce_ring_sq_doorbell_from_cache<aclshmemi_rdma_backend_t::XSCALE>(
-    __ubuf__ aclshmemi_roce_aggregate_cache_t* cache, uint32_t cur_head, AscendC::LocalTensor<uint64_t>& ub_local64,
-    AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
+    __ubuf__ aclshmemi_roce_aggregate_cache_t* cache, uint32_t pe, uint32_t qp_idx, uint32_t cur_head,
+    AscendC::LocalTensor<uint64_t>& ub_local64, AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
 {
+    (void)pe;
+    (void)qp_idx;
     uint64_t sq_head_addr = cache->sq_head_addr;
     uint64_t sq_db_addr = cache->sq_db_addr;
-    uint32_t sq_wqn = cache->sq_wqn;
+    uint32_t sq_wqn = cache->backend.xscale.sq_wqn;
 
     ub_local32.SetValue(0, cur_head);
     aclshmemi_roce_write_ub_to_gm_with_sync(sq_head_addr, ub_local32, sizeof(uint32_t), sync_id);

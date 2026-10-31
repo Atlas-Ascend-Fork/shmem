@@ -2,16 +2,16 @@
 
 ## 概述
 
-本样例基于 SHMEM 工程，介绍 device kernel 在云脉（XSCALE）和 1825（HNS_1825）RDMA 场景下，使用多个 QP 并发完成同一对端 PE 的普通 Put/Get 数据传输。
+本样例基于 SHMEM 工程，介绍 device kernel 在云脉（XSCALE）和 1825（HNS_1825）RDMA 场景下，使用多个 QP 并发完成同一对端 PE 的普通及聚合 Put/Get 数据传输。
 
-样例在两个后端均覆盖普通 Put/Get；XSCALE 额外覆盖聚合 Put/Get：
+样例在两个后端均覆盖普通和聚合 Put/Get：
 
 - `put`：当前 PE 使用多个 QP，将本地 SHMEM 对称内存中的数据写入下一个 PE 的对称内存。
 - `get`：当前 PE 使用多个 QP，从下一个 PE 的 SHMEM 对称内存读取数据到本地对称内存。
-- `aggregate_put`：仅 XSCALE，每个 QP 将多个 Put 操作聚合为一个批次后提交。
-- `aggregate_get`：仅 XSCALE，每个 QP 将多个 Get 操作聚合为一个批次后提交。
+- `aggregate_put`：每个 QP 将多个 Put 操作聚合为一个批次后提交。
+- `aggregate_get`：每个 QP 将多个 Get 操作聚合为一个批次后提交。
 
-`-op all` 在 XSCALE 执行四种模式，在 HNS_1825 执行普通 Put/Get。
+`-op all` 在 XSCALE 和 HNS_1825 上均执行四种模式。
 
 ## 环境要求
 
@@ -19,11 +19,11 @@
 
 - 本样例支持 Ascend950 平台的 XSCALE 和 HNS_1825 RDMA 后端。
 - 所有 PE 必须配置相同的 QP 数量，取值范围为 `[1, 56]`。
-- 每个 QP 固定处理 512 KiB。XSCALE 聚合模式将分片均分为 8 个 chunk，使用 1088B UB workspace。
+- 每个 QP 固定处理 512 KiB。聚合模式将分片均分为 8 个 chunk，使用 1088B UB workspace。
 
 ## 样例实现
 
-本样例呈现多个 QP 在同一对端 PE 之间并发执行 RDMA 普通 Put/Get；XSCALE 还验证 QP 指定的聚合 Put/Get。
+本样例呈现多个 QP 在同一对端 PE 之间并发执行 RDMA 普通及聚合 Put/Get。
 
 ### 测试用例实现
 
@@ -37,7 +37,7 @@
 
 （5）kernel 执行完成后，将目标缓冲区拷回 Host 逐字节校验。Put 结果应来自环形拓扑中的上一个 PE，Get 结果应来自下一个 PE。
 
-（6）XSCALE 的 `all` 模式依次执行普通和聚合 Put/Get，其中聚合操作通过 submit/defer 接口提交；HNS_1825 没有聚合提交，只执行普通 Put/Get。全部校验完成后释放资源。
+（6）两个后端的 `all` 模式都依次执行普通和聚合 Put/Get，其中聚合操作通过 submit/defer 接口提交。全部校验完成后释放资源。
 
 ### Kernel 实现
 
@@ -49,9 +49,9 @@ block 1 -> QP 1
 ...
 ```
 
-（2）普通 Put 模式调用 `aclshmemx_roce_qp_put_nbi`，普通 Get 模式调用 `aclshmemx_roce_qp_get_nbi`。每个 AIV 只提交一次自己负责的完整数据分片；只有 XSCALE 额外使用聚合提交接口，HNS_1825 不执行聚合提交。
+（2）普通 Put 模式调用 `aclshmemx_roce_qp_put_nbi`，普通 Get 模式调用 `aclshmemx_roce_qp_get_nbi`。每个 AIV 只提交一次自己负责的完整数据分片；两个后端都使用 QP 指定的聚合提交接口。
 
-（3）XSCALE 聚合模式中，每个 AIV 将自己的数据分片拆成 8 个 chunk，并创建独立的 `aclshmemx_submit_state_t` 和 UB workspace。前 7 个操作使用 `aclshmemx_defer_t` 加入批次，最后一个操作使用 `aclshmemx_submit_t` 提交整个批次。该路径不会编译到 HNS_1825 后端。
+（3）聚合模式中，每个 AIV 将自己的数据分片拆成 8 个 chunk，并创建独立的 `aclshmemx_submit_state_t` 和 UB workspace。前 7 个操作使用 `aclshmemx_defer_t` 加入批次，最后一个操作使用 `aclshmemx_submit_t` 提交整个批次。
 
 （4）每个聚合批次中的操作使用相同的对端 PE、QP、UB 基地址和内部同步事件 ID。不同 QP 可并发访问同一 PE，但每个 QP 必须由单一 AIV 使用独立的 `aclshmemx_submit_state_t` 和 UB workspace；同一 `(PE, QP)` 同时只能有一个活动批次。批次总操作数（含最后的 submit）不得超过 `ACLSHMEM_ROCE_QP_AGGREGATE_MAX_OPS`，超出时需拆分为多个批次。
 
@@ -59,7 +59,7 @@ block 1 -> QP 1
 
 ## 编译执行
 
-在仓库根目录启用 RDMA XSCALE 或 HNS_1825 构建 examples，然后运行。只有 XSCALE 构建聚合提交路径，HNS_1825 构建和运行普通 Put/Get 路径：
+在仓库根目录启用 RDMA XSCALE 或 HNS_1825 构建 examples，然后运行。两个后端均构建并运行普通及聚合 Put/Get 路径：
 
 ```bash
 # XSCALE
@@ -69,7 +69,7 @@ bash scripts/build.sh -soc_type Ascend950 -enable_rdma -rdma_backend HNS_1825 -e
 bash examples/rdma_qp_demo/run.sh
 ```
 
-指定首个 NPU 和 QP 数。XSCALE 默认运行四种模式，HNS_1825 默认运行两种普通模式：
+指定首个 NPU 和 QP 数。两个后端默认均运行四种模式：
 
 ```bash
 bash examples/rdma_qp_demo/run.sh -fnpu 0 -qp 4
@@ -94,8 +94,8 @@ bash examples/rdma_qp_demo/run.sh -pes 4 -fpe 2 -gnpus 2 -fnpu 0 -qp 4 \
 ```text
 [PASS] op=put pe=0 elements=1048576
 [PASS] op=get pe=0 elements=1048576
-[PASS] op=aggregate_put pe=0 elements=1048576  # XSCALE only
-[PASS] op=aggregate_get pe=0 elements=1048576  # XSCALE only
+[PASS] op=aggregate_put pe=0 elements=1048576
+[PASS] op=aggregate_get pe=0 elements=1048576
 ```
 
 数据校验失败时，程序打印首个错误位置、实际值和期望值。`run.sh` 会等待当前机器上的所有 PE 进程，并在任意进程失败时返回非 0。
@@ -109,5 +109,5 @@ bash examples/rdma_qp_demo/run.sh -pes 4 -fpe 2 -gnpus 2 -fnpu 0 -qp 4 \
 | `-gnpus` | `2` | 当前机器启动的 NPU/PE 进程数量 |
 | `-fnpu` | `0` | 当前机器使用的首个逻辑 NPU 编号 |
 | `-qp` | `2` | 每个对端 PE 的 QP 数，范围 1~56 |
-| `-op` | `all` | `put`、`get`、`aggregate_put`、`aggregate_get` 或 `all`；聚合选项仅 XSCALE 支持 |
+| `-op` | `all` | `put`、`get`、`aggregate_put`、`aggregate_get` 或 `all` |
 | `-ipport` | 动态本机端口 | SHMEM 初始化地址 |

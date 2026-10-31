@@ -73,7 +73,7 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_fill_wqe(
  * @brief Fill one WQE in the UB aggregate staging buffer (WRITE/READ opcodes)
  *
  * Compile-time dispatched on B; every backend with aggregate support must specialize
- * this entry for OP_RDMA_WRITE and OP_RDMA_READ (see the XSCALE / IN_DIE backends).
+ * this entry for OP_RDMA_WRITE and OP_RDMA_READ (see the XSCALE / IN_DIE / HNS_1825 backends).
  * Shared shape: callers stage WQEs with isSubmit=false and submit the last one with
  * isSubmit=true; backends without CQE compression may ignore the flag.
  *
@@ -151,7 +151,7 @@ ACLSHMEM_DEVICE void aclshmemi_roce_ring_cq_doorbell(
  * @tparam B                     RDMA Backend type
  * @param pe                     [in] PE number of the remote PE.
  * @param qp_idx                 [in] QP index in multi-QP scenario (default 0 for single QP)
- * @param target_idx             [in] target progress index after polling; XSCALE use the target SQ
+ * @param target_idx             [in] target progress index after polling; HNS_1825 and XSCALE use the target SQ
  *                                    producer index because compressed CQEs make CQ and SQ indices different domains
  * @param ub_local64             [in] temporary UB local tensor of uint64_t used as workspace
  * @param ub_local32             [in] temporary UB local tensor of uint32_t used as workspace
@@ -164,13 +164,14 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_poll_cq(
 
 /*
  *  =====================================================================================================
- *  Shared RDMA Aggregate Cache (XSCALE / IN_DIE)
+ *  Shared RDMA Aggregate Cache (XSCALE / HNS_1825 / IN_DIE)
  *  =====================================================================================================
- *  Aggregate-capable backends stage WQEs in a UB buffer and snapshot the SQ context into a common 64B cache
+ *  Aggregate-capable backends stage WQEs in a UB buffer and snapshot the SQ context into a common cache
  *  placed right before the staging area (buf - UB_ALIGN_SIZE * 2). The cache is filled once per batch
  *  (pending_count == 0) and read by both the stage and commit paths. Each backend keeps its own WQE format
- *  and submit logic. Shared fields occupy 56B; backend-specific fields share the remaining space
- *  through a union. XSCALE needs no extra fields; IN_DIE stores its service level.
+ *  and submit logic. The cache occupies two 32B UB blocks: 56B of shared state followed by
+ *  an 8B union of backend
+ * parameters. HNS_1825 reads its software doorbell address at submit.
  */
 struct aclshmemi_roce_aggregate_cache_t {
     uint64_t sq_base_addr;
@@ -179,17 +180,37 @@ struct aclshmemi_roce_aggregate_cache_t {
     uint64_t sq_db_addr;
     uint64_t remote_mr_base;
     uint32_t sq_depth;
-    uint32_t sq_wqn;
-    uint32_t sq_wqe_size : 29;
-    uint32_t sq_sl : 3;
     uint32_t base_head;
     uint32_t remote_rkey;
     uint32_t local_lkey;
+    union {
+        struct {
+            uint32_t sq_wqn;
+            uint32_t sq_wqe_size : 29;
+            uint32_t sq_sl : 3;
+        } in_die;
+        struct {
+            uint32_t sq_wqn;
+            uint32_t sq_wqe_size;
+        } xscale;
+        struct {
+            uint32_t sq_wqn;
+            uint8_t sq_mtu_shift;
+            uint8_t sq_db_cos;
+        } hns_1825;
+    } backend;
 };
 
-static_assert(sizeof(aclshmemi_roce_aggregate_cache_t) == 64);
+static_assert(sizeof(aclshmemi_roce_aggregate_cache_t) == UB_ALIGN_SIZE * 2);
 
-static_assert(sizeof(aclshmemi_roce_aggregate_cache_t) <= UB_ALIGN_SIZE * 2);
+/** @brief Return the aggregate WQE stride for a backend's SQ. */
+template <aclshmemi_rdma_backend_t B>
+ACLSHMEM_DEVICE uint32_t aclshmemi_roce_aggregate_wqe_size(__ubuf__ aclshmemi_roce_aggregate_cache_t* cache);
+
+/** @brief Perform any backend-specific SQ preparation before copying an aggregate batch. */
+template <aclshmemi_rdma_backend_t B>
+ACLSHMEM_DEVICE void aclshmemi_roce_prepare_aggregate_commit(
+    __ubuf__ aclshmemi_roce_aggregate_cache_t* cache, uint32_t next_head);
 
 /**
  * @brief Ring the backend SQ doorbell using the aggregate cache.
@@ -197,8 +218,8 @@ static_assert(sizeof(aclshmemi_roce_aggregate_cache_t) <= UB_ALIGN_SIZE * 2);
  */
 template <aclshmemi_rdma_backend_t B>
 ACLSHMEM_DEVICE void aclshmemi_roce_ring_sq_doorbell_from_cache(
-    __ubuf__ aclshmemi_roce_aggregate_cache_t* cache, uint32_t cur_head, AscendC::LocalTensor<uint64_t>& ub_local64,
-    AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id);
+    __ubuf__ aclshmemi_roce_aggregate_cache_t* cache, uint32_t pe, uint32_t qp_idx, uint32_t cur_head,
+    AscendC::LocalTensor<uint64_t>& ub_local64, AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id);
 
 ACLSHMEM_DEVICE __ubuf__ aclshmemi_roce_aggregate_cache_t* aclshmemi_roce_aggregate_cache(__ubuf__ uint8_t* buf);
 

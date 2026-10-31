@@ -124,6 +124,23 @@ union aclshmemi_hns_1825_sq_db_t {
     uint64_t value;
 };
 
+struct aclshmemi_hns_1825_sq_doorbell_view_t {
+    uint64_t sq_head_addr;  // GM address of the SQ producer-index mirror.
+    uint64_t sq_db_addr;    // GM address of the HNS_1825 hardware SQ doorbell register.
+    uint64_t sq_db_sw_addr; // GM address of the software shadow doorbell record, written in big-endian format.
+    uint32_t sq_wqn;        // SQ work queue number (QP number) encoded in the doorbell.
+    uint8_t sq_mtu_shift;   // Path MTU shift encoded in the doorbell.
+    uint8_t sq_db_cos;      // SQ doorbell COS for HNS_1825 hardware priority
+};
+
+// Constants shared by multiple HNS_1825 send/aggregate paths.
+constexpr uint32_t ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE = 64;
+constexpr uint32_t ACLSHMEMI_HNS_1825_POLL_CQ_THRESHOLD = 10;
+static_assert(
+    sizeof(aclshmemi_hns_1825_wqe_ctrl_seg_t) + sizeof(aclshmemi_hns_1825_wqe_rdma_task_seg_t) +
+        sizeof(aclshmemi_hns_1825_wqe_data_seg_t) ==
+    ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE);
+
 // HNS_1825 NIC consumes big-endian WQE dwords and software doorbell records while AscendC runs little-endian.
 // SHMEM-owned SQ/CQ head-tail mirrors stay host-order; only NIC-visible payloads are byte-swapped.
 ACLSHMEM_DEVICE uint16_t aclshmemi_hns_1825_htobe16(uint16_t host_val)
@@ -158,8 +175,7 @@ ACLSHMEM_DEVICE void aclshmemi_hns_1825_sync_func(uint32_t sync_id)
 
 ACLSHMEM_DEVICE void aclshmemi_hns_1825_clear_wqe_ub(AscendC::LocalTensor<uint32_t>& wqe_ub_local)
 {
-    constexpr uint32_t ACLSHMEMI_HNS_1825_WQE_SIZE = 64;
-    for (uint32_t i = 0; i < ACLSHMEMI_HNS_1825_WQE_SIZE / sizeof(uint32_t); ++i) {
+    for (uint32_t i = 0; i < ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE / sizeof(uint32_t); ++i) {
         wqe_ub_local.SetValue(i, 0);
     }
 }
@@ -194,8 +210,7 @@ ACLSHMEM_DEVICE __gm__ uint8_t* aclshmemi_roce_hns_1825_get_send_wqe(
     __gm__ aclshmemi_rdma_sq_ctx*& sq_context, uint32_t idx)
 {
     // SQ ring slot stride is one 64B WQEBB; it is independent from the control-plane wqe_size field.
-    constexpr uint32_t ACLSHMEMI_HNS_1825_WQEBB_SIZE = 64;
-    return (__gm__ uint8_t*)sq_context->buf_addr + (uint64_t)idx * ACLSHMEMI_HNS_1825_WQEBB_SIZE;
+    return (__gm__ uint8_t*)sq_context->buf_addr + (uint64_t)idx * ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE;
 }
 
 // A CQE is ready when its owner bit matches the lap parity derived from the current consumer index.
@@ -224,8 +239,6 @@ ACLSHMEM_DEVICE void aclshmemi_roce_hns_1825_dump_cqe(__ubuf__ aclshmemi_hns_182
     AscendC::printf("RDMA HNS_1825 CQE raw DW4-DW7: [0x%x, 0x%x, 0x%x, 0x%x]\n", raw[4], raw[5], raw[6], raw[7]);
 }
 
-// HNS_1825 CQ doorbell: keep host-order CI mirrors in CQ/SQ tail records and publish the big-endian CI to
-// the NIC-visible CQ software doorbell (roceCq.dbSwVa).
 template <>
 ACLSHMEM_DEVICE void aclshmemi_roce_ring_cq_doorbell<aclshmemi_rdma_backend_t::HNS_1825>(
     uint32_t pe, uint32_t qp_idx, uint32_t cur_tail, AscendC::LocalTensor<uint64_t>& ub_local64,
@@ -239,12 +252,8 @@ ACLSHMEM_DEVICE void aclshmemi_roce_ring_cq_doorbell<aclshmemi_rdma_backend_t::H
     __gm__ aclshmemi_rdma_cq_ctx* cq_context =
         (__gm__ aclshmemi_rdma_cq_ctx*)(rdma_info->scq_ptr +
                                         ((uint64_t)pe * qp_num + qp_idx) * sizeof(aclshmemi_rdma_cq_ctx));
-    __gm__ aclshmemi_rdma_sq_ctx* sq_context =
-        (__gm__ aclshmemi_rdma_sq_ctx*)(rdma_info->sq_ptr +
-                                        ((uint64_t)pe * qp_num + qp_idx) * sizeof(aclshmemi_rdma_sq_ctx));
-    // Host-order CI mirrors: cq tail_addr lets poll_cq resume, sq tail_addr feeds post_send SQ-full checks.
+
     aclshmemi_hns_1825_write_u32_gm(cq_context->tail_addr, cur_tail);
-    aclshmemi_hns_1825_write_u32_gm(sq_context->tail_addr, cur_tail);
 
     ub_local32.SetValue(0, aclshmemi_hns_1825_htobe32(cur_tail & ACLSHMEMI_HNS_1825_CQ_UPDATE_CI_MASK));
     aclshmemi_roce_write_ub_to_gm_with_sync(cq_context->db_sw_addr, ub_local32, sizeof(uint32_t), sync_id);
@@ -258,10 +267,11 @@ constexpr uint64_t ACLSHMEMI_HNS_1825_CYCLES_PER_US = 50;
 constexpr uint64_t ACLSHMEMI_HNS_1825_CYCLES_PER_US = 1000;
 #endif
 
-// Poll until the CQ consumer index reaches target_idx, or return an error status on CQE error/timeout.
+// Poll until the CQE for target_sq_head is consumed, or return an error status on CQE error/timeout.
+// HNS CQ tail counts CQEs; the CQE's wqe_counter tracks SQ WQEs when some WQEs are unsignaled.
 template <>
 ACLSHMEM_DEVICE uint32_t aclshmemi_roce_poll_cq<aclshmemi_rdma_backend_t::HNS_1825>(
-    uint32_t pe, uint32_t qp_idx, uint32_t target_idx, AscendC::LocalTensor<uint64_t>& ub_local64,
+    uint32_t pe, uint32_t qp_idx, uint32_t target_sq_head, AscendC::LocalTensor<uint64_t>& ub_local64,
     AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
 {
     constexpr uint64_t ACLSHMEMI_HNS_1825_POLL_CQ_TIMEOUT_US = 60ULL * 1000 * 1000;
@@ -273,6 +283,7 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_poll_cq<aclshmemi_rdma_backend_t::HNS_18
     constexpr uint32_t ACLSHMEMI_HNS_1825_CQE_OPCODE_MASK = 0x1f;
     constexpr uint32_t ACLSHMEMI_HNS_1825_CQE_OPTYPE_ERROR = 0x1e;   // op_type = error coding
     constexpr uint32_t ACLSHMEMI_HNS_1825_CQE_OPTYPE_INVALID = 0x1f; // op_type = unused/placeholder slot
+    constexpr uint32_t ACLSHMEMI_HNS_1825_CQE_WQE_COUNTER_MASK = 0xffffU;
     // CQE slot stride in the CQ ring. The hardware slot is 64B even though SHMEM only parses the first
     // 32B (aclshmemi_hns_1825_cqe_t); used only when the control plane leaves cqe_size unset.
     constexpr uint32_t ACLSHMEMI_HNS_1825_DEFAULT_CQE_SIZE = 64;
@@ -281,14 +292,26 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_poll_cq<aclshmemi_rdma_backend_t::HNS_18
     __gm__ aclshmemi_rdma_cq_ctx* cq_context =
         (__gm__ aclshmemi_rdma_cq_ctx*)(rdma_info->scq_ptr +
                                         ((uint64_t)pe * qp_num + qp_idx) * sizeof(aclshmemi_rdma_cq_ctx));
+    __gm__ aclshmemi_rdma_sq_ctx* sq_context =
+        (__gm__ aclshmemi_rdma_sq_ctx*)(rdma_info->sq_ptr +
+                                        ((uint64_t)pe * qp_num + qp_idx) * sizeof(aclshmemi_rdma_sq_ctx));
+
+    uint32_t current_sq_tail = aclshmemi_hns_1825_read_u32_gm(sq_context->tail_addr);
+    if (target_sq_head == current_sq_tail) {
+        return 0;
+    }
+    // target_sq_head is the next SQ producer index, so its completion CQE carries target_sq_head - 1.
+    uint16_t target_wqe_counter = (uint16_t)((target_sq_head - 1U) & ACLSHMEMI_HNS_1825_CQE_WQE_COUNTER_MASK);
 
     uint32_t cqe_size = cq_context->cqe_size == 0 ? ACLSHMEMI_HNS_1825_DEFAULT_CQE_SIZE : cq_context->cqe_size;
     uint32_t cq_ring = cq_context->depth;
     uint32_t cur_tail = aclshmemi_hns_1825_read_u32_gm(cq_context->tail_addr);
     uint32_t original_cur_tail = cur_tail;
+    uint32_t completed_sq_tail = current_sq_tail;
     uint32_t status = 0;
+    bool target_reached = false;
 
-    while (cur_tail != target_idx) {
+    while (!target_reached) {
         __gm__ uint8_t* cqe_addr =
             (__gm__ uint8_t*)(cq_context->buf_addr + (uint64_t)(cur_tail & (cq_ring - 1)) * cqe_size);
         AscendC::GlobalTensor<uint32_t> cqe_gm;
@@ -319,11 +342,19 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_poll_cq<aclshmemi_rdma_backend_t::HNS_18
             ACLSHMEM_DEBUG_FUNC(aclshmemi_roce_hns_1825_dump_cqe, cqe);
             ACLSHMEM_DEBUG_FUNC(
                 aclshmemi_kernel_printf,
-                "Poll CQE timeout: pe=%u, qp_idx=%u, cur_tail=%u, target_idx=%u, original_tail=%u, backend=%u\n", pe,
-                qp_idx, cur_tail, target_idx, original_cur_tail, (uint32_t)aclshmemi_rdma_backend_t::HNS_1825);
+                "Poll CQE timeout: pe=%u, qp_idx=%u, cq_tail=%u, target_sq_head=%u, original_cq_tail=%u, "
+                "backend=%u\n",
+                pe, qp_idx, cur_tail, target_sq_head, original_cur_tail, (uint32_t)aclshmemi_rdma_backend_t::HNS_1825);
             trap();
             break;
         }
+
+        // wqe_counter is the low 16 bits of the completed SQ WQE sequence. Reconstruct the SQ consumer
+        // boundary relative to the last locally published SQ tail; this also handles CQEs consumed before
+        // a later timeout or error CQE.
+        uint16_t previous_wqe_counter = (uint16_t)((completed_sq_tail - 1U) & ACLSHMEMI_HNS_1825_CQE_WQE_COUNTER_MASK);
+        uint16_t completed_wqe_count = (uint16_t)(cqe->wqe_counter - previous_wqe_counter);
+        completed_sq_tail += completed_wqe_count;
 
         // Check CQE status.
         if (cqe_type == ACLSHMEMI_HNS_1825_CQE_OPTYPE_ERROR) {
@@ -340,18 +371,30 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_poll_cq<aclshmemi_rdma_backend_t::HNS_18
             trap();
             break;
         }
+
+        target_reached = cqe->wqe_counter == target_wqe_counter;
         cur_tail++;
     }
 
     aclshmemi_roce_ring_cq_doorbell<aclshmemi_rdma_backend_t::HNS_1825>(
         pe, qp_idx, cur_tail, ub_local64, ub_local32, sync_id);
+
+    // SQ tail is a WQE consumer index, not a CQE consumer index. On success, all WQEs through target_sq_head
+    // are complete; on error/timeout, publish only the SQ progress proven by the CQEs already consumed.
+    uint32_t sq_tail_to_publish = completed_sq_tail;
+    if (status == 0 && target_reached) {
+        sq_tail_to_publish = target_sq_head;
+    }
+    if (sq_tail_to_publish != current_sq_tail) {
+        aclshmemi_hns_1825_write_u32_gm(sq_context->tail_addr, sq_tail_to_publish);
+    }
     return status;
 }
 
 // Fill the 16B WQE control segment in the UB staging buffer. owner_sl carries the owner bit that toggles
 // on every SQ wrap; the remaining fields select one task section plus one data segment.
 ACLSHMEM_DEVICE __ubuf__ uint8_t* aclshmemi_roce_hns_1825_fill_wqe_ctrl_seg(
-    AscendC::LocalTensor<uint32_t>& wqe_ub_local, uint32_t cur_head, uint32_t depth)
+    __ubuf__ uint8_t* wqe_addr, uint32_t cur_head, uint32_t depth, bool isSubmit)
 {
     constexpr uint32_t ACLSHMEMI_HNS_1825_WQE_CTRL_VALUE = 0x40;           // owner_sl fixed part
     constexpr uint32_t ACLSHMEMI_HNS_1825_WQE_VA_VALUE = 0x20;             // df_tsl VA bit
@@ -366,74 +409,79 @@ ACLSHMEM_DEVICE __ubuf__ uint8_t* aclshmemi_roce_hns_1825_fill_wqe_ctrl_seg(
     uint16_t wf_bdsl = (uint16_t)(ACLSHMEMI_HNS_1825_WQE_DATA_SEG_BDSL |
                                   ((cur_head & ACLSHMEMI_HNS_1825_WQE_MSN_MASK) << ACLSHMEMI_HNS_1825_WQE_MSN_SHIFT));
 
-    aclshmemi_hns_1825_clear_wqe_ub(wqe_ub_local);
-    __ubuf__ uint8_t* wqe_ub = (__ubuf__ uint8_t*)(__ubuf__ void*)wqe_ub_local.GetPhyAddr();
     __ubuf__ aclshmemi_hns_1825_wqe_ctrl_seg_t* ctrl =
-        (__ubuf__ aclshmemi_hns_1825_wqe_ctrl_seg_t*)(__ubuf__ void*)wqe_ub;
+        (__ubuf__ aclshmemi_hns_1825_wqe_ctrl_seg_t*)(__ubuf__ void*)wqe_addr;
 
     ctrl->owner_sl = (((cur_head & depth) == 0) ? 0 : (1U << ACLSHMEMI_HNS_1825_WQE_OWNER_SHIFT)) |
                      ACLSHMEMI_HNS_1825_WQE_CTRL_VALUE;
-    ctrl->df_tsl = (uint8_t)((1U << ACLSHMEMI_HNS_1825_WQE_CQE_SIGNAL_SHIFT) | ACLSHMEMI_HNS_1825_WQE_VA_VALUE |
-                             (sizeof(aclshmemi_hns_1825_wqe_rdma_task_seg_t) / ACLSHMEMI_HNS_1825_SEG_LEN_UNIT));
+    ctrl->df_tsl =
+        (uint8_t)(((isSubmit ? 1U : 0U) << ACLSHMEMI_HNS_1825_WQE_CQE_SIGNAL_SHIFT) | ACLSHMEMI_HNS_1825_WQE_VA_VALUE |
+                  (sizeof(aclshmemi_hns_1825_wqe_rdma_task_seg_t) / ACLSHMEMI_HNS_1825_SEG_LEN_UNIT));
     ctrl->wf_bdsl = aclshmemi_hns_1825_htobe16(wf_bdsl);
     ctrl->cl_pi = aclshmemi_hns_1825_htobe32(1U << ACLSHMEMI_HNS_1825_WQE_CMP_TASK_LEN_SHIFT);
-    return wqe_ub + sizeof(aclshmemi_hns_1825_wqe_ctrl_seg_t);
+    ctrl->db = 0;
+    return wqe_addr + sizeof(aclshmemi_hns_1825_wqe_ctrl_seg_t);
 }
 
 // Fill the 32B RDMA task segment in UB with opcode, message length, remote VA, rkey and ulp. Multi-byte
 // fields are stored in the byte order consumed by the NIC.
 ACLSHMEM_DEVICE __ubuf__ uint8_t* aclshmemi_roce_hns_1825_fill_wqe_task_seg(
-    __ubuf__ uint8_t* wqe_addr, aclshmemi_rdma_send_wr& wr, aclshmemi_hns_1825_msg_type_t opcode)
+    __ubuf__ uint8_t* wqe_addr, uint32_t rkey, __gm__ uint8_t* remote_addr, uint32_t lkey, uint32_t message_len,
+    aclshmemi_hns_1825_msg_type_t opcode, bool isSubmit)
 {
     __ubuf__ aclshmemi_hns_1825_wqe_rdma_task_seg_t* task =
         (__ubuf__ aclshmemi_hns_1825_wqe_rdma_task_seg_t*)(__ubuf__ void*)wqe_addr;
 
     task->com_tsk.value = 0;
-    task->com_tsk.bs.signal = 1;
+    task->com_tsk.bs.signal = isSubmit ? 1 : 0;
     task->com_tsk.bs.opcode = static_cast<uint32_t>(opcode);
     task->com_tsk.value = aclshmemi_hns_1825_htobe32(task->com_tsk.value);
-    task->data_len = aclshmemi_hns_1825_htobe32((uint32_t)wr.message_len);
+    task->data_len = aclshmemi_hns_1825_htobe32(message_len);
     task->imm_data = 0;
     task->dw3.value = 0;
+
     if (opcode == aclshmemi_hns_1825_msg_type_t::ACLSHMEMI_HNS_1825_MSG_OPCODE_RDMA_READ) {
         constexpr uint32_t ACLSHMEMI_HNS_1825_RDMA_READ_LAST_EXT_LEN = 4;
 
         task->dw3.bs.last_ext_len = ACLSHMEMI_HNS_1825_RDMA_READ_LAST_EXT_LEN;
         task->dw3.value = aclshmemi_hns_1825_htobe32(task->dw3.value);
     }
-    task->va = aclshmemi_hns_1825_htobe64((uint64_t)wr.remote_addr);
-    task->rkey = aclshmemi_hns_1825_htobe32(wr.rkey);
-    task->ulp = aclshmemi_hns_1825_htobe32(wr.lkey & 0xffffff00U);
+    task->va = aclshmemi_hns_1825_htobe64((uint64_t)remote_addr);
+    task->rkey = aclshmemi_hns_1825_htobe32(rkey);
+    task->ulp = aclshmemi_hns_1825_htobe32(lkey & 0xffffff00U);
     return wqe_addr + sizeof(aclshmemi_hns_1825_wqe_rdma_task_seg_t);
 }
 
 // Fill the 16B data segment in UB immediately after the task segment. le_key sets L for the single SGE.
 ACLSHMEM_DEVICE __ubuf__ uint8_t* aclshmemi_roce_hns_1825_fill_wqe_data_seg(
-    __ubuf__ uint8_t* wqe_addr, aclshmemi_rdma_send_wr& wr)
+    __ubuf__ uint8_t* wqe_addr, uint32_t lkey, __gm__ uint8_t* local_addr, uint32_t message_len)
 {
     constexpr uint32_t ACLSHMEMI_HNS_1825_WQE_NEXT_SGE_INVALID = 1U << 31; // data seg le_key L bit
     constexpr uint32_t ACLSHMEMI_HNS_1825_WQE_LKEY_MASK = 0x3fffffffU;     // data seg le_key key[29:0]
 
-    __ubuf__ aclshmemi_hns_1825_wqe_data_seg_t* data_ub =
+    __ubuf__ aclshmemi_hns_1825_wqe_data_seg_t* data =
         (__ubuf__ aclshmemi_hns_1825_wqe_data_seg_t*)(__ubuf__ void*)wqe_addr;
 
-    data_ub->buf_addr = aclshmemi_hns_1825_htobe64((uint64_t)wr.local_addr);
-    data_ub->r_len = aclshmemi_hns_1825_htobe32((uint32_t)wr.message_len);
-    data_ub->le_key = aclshmemi_hns_1825_htobe32(
-        (wr.lkey & ACLSHMEMI_HNS_1825_WQE_LKEY_MASK) | ACLSHMEMI_HNS_1825_WQE_NEXT_SGE_INVALID);
+    data->buf_addr = aclshmemi_hns_1825_htobe64((uint64_t)local_addr);
+    data->r_len = aclshmemi_hns_1825_htobe32((uint32_t)message_len);
+    data->le_key =
+        aclshmemi_hns_1825_htobe32((lkey & ACLSHMEMI_HNS_1825_WQE_LKEY_MASK) | ACLSHMEMI_HNS_1825_WQE_NEXT_SGE_INVALID);
     return wqe_addr + sizeof(aclshmemi_hns_1825_wqe_data_seg_t);
 }
 
 // Pre-mark the next WQEBB owner byte as invalid so the hardware stops there until the following WQE is
 // posted.
-ACLSHMEM_DEVICE void aclshmemi_roce_hns_1825_write_invalid_wqebb(
-    __gm__ aclshmemi_rdma_sq_ctx*& sq_context, uint32_t idx)
+ACLSHMEM_DEVICE void aclshmemi_roce_hns_1825_write_invalid_wqebb(uint64_t sq_base_addr, uint32_t depth, uint32_t idx)
 {
-    auto wqe = aclshmemi_roce_hns_1825_get_send_wqe(sq_context, idx & (sq_context->depth - 1));
-    AscendC::GlobalTensor<uint8_t> owner;
-    owner.SetGlobalBuffer(wqe);
-    owner.SetValue(0, ((idx & sq_context->depth) == 0) ? 0xff : 0x7f);
-    dcci_cachelines(wqe, sizeof(uint8_t));
+    uint32_t slot = idx & (depth - 1);
+
+    __gm__ uint8_t* wqe_addr =
+        (__gm__ uint8_t*)(sq_base_addr + (uint64_t)slot * ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE);
+
+    __gm__ aclshmemi_hns_1825_wqe_ctrl_seg_t* ctrl = (__gm__ aclshmemi_hns_1825_wqe_ctrl_seg_t*)wqe_addr;
+
+    ctrl->owner_sl = ((idx & depth) == 0) ? 0xff : 0x7f;
+    dcci_cachelines((__gm__ uint8_t*)ctrl, sizeof(uint8_t));
 }
 
 // Assemble the WRITE/READ WQE contiguously in the UB staging buffer, mark the next WQEBB invalid, then
@@ -444,12 +492,13 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_hns_1825_fill_wqe_write_read(
 {
     // This single-SGE WRITE/READ WQE is one 64B WQEBB (ctrl 16B + task 32B + data 16B); other opcodes/tasks
     // may use a different WQE size, so this constant is scoped to WRITE/READ rather than a generic WQE size.
-    constexpr uint32_t ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE = 64;
-
-    __ubuf__ uint8_t* data_ub = aclshmemi_roce_hns_1825_fill_wqe_task_seg(
-        aclshmemi_roce_hns_1825_fill_wqe_ctrl_seg(wqe_ub_local, cur_head, sq_context->depth), wr, opcode);
-    (void)aclshmemi_roce_hns_1825_fill_wqe_data_seg(data_ub, wr);
-    aclshmemi_roce_hns_1825_write_invalid_wqebb(sq_context, cur_head + 1);
+    aclshmemi_hns_1825_clear_wqe_ub(wqe_ub_local);
+    __ubuf__ uint8_t* wqe_ub_addr = (__ubuf__ uint8_t*)wqe_ub_local.GetPhyAddr();
+    wqe_ub_addr = aclshmemi_roce_hns_1825_fill_wqe_ctrl_seg(wqe_ub_addr, cur_head, sq_context->depth, true);
+    wqe_ub_addr = aclshmemi_roce_hns_1825_fill_wqe_task_seg(
+        wqe_ub_addr, wr.rkey, wr.remote_addr, wr.lkey, (uint32_t)wr.message_len, opcode, true);
+    (void)aclshmemi_roce_hns_1825_fill_wqe_data_seg(wqe_ub_addr, wr.lkey, wr.local_addr, (uint32_t)wr.message_len);
+    aclshmemi_roce_hns_1825_write_invalid_wqebb(sq_context->buf_addr, sq_context->depth, cur_head + 1);
     aclshmemi_roce_write_ub_to_gm_with_sync(
         (uint64_t)wqe_addr, wqe_ub_local, ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE, sync_id);
     return ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE;
@@ -463,8 +512,6 @@ ACLSHMEM_DEVICE uint32_t
 aclshmemi_roce_fill_wqe<aclshmemi_rdma_backend_t::HNS_1825, aclshmemi_rdma_opcode_t::OP_RDMA_WRITE>(
     aclshmemi_rdma_send_wr& wr, __gm__ aclshmemi_rdma_sq_ctx*& sq_context, __gm__ uint8_t* wqe_addr, uint32_t cur_head)
 {
-    constexpr uint32_t ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE = 64; // a WRITE/READ WQE occupies one 64B WQEBB
-
     (void)wr;
     (void)sq_context;
     (void)wqe_addr;
@@ -477,13 +524,66 @@ ACLSHMEM_DEVICE uint32_t
 aclshmemi_roce_fill_wqe<aclshmemi_rdma_backend_t::HNS_1825, aclshmemi_rdma_opcode_t::OP_RDMA_READ>(
     aclshmemi_rdma_send_wr& wr, __gm__ aclshmemi_rdma_sq_ctx*& sq_context, __gm__ uint8_t* wqe_addr, uint32_t cur_head)
 {
-    constexpr uint32_t ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE = 64; // a WRITE/READ WQE occupies one 64B WQEBB
-
     (void)wr;
     (void)sq_context;
     (void)wqe_addr;
     (void)cur_head;
     return ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE;
+}
+
+ACLSHMEM_DEVICE void aclshmemi_roce_hns_1825_ring_sq_doorbell_impl(
+    aclshmemi_hns_1825_sq_doorbell_view_t db_view, uint32_t cur_head, AscendC::LocalTensor<uint64_t>& ub_local64,
+    AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
+{
+    constexpr uint32_t ACLSHMEMI_HNS_1825_SQ_DB_PI_HIGH_SHIFT = 8;   // high 8 bits of the SQ producer index
+    constexpr uint32_t ACLSHMEMI_HNS_1825_SQ_DB_PI_FIELD_SHIFT = 32; // pi field offset in the 64-bit doorbell
+    constexpr uint32_t ACLSHMEMI_HNS_1825_SQ_DB_TYPE_21 = 21;        // doorbell type = SQ
+    constexpr uint32_t ACLSHMEMI_HNS_1825_SQ_DB_SGID_IDX = 1;
+    constexpr uint32_t ACLSHMEMI_HNS_1825_SQ_DB_CNTX_SIZE = 1;
+
+    (void)ub_local64;
+    uint64_t db_addr;
+    if constexpr (aclshmemi_hns_1825_use_pi_on_chip) {
+        (void)ub_local32;
+        aclshmemi_hns_1825_write_u32_gm(db_view.sq_head_addr, cur_head);
+        // The low PI byte selects an 8-byte slot in the 2KB-aligned doorbell window.
+        db_addr = db_view.sq_db_addr + ((uint64_t)(cur_head & 0xffU) << 3);
+    } else {
+        AscendC::DataCopyExtParams copy_params{1, sizeof(uint32_t), 0, 0, 0};
+        AscendC::GlobalTensor<uint32_t> sq_sw_db;
+        sq_sw_db.SetGlobalBuffer((__gm__ uint32_t*)db_view.sq_db_sw_addr, 1);
+        ub_local32.SetValue(0, aclshmemi_hns_1825_htobe32(cur_head));
+        aclshmemi_hns_1825_sync_func<AscendC::HardEvent::S_MTE3>(sync_id);
+        AscendC::DataCopyPad(sq_sw_db, ub_local32, copy_params);
+        aclshmemi_hns_1825_write_u32_gm(db_view.sq_head_addr, cur_head);
+        AscendC::PipeBarrier<PIPE_MTE3>();
+        dcci_cachelines((__gm__ uint8_t*)db_view.sq_db_sw_addr, sizeof(uint32_t));
+        db_addr = db_view.sq_db_addr;
+    }
+
+    // Program the hardware doorbell register with a single st_dev write.
+    aclshmemi_hns_1825_sq_db_t sq_db;
+    sq_db.value = 0;
+    sq_db.bs.c = 0;
+    sq_db.bs.cntx_size = ACLSHMEMI_HNS_1825_SQ_DB_CNTX_SIZE;
+    sq_db.bs.qpn = db_view.sq_wqn;
+    sq_db.bs.sub_type = 0;
+    sq_db.bs.rsvd1 = 0;
+    sq_db.bs.pi = 0;
+    sq_db.bs.sgid_index = ACLSHMEMI_HNS_1825_SQ_DB_SGID_IDX;
+    sq_db.bs.type = ACLSHMEMI_HNS_1825_SQ_DB_TYPE_21;
+    sq_db.bs.mtu_shift = db_view.sq_mtu_shift;
+    sq_db.bs.cos = db_view.sq_db_cos;
+
+    uint64_t db_value = sq_db.value | ((((uint64_t)cur_head >> ACLSHMEMI_HNS_1825_SQ_DB_PI_HIGH_SHIFT) & 0xffULL)
+                                       << ACLSHMEMI_HNS_1825_SQ_DB_PI_FIELD_SHIFT);
+
+    AscendC::GlobalTensor<uint32_t> db_gm;
+    db_gm.SetGlobalBuffer((__gm__ uint32_t*)db_addr, sizeof(uint64_t) / sizeof(uint32_t));
+    aclshmemi_hns_1825_sync_func<AscendC::HardEvent::MTE3_S>(sync_id);
+    st_dev(db_value, (__gm__ uint64_t*)db_gm.GetPhyAddr(), 0);
+    aclshmemi_hns_1825_sync_func<AscendC::HardEvent::MTE3_S>(sync_id);
+    AscendC::PipeBarrier<PIPE_ALL>();
 }
 
 /**
@@ -503,56 +603,10 @@ ACLSHMEM_DEVICE void aclshmemi_roce_ring_sq_doorbell<aclshmemi_rdma_backend_t::H
     __gm__ aclshmemi_rdma_sq_ctx*& sq_context, uint32_t cur_head, AscendC::LocalTensor<uint64_t>& ub_local64,
     AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
 {
-    constexpr uint32_t ACLSHMEMI_HNS_1825_SQ_DB_PI_HIGH_SHIFT = 8;   // high 8 bits of the SQ producer index
-    constexpr uint32_t ACLSHMEMI_HNS_1825_SQ_DB_PI_FIELD_SHIFT = 32; // pi field offset in the 64-bit doorbell
-    constexpr uint32_t ACLSHMEMI_HNS_1825_SQ_DB_TYPE_21 = 21;        // doorbell type = SQ
-    constexpr uint32_t ACLSHMEMI_HNS_1825_SQ_DB_SGID_IDX = 1;
-    constexpr uint32_t ACLSHMEMI_HNS_1825_SQ_DB_CNTX_SIZE = 1;
+    aclshmemi_hns_1825_sq_doorbell_view_t db_view{sq_context->head_addr, sq_context->db_addr,   sq_context->db_sw_addr,
+                                                  sq_context->wqn,       sq_context->mtu_shift, sq_context->db_cos};
 
-    (void)ub_local64;
-    uint64_t db_addr;
-    if constexpr (aclshmemi_hns_1825_use_pi_on_chip) {
-        (void)ub_local32;
-        // head_addr is SHMEM's host-order PI mirror, not the NIC-visible software doorbell.
-        aclshmemi_hns_1825_write_u32_gm(sq_context->head_addr, cur_head);
-        // The low PI byte selects an 8-byte slot in the 2KB-aligned doorbell window.
-        // Keep db_addr in the SQ context as the base; the payload already carries the high PI byte.
-        db_addr = sq_context->db_addr + ((uint64_t)(cur_head & 0xffU) << 3);
-    } else {
-        AscendC::DataCopyExtParams copy_params{1, sizeof(uint32_t), 0, 0, 0};
-        AscendC::GlobalTensor<uint32_t> sq_sw_db;
-        sq_sw_db.SetGlobalBuffer((__gm__ uint32_t*)sq_context->db_sw_addr, 1);
-        ub_local32.SetValue(0, aclshmemi_hns_1825_htobe32(cur_head));
-        aclshmemi_hns_1825_sync_func<AscendC::HardEvent::S_MTE3>(sync_id);
-        AscendC::DataCopyPad(sq_sw_db, ub_local32, copy_params);
-
-        // Update the independent SHMEM PI mirror while MTE3 publishes the software doorbell.
-        aclshmemi_hns_1825_write_u32_gm(sq_context->head_addr, cur_head);
-        AscendC::PipeBarrier<PIPE_MTE3>();
-        db_addr = sq_context->db_addr;
-    }
-
-    // Program the hardware doorbell register with a single st_dev write.
-    aclshmemi_hns_1825_sq_db_t sq_db;
-    sq_db.value = 0;
-    sq_db.bs.c = 0;
-    sq_db.bs.rsvd0 = 0;
-    sq_db.bs.cntx_size = ACLSHMEMI_HNS_1825_SQ_DB_CNTX_SIZE;
-    sq_db.bs.qpn = sq_context->wqn;
-    sq_db.bs.sub_type = 0;
-    sq_db.bs.rsvd1 = 0;
-    sq_db.bs.pi = 0;
-    sq_db.bs.sgid_index = ACLSHMEMI_HNS_1825_SQ_DB_SGID_IDX;
-    sq_db.bs.type = ACLSHMEMI_HNS_1825_SQ_DB_TYPE_21;
-    sq_db.bs.mtu_shift = sq_context->mtu_shift;
-    sq_db.bs.cos = sq_context->db_cos;
-    uint64_t db_value = sq_db.value | ((((uint64_t)cur_head >> ACLSHMEMI_HNS_1825_SQ_DB_PI_HIGH_SHIFT) & 0xffULL)
-                                       << ACLSHMEMI_HNS_1825_SQ_DB_PI_FIELD_SHIFT);
-
-    AscendC::GlobalTensor<uint32_t> db_gm;
-    db_gm.SetGlobalBuffer((__gm__ uint32_t*)db_addr, sizeof(uint64_t) / sizeof(uint32_t));
-    aclshmemi_hns_1825_sync_func<AscendC::HardEvent::MTE3_S>(sync_id);
-    st_dev(db_value, (__gm__ uint64_t*)db_gm.GetPhyAddr(), 0);
+    aclshmemi_roce_hns_1825_ring_sq_doorbell_impl(db_view, cur_head, ub_local64, ub_local32, sync_id);
 }
 
 /**
@@ -576,7 +630,6 @@ ACLSHMEM_DEVICE void aclshmemi_hns_1825_post_send_read_write(
         OP_CODE == aclshmemi_rdma_opcode_t::OP_RDMA_READ ?
             aclshmemi_hns_1825_msg_type_t::ACLSHMEMI_HNS_1825_MSG_OPCODE_RDMA_READ :
             aclshmemi_hns_1825_msg_type_t::ACLSHMEMI_HNS_1825_MSG_OPCODE_RDMA_WRITE;
-    constexpr uint32_t ACLSHMEMI_HNS_1825_POLL_CQ_THRESHOLD = 10;
 
     __gm__ aclshmemi_rdma_info* rdma_info = aclshmemi_qp_info_fetch();
     uint32_t my_pe = aclshmemi_get_my_pe();
@@ -621,7 +674,6 @@ ACLSHMEM_DEVICE void aclshmemi_hns_1825_post_send_read_write(
     wr.lkey = local_mem_info->lkey;
 
     // Create a UB view sized to the READ/WRITE WQE before staging it for the SQ copy.
-    constexpr uint32_t ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE = 64;
     AscendC::LocalTensor<uint32_t> wqe_ub_local =
         aclshmemi_hns_1825_make_wqe_ub(ub_local32, ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE);
     __gm__ uint8_t* wqe_addr = aclshmemi_roce_hns_1825_get_send_wqe(sq_context, cur_head & (sq_context->depth - 1));
@@ -655,6 +707,85 @@ aclshmemi_roce_post_send<aclshmemi_rdma_backend_t::HNS_1825, aclshmemi_rdma_opco
         wr, pe, qp_idx, ub_local64, ub_local32, sync_id);
 }
 
+template <>
+ACLSHMEM_DEVICE uint32_t
+aclshmemi_roce_aggregate_wqe_size<aclshmemi_rdma_backend_t::HNS_1825>(__ubuf__ aclshmemi_roce_aggregate_cache_t* cache)
+{
+    (void)cache;
+    // An HNS_1825 SQ slot is one 64B WQEBB, independent of the control-plane wqe_size field.
+    return ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE;
+}
+
+ACLSHMEM_DEVICE uint32_t aclshmemi_roce_hns_1825_fill_wqe_ub_write_read(
+    __ubuf__ uint8_t* wqe_addr, uint32_t wqe_head, uint32_t message_len, aclshmemi_hns_1825_msg_type_t opcode,
+    uint32_t rkey, __gm__ uint8_t* remote_addr, uint32_t lkey, __gm__ uint8_t* local_addr, uint32_t depth,
+    bool isSubmit)
+{
+    __ubuf__ uint8_t* cur_wqe_addr = wqe_addr;
+
+    cur_wqe_addr = aclshmemi_roce_hns_1825_fill_wqe_ctrl_seg(cur_wqe_addr, wqe_head, depth, isSubmit);
+    cur_wqe_addr =
+        aclshmemi_roce_hns_1825_fill_wqe_task_seg(cur_wqe_addr, rkey, remote_addr, lkey, message_len, opcode, isSubmit);
+    cur_wqe_addr = aclshmemi_roce_hns_1825_fill_wqe_data_seg(cur_wqe_addr, lkey, local_addr, message_len);
+
+    return ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE;
+}
+
+template <>
+ACLSHMEM_DEVICE uint32_t
+aclshmemi_roce_fill_wqe_ub<aclshmemi_rdma_backend_t::HNS_1825, aclshmemi_rdma_opcode_t::OP_RDMA_WRITE>(
+    __ubuf__ uint8_t* wqe_addr, uint32_t wqe_head, uint32_t message_len, uint32_t rkey, __gm__ uint8_t* remote_addr,
+    uint32_t lkey, __gm__ uint8_t* local_addr, uint32_t depth, bool isSubmit)
+{
+    return aclshmemi_roce_hns_1825_fill_wqe_ub_write_read(
+        wqe_addr, wqe_head, message_len, aclshmemi_hns_1825_msg_type_t::ACLSHMEMI_HNS_1825_MSG_OPCODE_RDMA_WRITE, rkey,
+        remote_addr, lkey, local_addr, depth, isSubmit);
+}
+
+template <>
+ACLSHMEM_DEVICE uint32_t
+aclshmemi_roce_fill_wqe_ub<aclshmemi_rdma_backend_t::HNS_1825, aclshmemi_rdma_opcode_t::OP_RDMA_READ>(
+    __ubuf__ uint8_t* wqe_addr, uint32_t wqe_head, uint32_t message_len, uint32_t rkey, __gm__ uint8_t* remote_addr,
+    uint32_t lkey, __gm__ uint8_t* local_addr, uint32_t depth, bool isSubmit)
+{
+    return aclshmemi_roce_hns_1825_fill_wqe_ub_write_read(
+        wqe_addr, wqe_head, message_len, aclshmemi_hns_1825_msg_type_t::ACLSHMEMI_HNS_1825_MSG_OPCODE_RDMA_READ, rkey,
+        remote_addr, lkey, local_addr, depth, isSubmit);
+}
+
+template <>
+ACLSHMEM_DEVICE void aclshmemi_roce_ring_sq_doorbell_from_cache<aclshmemi_rdma_backend_t::HNS_1825>(
+    __ubuf__ aclshmemi_roce_aggregate_cache_t* cache, uint32_t pe, uint32_t qp_idx, uint32_t cur_head,
+    AscendC::LocalTensor<uint64_t>& ub_local64, AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
+{
+    uint64_t sq_db_sw_addr = 0;
+    if constexpr (!aclshmemi_hns_1825_use_pi_on_chip) {
+        __gm__ aclshmemi_rdma_info* rdma_info = aclshmemi_qp_info_fetch();
+        __gm__ aclshmemi_rdma_sq_ctx* sq_context =
+            (__gm__ aclshmemi_rdma_sq_ctx*)(rdma_info->sq_ptr + ((uint64_t)pe * rdma_info->qp_num + qp_idx) *
+                                                                    sizeof(aclshmemi_rdma_sq_ctx));
+        sq_db_sw_addr = sq_context->db_sw_addr;
+    }
+    // Snapshot all fields before the doorbell path reuses the aliased UB workspace.
+    aclshmemi_hns_1825_sq_doorbell_view_t db_view{
+        cache->sq_head_addr,
+        cache->sq_db_addr,
+        sq_db_sw_addr,
+        cache->backend.hns_1825.sq_wqn,
+        cache->backend.hns_1825.sq_mtu_shift,
+        cache->backend.hns_1825.sq_db_cos};
+
+    aclshmemi_roce_hns_1825_ring_sq_doorbell_impl(db_view, cur_head, ub_local64, ub_local32, sync_id);
+}
+
+template <>
+ACLSHMEM_DEVICE void aclshmemi_roce_prepare_aggregate_commit<aclshmemi_rdma_backend_t::HNS_1825>(
+    __ubuf__ aclshmemi_roce_aggregate_cache_t* cache, uint32_t next_head)
+{
+    // Keep the next WQEBB invalid until a later post writes it.
+    aclshmemi_roce_hns_1825_write_invalid_wqebb(cache->sq_base_addr, cache->sq_depth, next_head);
+}
+
 // Build a 64-bit FAA/CAS WQE in UB, with an 8B result SGE.
 template <aclshmemi_rdma_atomic_op_t ATOMIC_OP_CODE>
 ACLSHMEM_DEVICE void aclshmemi_roce_hns_1825_fill_wqe_atomic(
@@ -668,7 +799,8 @@ ACLSHMEM_DEVICE void aclshmemi_roce_hns_1825_fill_wqe_atomic(
     constexpr auto OPCODE = ATOMIC_OP_CODE == aclshmemi_rdma_atomic_op_t::OP_ATOMIC_FA ?
                                 aclshmemi_hns_1825_msg_type_t::ACLSHMEMI_HNS_1825_MSG_OPCODE_ATOMIC_FA :
                                 aclshmemi_hns_1825_msg_type_t::ACLSHMEMI_HNS_1825_MSG_OPCODE_ATOMIC_CAS;
-    auto task_addr = aclshmemi_roce_hns_1825_fill_wqe_ctrl_seg(wqe_ub, cur_head, sq_context->depth);
+    __ubuf__ uint8_t* task_addr = aclshmemi_roce_hns_1825_fill_wqe_ctrl_seg(
+        (__ubuf__ uint8_t*)wqe_ub.GetPhyAddr(), cur_head, sq_context->depth, true);
     auto task = reinterpret_cast<__ubuf__ aclshmemi_hns_1825_wqe_atomic_task_seg_t*>(task_addr);
     task->com_tsk.value = 0;
     task->com_tsk.bs.signal = 1;
@@ -679,8 +811,11 @@ ACLSHMEM_DEVICE void aclshmemi_roce_hns_1825_fill_wqe_atomic(
     task->swap_add_data = aclshmemi_hns_1825_htobe64(wr.atomic.masked_common.swap_add_data);
     if constexpr (ATOMIC_OP_CODE == aclshmemi_rdma_atomic_op_t::OP_ATOMIC_CAS) {
         task->compare_data = aclshmemi_hns_1825_htobe64(wr.atomic.masked_common.compare_data);
+    } else {
+        task->compare_data = 0;
     }
-    aclshmemi_roce_hns_1825_fill_wqe_data_seg(task_addr + sizeof(*task), wr);
+    (void)aclshmemi_roce_hns_1825_fill_wqe_data_seg(
+        task_addr + sizeof(*task), wr.lkey, wr.local_addr, (uint32_t)wr.message_len);
 }
 
 /**
@@ -731,7 +866,7 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_hns_1825_post_send_atomic_wqe(
     wr.message_len = sizeof(uint64_t);
     auto wqe_ub = aclshmemi_hns_1825_make_wqe_ub(ub_local32, WQE_SIZE);
     aclshmemi_roce_hns_1825_fill_wqe_atomic<ATOMIC_OP_CODE>(wr, sq_context, wqe_ub, cur_head);
-    aclshmemi_roce_hns_1825_write_invalid_wqebb(sq_context, cur_head + 1U);
+    aclshmemi_roce_hns_1825_write_invalid_wqebb(sq_context->buf_addr, sq_context->depth, cur_head + 1U);
     auto wqe_addr = aclshmemi_roce_hns_1825_get_send_wqe(sq_context, cur_head & (sq_context->depth - 1U));
     aclshmemi_roce_write_ub_to_gm_with_sync(reinterpret_cast<uint64_t>(wqe_addr), wqe_ub, WQE_SIZE, sync_id);
     dcci_cachelines(wqe_addr, WQE_SIZE);

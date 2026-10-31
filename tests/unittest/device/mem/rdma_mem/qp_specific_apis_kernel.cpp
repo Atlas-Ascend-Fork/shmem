@@ -18,7 +18,7 @@ constexpr uint64_t AGGREGATE_MESSAGE_SIZE = AGGREGATE_OP_COUNT * sizeof(uint32_t
 constexpr uint32_t AGGREGATE_UB_SIZE = 64 + AGGREGATE_OP_COUNT * 128;
 
 namespace {
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
+#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
 constexpr bool kQpSpecificBackendSupported = true;
 #else
 constexpr bool kQpSpecificBackendSupported = false;
@@ -48,7 +48,8 @@ __aicore__ inline uint32_t get_qp_num_or_zero()
 template <typename T>
 __aicore__ inline void roce_qp_put_nbi_raw_impl(__gm__ T* gva)
 {
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) && (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
+#if (defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)) && \
+    (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
     if (g_coreType != AscendC::AIV || AscendC::GetSubBlockIdx() != 0) {
         return;
     }
@@ -95,7 +96,8 @@ __aicore__ inline void roce_qp_put_nbi_raw_impl(__gm__ T* gva)
 template <typename T>
 __aicore__ inline void roce_qp_put_nbi_raw_aggregate_impl(__gm__ T* gva)
 {
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) && (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
+#if (defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)) && \
+    (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
     if (g_coreType != AscendC::AIV || AscendC::GetSubBlockIdx() != 0) {
         return;
     }
@@ -143,7 +145,8 @@ __aicore__ inline void roce_qp_put_nbi_raw_aggregate_impl(__gm__ T* gva)
 template <typename T>
 __aicore__ inline void roce_qp_get_nbi_raw_impl(__gm__ T* gva)
 {
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) && (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
+#if (defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)) && \
+    (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
     if (g_coreType != AscendC::AIV || AscendC::GetSubBlockIdx() != 0) {
         return;
     }
@@ -190,7 +193,8 @@ __aicore__ inline void roce_qp_get_nbi_raw_impl(__gm__ T* gva)
 template <typename T>
 __aicore__ inline void roce_qp_get_nbi_raw_aggregate_impl(__gm__ T* gva)
 {
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) && (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
+#if (defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)) && \
+    (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
     if (g_coreType != AscendC::AIV || AscendC::GetSubBlockIdx() != 0) {
         return;
     }
@@ -238,7 +242,8 @@ __aicore__ inline void roce_qp_get_nbi_raw_aggregate_impl(__gm__ T* gva)
 template <typename T>
 __aicore__ inline void roce_qp_put_nbi_tensor_impl(AscendC::GlobalTensor<T> gva)
 {
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) && (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
+#if (defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)) && \
+    (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
     if (g_coreType != AscendC::AIV || AscendC::GetSubBlockIdx() != 0) {
         return;
     }
@@ -285,7 +290,8 @@ __aicore__ inline void roce_qp_put_nbi_tensor_impl(AscendC::GlobalTensor<T> gva)
 template <typename T>
 __aicore__ inline void roce_qp_put_nbi_tensor_aggregate_impl(AscendC::GlobalTensor<T> gva)
 {
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) && (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
+#if (defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)) && \
+    (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
     if (g_coreType != AscendC::AIV || AscendC::GetSubBlockIdx() != 0) {
         return;
     }
@@ -342,7 +348,8 @@ __aicore__ inline void roce_qp_put_nbi_tensor_aggregate_impl(AscendC::GlobalTens
 template <typename T>
 __aicore__ inline void roce_qp_get_nbi_tensor_impl(AscendC::GlobalTensor<T> gva)
 {
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) && (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
+#if (defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)) && \
+    (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
     if (g_coreType != AscendC::AIV || AscendC::GetSubBlockIdx() != 0) {
         return;
     }
@@ -389,7 +396,8 @@ __aicore__ inline void roce_qp_get_nbi_tensor_impl(AscendC::GlobalTensor<T> gva)
 template <typename T>
 __aicore__ inline void roce_qp_get_nbi_tensor_aggregate_impl(AscendC::GlobalTensor<T> gva)
 {
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) && (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
+#if (defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)) && \
+    (defined(__DAV_C220_VEC__) || defined(__DAV_C310_VEC__))
     if (g_coreType != AscendC::AIV || AscendC::GetSubBlockIdx() != 0) {
         return;
     }

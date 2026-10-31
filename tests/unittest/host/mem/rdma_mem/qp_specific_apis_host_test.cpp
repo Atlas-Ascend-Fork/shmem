@@ -27,7 +27,7 @@ constexpr uint32_t REQUESTED_QP_NUM = 2;
 constexpr uint32_t RANK_OFFSET = 10;
 constexpr int TIMEOUT = 30;
 
-#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
+#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
 constexpr bool kQpSpecificBackendSupported = true;
 #else
 constexpr bool kQpSpecificBackendSupported = false;
@@ -126,7 +126,7 @@ void test_rdma_qp_specific_apis(int rank_id, int rank_size, uint64_t local_mem_s
 TEST(TestMemApi, TestShmemRdmaQpSpecificApis)
 {
     if (!kQpSpecificBackendSupported) {
-        GTEST_SKIP() << "RDMA QP-specific APIs only support XSCALE backend.";
+        GTEST_SKIP() << "RDMA QP-specific APIs require XSCALE or HNS_1825 backend.";
     }
 
     const int process_count = test_gnpu_num;

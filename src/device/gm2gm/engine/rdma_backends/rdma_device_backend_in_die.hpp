@@ -197,15 +197,17 @@ aclshmemi_roce_fill_wqe_ub<aclshmemi_rdma_backend_t::IN_DIE, aclshmemi_rdma_opco
 
 template <>
 ACLSHMEM_DEVICE void aclshmemi_roce_ring_sq_doorbell_from_cache<aclshmemi_rdma_backend_t::IN_DIE>(
-    __ubuf__ aclshmemi_roce_aggregate_cache_t* cache, uint32_t cur_head, AscendC::LocalTensor<uint64_t>& ub_local64,
-    AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
+    __ubuf__ aclshmemi_roce_aggregate_cache_t* cache, uint32_t pe, uint32_t qp_idx, uint32_t cur_head,
+    AscendC::LocalTensor<uint64_t>& ub_local64, AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
 {
+    (void)pe;
+    (void)qp_idx;
     // Snapshot cache fields before ub_local32/ub_local64 overwrite the shared UB workspace.
     uint64_t doorbell_info = 0;
-    doorbell_info |= cache->sq_wqn;                      // [0:23] DB_TAG = qp_num
-    doorbell_info |= 0 << 24;                            // [24:27] DB_CMD = HNS_ROCE_V2_SQ_DB(0)
-    doorbell_info |= ((uint64_t)cur_head % 65536) << 32; // [32:47] DB_PI = sq.head
-    doorbell_info |= (uint64_t)(cache->sq_sl) << 48;     // [48:50] DB_SL = qp.sl
+    doorbell_info |= cache->backend.in_die.sq_wqn;                  // [0:23] DB_TAG = qp_num
+    doorbell_info |= 0 << 24;                                       // [24:27] DB_CMD = HNS_ROCE_V2_SQ_DB(0)
+    doorbell_info |= ((uint64_t)cur_head % 65536) << 32;            // [32:47] DB_PI = sq.head
+    doorbell_info |= (uint64_t)(cache->backend.in_die.sq_sl) << 48; // [48:50] DB_SL = qp.sl
 
     uint64_t sq_head_addr = cache->sq_head_addr;
     uint64_t sq_db_addr = cache->sq_db_addr;

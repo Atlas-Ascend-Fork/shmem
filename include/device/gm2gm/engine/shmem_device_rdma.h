@@ -22,7 +22,7 @@ constexpr uint32_t ACLSHMEM_ROCE_QP_AGGREGATE_MAX_OPS = 1023;
 /**
  * @anchor roce_qp_aggregate_contract
  * @par QP-specific aggregate RoCE contract
- * QP-specific aggregate operations are supported only on XSCALE.
+ * QP-specific aggregate operations are supported on XSCALE and HNS_1825.
  * - A batch contains deferred operations followed by exactly one submit operation. The submit operation publishes the
  *   complete batch and resets its state after success.
  * - A batch must use one operation kind, PE, QP index, submit state, UB workspace base, and synchronization ID.
@@ -60,7 +60,8 @@ ACLSHMEM_DEVICE __gm__ void* aclshmem_roce_ptr(__gm__ void* ptr, int pe);
  * @param dst               [in] Symmetric address of the destination data on the local PE.
  * @param src               [in] Symmetric address of the source data.
  * @param buf               [in] Pointer on local UB. Must be at least 128 bytes.
- * @param elem_size         [in] Number of elements in the destination and source arrays.
+ * @param elem_size         [in] Number of elements in the destination and source arrays. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] PE number of the remote PE.
  * @note Both operands are local symmetric addresses; the RDMA engine derives the target network address internally.
  *       Both operands must point to symmetric memory, and each complete transfer range must remain within its
@@ -78,7 +79,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(__gm__ T* dst, __gm__ T* src, __ubuf
  * @param dst               [in] Symmetric address of the destination data on the local PE.
  * @param src               [in] Symmetric address of the source data.
  * @param buf               [in] Pointer on local UB. Must be at least 128 bytes.
- * @param elem_size         [in] Number of elements in the destination and source arrays.
+ * @param elem_size         [in] Number of elements in the destination and source arrays. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] PE number of the remote PE.
  * @param sync_id           [in] Hardware event ID for MTE3 pipeline synchronization.
  * @note Both operands are local symmetric addresses; the RDMA engine derives the target network address internally.
@@ -233,7 +235,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_qp_get_nbi(
  * @param dst               [in] GlobalTensor at the symmetric address of the destination data on the local PE.
  * @param src               [in] GlobalTensor at the symmetric address of the source data.
  * @param buf               [in] LocalTensor on local UB. Must be at least 128 bytes.
- * @param elem_size         [in] Number of elements in the destination and source arrays.
+ * @param elem_size         [in] Number of elements in the destination and source arrays. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] PE number of the remote PE.
  * @note Address requirements: src is translated to the corresponding address on pe; dst is the local RDMA operand.
  *       Both operands must point to symmetric memory, and each complete transfer range must remain within its
@@ -253,7 +256,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  * @param dst               [in] GlobalTensor at the symmetric address of the destination data on the local PE.
  * @param src               [in] GlobalTensor at the symmetric address of the source data.
  * @param buf               [in] LocalTensor on local UB. Must be at least 128 bytes.
- * @param elem_size         [in] Number of elements in the destination and source arrays.
+ * @param elem_size         [in] Number of elements in the destination and source arrays. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] PE number of the remote PE.
  * @param sync_id           [in] Hardware event ID for MTE3 pipeline synchronization.
  * @note Address requirements: src is translated to the corresponding address on pe; dst is the local RDMA operand.
@@ -271,7 +275,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  *
  * @warning n is the total number of operations in the batch, including the final submit call,
  *          and must be less than the SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is supported on IN_DIE, XSCALE and HNS_1825, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Get operation, buf base, and sync_id.
  * @note Finish the batch with an aclshmemx_submit_t action. After submit, call
  *       aclshmemx_roce_quiet(pe, buf, sync_id) before reading or reusing dst.
@@ -281,7 +285,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  * @param src               [in] Symmetric source address on the target PE specified by pe.
  * @param buf               [in] Local UB workspace shared by all calls in this batch. For n total operations, its
  *                          capacity must be at least 64 + 128 * n bytes.
- * @param elem_size         [in] Number of elements transferred by this Get operation.
+ * @param elem_size         [in] Number of elements transferred by this Get operation. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] Target PE that owns src.
  * @param sync_id           [in] Hardware event ID used for MTE3 pipeline synchronization.
  * @param action            [in] aclshmemx_defer_t action referencing the batch's initialized
@@ -297,7 +302,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  *
  * @warning n is the total number of operations in the batch, including this submit call, and must be less than the
  *          SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is supported on IN_DIE, XSCALE and HNS_1825, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Get operation, buf base, and sync_id.
  * @note The submit call contributes one operation to n. On a submit failure, the calling device kernel is aborted
  *       and the submit state is not reset.
@@ -308,7 +313,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  * @param src               [in] Symmetric source address on the target PE specified by pe.
  * @param buf               [in] Local UB workspace shared by all calls in this batch. For n total operations, its
  *                          capacity must be at least 64 + 128 * n bytes.
- * @param elem_size         [in] Number of elements transferred by this Get operation.
+ * @param elem_size         [in] Number of elements transferred by this Get operation. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] Target PE that owns src.
  * @param sync_id           [in] Hardware event ID used for MTE3 pipeline synchronization.
  * @param action            [in] aclshmemx_submit_t action referencing the same aclshmemx_submit_state_t.
@@ -323,7 +329,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  *
  * @warning n is the total number of operations in the batch, including the final submit call,
  *          and must be less than the SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is supported on IN_DIE, XSCALE and HNS_1825, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Get operation, buf base, and sync_id.
  * @note Finish the batch with an aclshmemx_submit_t action. After submit, call
  *       aclshmemx_roce_quiet(pe, buf, sync_id) before reading or reusing dst.
@@ -333,7 +339,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  * @param src               [in] Remote symmetric GlobalTensor for the source data on the target PE specified by pe.
  * @param buf               [in] Local UB LocalTensor workspace shared by all calls in this batch. For n total
  *                          operations, its capacity must be at least 64 + 128 * n bytes.
- * @param elem_size         [in] Number of elements transferred by this Get operation.
+ * @param elem_size         [in] Number of elements transferred by this Get operation. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] Target PE that owns src.
  * @param sync_id           [in] Hardware event ID used for MTE3 pipeline synchronization.
  * @param action            [in] aclshmemx_defer_t action referencing the batch's initialized
@@ -349,7 +356,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  *
  * @warning n is the total number of operations in the batch, including this submit call, and must be less than the
  *          SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is supported on IN_DIE, XSCALE and HNS_1825, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Get operation, buf base, and sync_id.
  * @note The submit call contributes one operation to n. On a submit failure, the calling device kernel is aborted
  *       and the submit state is not reset.
@@ -360,7 +367,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  * @param src               [in] Remote symmetric GlobalTensor for the source data on the target PE specified by pe.
  * @param buf               [in] Local UB LocalTensor workspace shared by all calls in this batch. For n total
  *                          operations, its capacity must be at least 64 + 128 * n bytes.
- * @param elem_size         [in] Number of elements transferred by this Get operation.
+ * @param elem_size         [in] Number of elements transferred by this Get operation. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] Target PE that owns src.
  * @param sync_id           [in] Hardware event ID used for MTE3 pipeline synchronization.
  * @param action            [in] aclshmemx_submit_t action referencing the same aclshmemx_submit_state_t.
@@ -379,7 +387,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  * @param dst               [in] Symmetric address of the destination data.
  * @param src               [in] Symmetric address of the source data on the local PE.
  * @param buf               [in] Pointer on local UB. Must be at least 128 bytes.
- * @param elem_size         [in] Number of elements in the destination and source arrays.
+ * @param elem_size         [in] Number of elements in the destination and source arrays. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] PE number of the remote PE.
  * @note Address requirements: dst is translated to the corresponding address on pe; src is the local RDMA operand.
  *       Both operands must point to symmetric memory, and each complete transfer range must remain within its
@@ -397,7 +406,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(__gm__ T* dst, __gm__ T* src, __ubuf
  * @param dst               [in] Symmetric address of the destination data.
  * @param src               [in] Symmetric address of the source data on the local PE.
  * @param buf               [in] Pointer on local UB. Must be at least 128 bytes.
- * @param elem_size         [in] Number of elements in the destination and source arrays.
+ * @param elem_size         [in] Number of elements in the destination and source arrays. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] PE number of the remote PE.
  * @param sync_id           [in] Hardware event ID used for MTE3 pipeline synchronization.
  * @note Address requirements: dst is translated to the corresponding address on pe; src is the local RDMA operand.
@@ -550,7 +560,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_qp_put_nbi(
  * @param dst               [in] GlobalTensor at the symmetric address of the destination data.
  * @param src               [in] GlobalTensor at the symmetric address of the source data on the local PE.
  * @param buf               [in] LocalTensor on local UB. Must be at least 128 bytes.
- * @param elem_size         [in] Number of elements in the destination and source arrays.
+ * @param elem_size         [in] Number of elements in the destination and source arrays. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] PE number of the remote PE.
  * @note Address requirements: dst is translated to the corresponding address on pe; src is the local RDMA operand.
  *       Both operands must point to symmetric memory, and each complete transfer range must remain within its
@@ -570,7 +581,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  * @param dst               [in] GlobalTensor at the symmetric address of the destination data.
  * @param src               [in] GlobalTensor at the symmetric address of the source data on the local PE.
  * @param buf               [in] LocalTensor on local UB. Must be at least 128 bytes.
- * @param elem_size         [in] Number of elements in the destination and source arrays.
+ * @param elem_size         [in] Number of elements in the destination and source arrays. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] PE number of the remote PE.
  * @param sync_id           [in] Hardware event ID used for MTE3 pipeline synchronization.
  * @note Address requirements: dst is translated to the corresponding address on pe; src is the local RDMA operand.
@@ -588,7 +600,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  *
  * @warning n is the total number of operations in the batch, including the final submit call,
  *          and must be less than the SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is supported on IN_DIE, XSCALE and HNS_1825, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Put operation, buf base, and sync_id.
  * @note Finish the batch with an aclshmemx_submit_t action. After submit, call
  *       aclshmemx_roce_quiet(pe, buf, sync_id); src must remain valid and unchanged until it returns.
@@ -598,7 +610,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  * @param src               [in] Symmetric source address on the local PE.
  * @param buf               [in] Local UB workspace shared by all calls in this batch. For n total operations, its
  *                          capacity must be at least 64 + 128 * n bytes.
- * @param elem_size         [in] Number of elements transferred by this Put operation.
+ * @param elem_size         [in] Number of elements transferred by this Put operation. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] Target PE that owns dst.
  * @param sync_id           [in] Hardware event ID used for MTE3 pipeline synchronization.
  * @param action            [in] aclshmemx_defer_t action referencing the batch's initialized
@@ -614,7 +627,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  *
  * @warning n is the total number of operations in the batch, including this submit call, and must be less than the
  *          SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is supported on IN_DIE, XSCALE and HNS_1825, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Put operation, buf base, and sync_id.
  * @note The submit call contributes one operation to n. On a submit failure, the calling device kernel is aborted
  *       and the submit state is not reset.
@@ -626,7 +639,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  * @param src               [in] Symmetric source address on the local PE.
  * @param buf               [in] Local UB workspace shared by all calls in this batch. For n total operations, its
  *                          capacity must be at least 64 + 128 * n bytes.
- * @param elem_size         [in] Number of elements transferred by this Put operation.
+ * @param elem_size         [in] Number of elements transferred by this Put operation. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] Target PE that owns dst.
  * @param sync_id           [in] Hardware event ID used for MTE3 pipeline synchronization.
  * @param action            [in] aclshmemx_submit_t action referencing the same aclshmemx_submit_state_t.
@@ -641,7 +655,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  *
  * @warning n is the total number of operations in the batch, including the final submit call,
  *          and must be less than the SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is supported on IN_DIE, XSCALE and HNS_1825, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Put operation, buf base, and sync_id.
  * @note Finish the batch with an aclshmemx_submit_t action. After submit, call
  *       aclshmemx_roce_quiet(pe, buf, sync_id); src must remain valid and unchanged until it returns.
@@ -652,7 +666,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  * @param src               [in] Local GlobalTensor for the source data on the local PE.
  * @param buf               [in] Local UB LocalTensor workspace shared by all calls in this batch. For n total
  *                          operations, its capacity must be at least 64 + 128 * n bytes.
- * @param elem_size         [in] Number of elements transferred by this Put operation.
+ * @param elem_size         [in] Number of elements transferred by this Put operation. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] Target PE that owns dst.
  * @param sync_id           [in] Hardware event ID used for MTE3 pipeline synchronization.
  * @param action            [in] aclshmemx_defer_t action referencing the batch's initialized
@@ -668,7 +683,7 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  *
  * @warning n is the total number of operations in the batch, including this submit call, and must be less than the
  *          SQ ring depth.
- * @note Aggregate ROCE NBI is currently supported on the XSCALE and IN_DIE backends, by one AI Core, one active batch,
+ * @note Aggregate ROCE NBI is supported on IN_DIE, XSCALE and HNS_1825, by one AI Core, one active batch,
  *       and QP0. Every call in a batch must use the same state, pe, Put operation, buf base, and sync_id.
  * @note The submit call contributes one operation to n. On a submit failure, the calling device kernel is aborted
  *       and the submit state is not reset.
@@ -681,7 +696,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  * @param src               [in] Local GlobalTensor for the source data on the local PE.
  * @param buf               [in] Local UB LocalTensor workspace shared by all calls in this batch. For n total
  *                          operations, its capacity must be at least 64 + 128 * n bytes.
- * @param elem_size         [in] Number of elements transferred by this Put operation.
+ * @param elem_size         [in] Number of elements transferred by this Put operation. The total transfer size
+ *                          (`elem_size * sizeof(T)`) must not exceed `UINT32_MAX` bytes.
  * @param pe                [in] Target PE that owns dst.
  * @param sync_id           [in] Hardware event ID used for MTE3 pipeline synchronization.
  * @param action            [in] aclshmemx_submit_t action referencing the same aclshmemx_submit_state_t.
