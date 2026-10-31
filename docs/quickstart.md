@@ -185,6 +185,7 @@ python3 -m pip install -r requirements-examples.txt
 
 - MPI：OpenMPI 4.0+（分布式通信场景）
 - PyTorch：1.12+（Python 示例运行）
+- HNS_1825网卡: 30.5.1.36以上版本的网卡驱动和固件不支持shmem v1.7.0及以下版本（RDMA场景）
 
 ### 4.9 Docker 容器环境
 
