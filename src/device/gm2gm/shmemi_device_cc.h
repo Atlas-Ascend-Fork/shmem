@@ -557,6 +557,7 @@ ACLSHMEM_DEVICE void aclshmemi_sync_algo(aclshmem_team_t team_idx)
         }
     }
 }
+
 template <bool IS_AIV_ONLY = true>
 ACLSHMEM_DEVICE void aclshmemi_barrier_algo(aclshmem_team_t team_idx)
 {
@@ -733,7 +734,19 @@ ACLSHMEM_DEVICE int aclshmem_barrier(aclshmem_team_t tid)
 
 ACLSHMEM_DEVICE void aclshmem_barrier_all() { aclshmem_barrier(ACLSHMEM_TEAM_WORLD); }
 
-ACLSHMEM_DEVICE void aclshmemx_sync_vec(aclshmem_team_t tid) { aclshmemi_sync<true>(tid); }
+ACLSHMEM_DEVICE void aclshmemx_sync_vec(aclshmem_team_t team)
+{
+    if (team == -1) {
+        return; // not in team
+    }
+    aclshmemx_team_t* sync_team = aclshmemi_get_state()->team_pools[team];
+    int32_t vec_size = AscendC::GetBlockNum() * AscendC::GetTaskRation();
+    if (sync_team->size <= SYNC_V3_SMALL_TEAM_SIZE || vec_size >= sync_team->size) {
+        aclshmemi_sync_npu_v3<true>(team);
+    } else {
+        aclshmemi_sync_npu_v4<true>(team);
+    }
+}
 
 ACLSHMEM_DEVICE void aclshmemx_sync_vec_all() { aclshmemx_sync_vec(ACLSHMEM_TEAM_WORLD); }
 

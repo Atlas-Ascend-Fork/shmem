@@ -70,11 +70,11 @@ ACLSHMEM_DEVICE void aclshmem_barrier_all(void);
 #define shmem_barrier_all aclshmem_barrier_all
 
 /**
- * @brief Collective synchronization over a team in which only vector cores participate. This routine does not
- * ensure
- *        completion of remote memory updates issued through ACLSHMEM communication APIs. Cube cores may call
- * the API
- *        but take no effect.
+ * @brief Collective synchronization over a team in which only vector cores participate.
+ * @note Cross-card synchronization is supported only within a UB/HCCS domain inside one machine or supernode.
+ *       All PEs in the team must belong to that domain.
+ * @note This routine does not ensure completion of remote memory updates issued through ACLSHMEM communication APIs.
+ *       Cube cores may call the API, but take no effect.
  *
  * @param team              [in] team to synchronize
  */
