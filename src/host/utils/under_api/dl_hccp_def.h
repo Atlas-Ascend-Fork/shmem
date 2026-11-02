@@ -15,6 +15,7 @@
 #include <time.h>
 #include <pthread.h>
 #include <cstdint>
+#include <cstddef>
 #include <netinet/in.h>
 #include <string>
 #include <ostream>
@@ -140,13 +141,39 @@ enum HccpNotifyType {
 /**
  * @ingroup libsocket
  * struct of the client socket
+ *
+ * 与 libra.so 内部 SocketConnectInfoT 的 V1 布局(8+16+4+192=220, 对齐到224)一致,
+ * 对应 libra 尚未引入 tagChkDis 字段(HCOMM commit a828b2db4 之前)的数组元素步长。
  */
 struct HccpSocketConnectInfo {
     void* handle;                      /**< socket handle */
     HccpIpAddr remoteIp;               /**< IP address of remote socket, [0-7] is reserved for vnic */
-    uint16_t port;                     /**< Socket listening port number */
-    char tag[HCCP_SOCK_CONN_TAG_SIZE]; /**< tag must ended by '\0' */
+    unsigned int port;                 /**< Socket listening port number (uint32, offset 24) */
+    char tag[HCCP_SOCK_CONN_TAG_SIZE]; /**< tag must ended by '\0' (offset 28) */
 };
+
+static_assert(sizeof(HccpSocketConnectInfo) == 224, "HccpSocketConnectInfo ABI mismatch: expect 224");
+static_assert(offsetof(HccpSocketConnectInfo, port) == 24, "port offset mismatch: expect 24");
+static_assert(offsetof(HccpSocketConnectInfo, tag) == 28, "tag offset mismatch: expect 28");
+
+/**
+ * @ingroup libsocket
+ * SocketConnectInfoT V2 布局(8+16+4+192+1+7=228, 按 8 字节对齐补齐到232), 对应 CANN hcomm
+ * (commit a828b2db4, 新增 tagChkDis/resv 字段)及以后的构建
+ * libra.so 的数组元素步长。
+ */
+struct HccpSocketConnectInfoV2 {
+    void* handle;                      /**< socket handle */
+    HccpIpAddr remoteIp;               /**< IP address of remote socket */
+    unsigned int port;                 /**< Socket listening port number */
+    char tag[HCCP_SOCK_CONN_TAG_SIZE]; /**< tag must ended by '\0' */
+    bool tagChkDis;                    /**< disable tag check */
+    unsigned char resv[7];             /**< reserved */
+};
+
+static_assert(sizeof(HccpSocketConnectInfoV2) == 232, "HccpSocketConnectInfoV2 ABI mismatch: expect 232");
+static_assert(offsetof(HccpSocketConnectInfoV2, tag) == 28, "tag offset mismatch: expect 28");
+static_assert(offsetof(HccpSocketConnectInfoV2, tagChkDis) == 220, "tagChkDis offset mismatch: expect 220");
 
 /**
  * @ingroup libsocket
@@ -168,6 +195,26 @@ struct HccpSocketListenInfo {
     unsigned int phase; /**< refer to enum listen_phase */
     unsigned int err;   /**< errno */
 };
+
+static_assert(sizeof(HccpSocketListenInfo) == 24, "HccpSocketListenInfo ABI mismatch: expect 24");
+
+/**
+ * @ingroup libsocket
+ * SocketListenInfoT V2 布局(8+4+4+4+1=21, 按 8 字节对齐补齐到32), 与 V2 SocketConnectInfoT
+ * 同批次(commit a828b2db4)引入 tagChkDis 字段, 位于 V1 原尾部填充区(offset 20),
+ * 数组元素步长由 24 变为 32。tagChkDis 语义与连接接口一致: false 保持 tag 校验。
+ */
+struct HccpSocketListenInfoV2 {
+    void* handle;           /**< socket handle */
+    unsigned int port;      /**< Socket listening port number */
+    unsigned int phase;     /**< refer to enum listen_phase */
+    unsigned int err;       /**< errno */
+    bool tagChkDis;         /**< disable tag check */
+    unsigned char resv[11]; /**< reserved */
+};
+
+static_assert(sizeof(HccpSocketListenInfoV2) == 32, "HccpSocketListenInfoV2 ABI mismatch: expect 32");
+static_assert(offsetof(HccpSocketListenInfoV2, tagChkDis) == 20, "tagChkDis offset mismatch: expect 20");
 
 /**
  * @ingroup libsocket

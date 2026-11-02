@@ -11,6 +11,8 @@
 #ifndef MF_HYBM_CORE_DL_HCCP_API_H
 #define MF_HYBM_CORE_DL_HCCP_API_H
 
+#include <cstdio>
+
 #include "dl_hccp_def.h"
 
 namespace shm {
@@ -49,6 +51,15 @@ public:
     static Result LoadLibrary();
     static void CleanupLibrary();
 
+    /*
+     * 给定库文件路径, 在镜像中搜索 V2 新增字段 "tagChkDis" 的日志串判定 SocketConnectInfoT 布局:
+     * 命中返回 232(V2), 完整扫描未命中返回 224(V1), 镜像无法定位/读取返回 0。
+     * 优先扫描运行时映射段, 失败时回退为直接扫描文件内容; 供 LoadLibrary 探测与单元测试使用。
+     */
+    static int DetectStrideFromImage(const char* imagePath);
+
+    static int DetectStrideFromFile(std::FILE* file);
+
     static inline int RaSocketInit(HccpNetworkMode mode, const HccpRdev& rdev, void*& socketHandle)
     {
         return gRaSocketInit(mode, rdev, &socketHandle);
@@ -70,25 +81,23 @@ public:
         return gRaRdevGetHandle(deviceId, &rdmaHandle);
     }
 
-    static inline int RaSocketBatchConnect(HccpSocketConnectInfo conn[], uint32_t num)
-    {
-        return gRaSocketBatchConnect(conn, num);
-    }
+    /*
+     * 兼容 libra.so 两种 SocketConnectInfoT 布局: conn 数组始终传入 V1 布局, 加载时探测到 V2 则内部自动转换后调用。
+     */
+    static int RaSocketBatchConnect(HccpSocketConnectInfo conn[], uint32_t num);
 
     static inline int RaSocketBatchClose(HccpSocketCloseInfo conn[], uint32_t num)
     {
         return gRaSocketBatchClose(conn, num);
     }
 
-    static inline int RaSocketListenStart(HccpSocketListenInfo conn[], uint32_t num)
-    {
-        return gRaSocketListenStart(conn, num);
-    }
+    /*
+     * 兼容 libra.so 两种 SocketListenInfoT 布局: conn 数组始终传入 V1 布局,
+     * 加载时探测到 V2(32B) 则内部自动转换, 返回前将库回写的出参字段拷回 V1 数组。
+     */
+    static int RaSocketListenStart(HccpSocketListenInfo conn[], uint32_t num);
 
-    static inline int RaSocketListenStop(HccpSocketListenInfo conn[], uint32_t num)
-    {
-        return gRaSocketListenStop(conn, num);
-    }
+    static int RaSocketListenStop(HccpSocketListenInfo conn[], uint32_t num);
 
     static inline int RaGetSockets(uint32_t role, HccpSocketInfo conn[], uint32_t num, uint32_t& connectedNum)
     {
@@ -151,6 +160,12 @@ private:
     static void* tsdHandle;
     static const char* gRaLibName;
     static const char* gTsdLibName;
+    /* 探测到的 libra.so 布局代次步长: connect 数组 224/232, listen 数组 24/32, 未探测为 0 */
+    static int gConnectInfoStride;
+
+    /* 在 libra.so 已加载镜像中搜索 V2 新增字段 "tagChkDis" 的日志串判定步长(架构无关):
+     * 命中返回 232(V2), 未命中返回 224(V1), 库映射定位失败返回 0 */
+    static int DetectConnectInfoStride(void* funcAddr);
 
     static raRdevGetHandleFunc gRaRdevGetHandle;
 
