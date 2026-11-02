@@ -153,7 +153,7 @@ tls_info = "xxx"
 shm.set_conf_store_tls(True, tls_info)      # Enable TLS authentication
 ```
 
-6. Run the test demo using Torchrun.
+5. Run the test demo using Torchrun.
 
 ```sh
 torchrun --nproc-per-node=k test.py // k indicates the rank size to be run.
