@@ -557,7 +557,6 @@ ACLSHMEM_DEVICE void aclshmemi_roce_hns_1825_ring_sq_doorbell_impl(
         AscendC::DataCopyPad(sq_sw_db, ub_local32, copy_params);
         aclshmemi_hns_1825_write_u32_gm(db_view.sq_head_addr, cur_head);
         AscendC::PipeBarrier<PIPE_MTE3>();
-        dcci_cachelines((__gm__ uint8_t*)db_view.sq_db_sw_addr, sizeof(uint32_t));
         db_addr = db_view.sq_db_addr;
     }
 
@@ -582,8 +581,6 @@ ACLSHMEM_DEVICE void aclshmemi_roce_hns_1825_ring_sq_doorbell_impl(
     db_gm.SetGlobalBuffer((__gm__ uint32_t*)db_addr, sizeof(uint64_t) / sizeof(uint32_t));
     aclshmemi_hns_1825_sync_func<AscendC::HardEvent::MTE3_S>(sync_id);
     st_dev(db_value, (__gm__ uint64_t*)db_gm.GetPhyAddr(), 0);
-    aclshmemi_hns_1825_sync_func<AscendC::HardEvent::MTE3_S>(sync_id);
-    AscendC::PipeBarrier<PIPE_ALL>();
 }
 
 /**
