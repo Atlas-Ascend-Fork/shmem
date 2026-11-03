@@ -46,7 +46,7 @@ include/
     │   └── shmem_host_heap.h               // Host memory management API
     ├── data_plane/                         // Host-side data plane API driven by CPU
     │   ├── shmem_host_rma.h                // High-level RMA API on the host
-    │   ├── shmem_device_so.h               // High-level signal operation API on the host
+    │   ├── shmem_host_so.h               // High-level signal operation API on the host
     │   ├── shmem_host_cc.h                 // High-level collective communication API on the host
     │   └── shmem_host_p2p_sync.h           // Host-side high-level P2P synchronization API
     └── utils/                              // Host-side DFX APIs

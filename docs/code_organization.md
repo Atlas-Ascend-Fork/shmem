@@ -49,7 +49,7 @@ include/
     │   └── shmem_host_heap.h               // host内存管理接口
     ├── data_plane/                         // host侧CPU驱动数据面接口
     │   ├── shmem_host_rma.h                // host 高阶 RMA 接口
-    │   ├── shmem_device_so.h               // host 高阶 信号操作接口
+    │   ├── shmem_host_so.h               // host 高阶 信号操作接口
     │   ├── shmem_host_cc.h                 // host 高阶 集合通信接口
     │   └── shmem_host_p2p_sync.h           // host 高阶 p2p同步接口
     └── utils/                              // host侧dfx接口
