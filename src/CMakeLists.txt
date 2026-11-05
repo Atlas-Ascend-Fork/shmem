@@ -24,8 +24,8 @@ else()
     endif()
 endif()
 
-file(GLOB_RECURSE ACLSHMEM_KERNEL_FILES ${CMAKE_CURRENT_SOURCE_DIR}/device/*.cpp)
-file(GLOB_RECURSE _TEMP_KERNEL_FILES ${CMAKE_CURRENT_SOURCE_DIR}/device_simt/*.cpp)
+file(GLOB_RECURSE ACLSHMEM_KERNEL_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/device/*.cpp)
+file(GLOB_RECURSE _TEMP_KERNEL_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/device_simt/*.cpp)
 list(APPEND ACLSHMEM_KERNEL_FILES ${_TEMP_KERNEL_FILES})
 add_library(aclshmem_device OBJECT ${ACLSHMEM_KERNEL_FILES})
 target_compile_options(aclshmem_device
@@ -47,7 +47,7 @@ if(USE_MSSANITIZER)
     )
 endif()
 
-file(GLOB_RECURSE ACLSHMEM_HOST_FILES ${CMAKE_CURRENT_SOURCE_DIR}/host/*.cpp)
+file(GLOB_RECURSE ACLSHMEM_HOST_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/host/*.cpp)
 list(FILTER ACLSHMEM_HOST_FILES EXCLUDE REGEX "python_wrapper")
 list(FILTER ACLSHMEM_HOST_FILES EXCLUDE REGEX "host/bootstrap")
 list(FILTER ACLSHMEM_HOST_FILES EXCLUDE REGEX "host/utils/log")
@@ -64,7 +64,7 @@ if(NOT (ACLSHMEM_RDMA_SUPPORT AND SOC_TYPE STREQUAL "Ascend950"))
     list(FILTER ACLSHMEM_HOST_FILES EXCLUDE REGEX "host/transport/device_rdma/device_rdma_transport_manager_v2")
 endif()
 if(SOC_TYPE STREQUAL "Ascend950")
-    file(GLOB_RECURSE ROOT_INFO_FILES ${CMAKE_CURRENT_SOURCE_DIR}/host/transport/topo/rootinfo/*.cpp)
+    file(GLOB_RECURSE ROOT_INFO_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/host/transport/topo/rootinfo/*.cpp)
     list(APPEND ROOT_INFO_FILES ${CMAKE_CURRENT_SOURCE_DIR}/host/utils/under_api/dl_dcmi_api.cpp)
     list(APPEND ACLSHMEM_HOST_FILES ${ROOT_INFO_FILES})
 endif()
@@ -103,7 +103,7 @@ if(SOC_TYPE STREQUAL "Ascend950")
     )
 endif()
 
-file(GLOB_RECURSE ACLSHMEM_UTILS_FILES ${CMAKE_CURRENT_SOURCE_DIR}/host/utils/*.cpp)
+file(GLOB_RECURSE ACLSHMEM_UTILS_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/host/utils/*.cpp)
 list(FILTER ACLSHMEM_UTILS_FILES EXCLUDE REGEX "host/utils/exception")
 if(USE_MSSANITIZER)
     list(FILTER ACLSHMEM_UTILS_FILES EXCLUDE REGEX "host/utils/mstx/mstx_mem_register_empty.cpp")
@@ -189,7 +189,7 @@ install(TARGETS aclshmem_bootstrap_uid
 # CONFIG_STORE
 add_library(aclshmem_bootstrap_config_store SHARED)
 
-file(GLOB_RECURSE CONFIG_STORE_FILES ${PROJECT_SOURCE_DIR}/src/host/bootstrap/config_store/*.cpp)
+file(GLOB_RECURSE CONFIG_STORE_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/host/bootstrap/config_store/*.cpp)
 
 target_sources(aclshmem_bootstrap_config_store PRIVATE
         ${CONFIG_STORE_FILES}

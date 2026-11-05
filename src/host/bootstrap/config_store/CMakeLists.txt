@@ -21,7 +21,7 @@ include_directories(
         ${PROJECT_SOURCE_DIR}/src/host/utils
 )
 
-file(GLOB_RECURSE CONFIG_STORE_SRCS *.cpp)
+file(GLOB_RECURSE CONFIG_STORE_SRCS CONFIGURE_DEPENDS *.cpp)
 add_library(config_store_object OBJECT ${CONFIG_STORE_SRCS})
 add_library(config_store_static STATIC $<TARGET_OBJECTS:config_store_object>)
 set_target_properties(config_store_static PROPERTIES OUTPUT_NAME "config_store")
@@ -41,7 +41,7 @@ target_link_libraries(config_store_shared
         -Wl,--end-group
         )
 
-file(GLOB HEADER_FILES ../include/*.h)
+file(GLOB HEADER_FILES CONFIGURE_DEPENDS ../include/*.h)
 install(FILES ${HEADER_FILES} DESTINATION ${TARGET_INSTALL_DIR}/acc_links/include)
 install(TARGETS config_store_shared
         LIBRARY DESTINATION lib

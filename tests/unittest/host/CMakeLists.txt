@@ -9,7 +9,7 @@
 # -----------------------------------------------------------------------------------------------------------
 
 # Compile host source files here with coverage feature ON
-file(GLOB_RECURSE ACLSHMEM_HOST_FILES ${PROJECT_SOURCE_DIR}/src/host/*.cpp)
+file(GLOB_RECURSE ACLSHMEM_HOST_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/host/*.cpp)
 list(FILTER ACLSHMEM_HOST_FILES EXCLUDE REGEX "python_wrapper")
 list(FILTER ACLSHMEM_HOST_FILES EXCLUDE REGEX "host/bootstrap")
 if(NOT SOC_TYPE STREQUAL "Ascend950")
@@ -29,8 +29,8 @@ else()
     message(STATUS "USE_MSSANITIZER=OFF")
 endif()
 
-file(GLOB_RECURSE TEST_HOST_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*_test.cpp")
-file(GLOB_RECURSE TOPO_TEST_HOST_FILES "${CMAKE_CURRENT_SOURCE_DIR}/topo/*_test.cpp")
+file(GLOB_RECURSE TEST_HOST_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*_test.cpp")
+file(GLOB_RECURSE TOPO_TEST_HOST_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/topo/*_test.cpp")
 
 if(NOT SOC_TYPE STREQUAL "Ascend950")
     list(FILTER TEST_HOST_FILES EXCLUDE REGEX "init/user_buffer_heap_test[.]cpp$")
@@ -51,8 +51,8 @@ if(NOT ACLSHMEM_SIMT_UDMA_SUPPORT OR ACLSHMEM_RELAY_SUPPORT)
     list(FILTER TEST_HOST_FILES EXCLUDE REGEX "simt_udma/")
 endif()
 
-file(GLOB_RECURSE CONFIG_STORE_FILES ${PROJECT_SOURCE_DIR}/src/host/bootstrap/config_store/*.cpp)
-file(GLOB_RECURSE UNDER_API_FILES ${PROJECT_SOURCE_DIR}/src/host/utils/under_api/*.cpp)
+file(GLOB_RECURSE CONFIG_STORE_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/host/bootstrap/config_store/*.cpp)
+file(GLOB_RECURSE UNDER_API_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/host/utils/under_api/*.cpp)
 set(CMAKE_C_COMPILER gcc)
 set(CMAKE_CXX_COMPILER g++)
 
@@ -77,7 +77,7 @@ set(CMAKE_REQUIRED_INCLUDES "${_ACLSHMEM_SAVED_CMAKE_REQUIRED_INCLUDES}")
 unset(_ACLSHMEM_SAVED_CMAKE_REQUIRED_INCLUDES)
 
 if(SOC_TYPE STREQUAL "Ascend950")
-    file(GLOB_RECURSE TOPO_UNITTEST_SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/host/transport/topo/*.cpp)
+    file(GLOB_RECURSE TOPO_UNITTEST_SOURCE_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/host/transport/topo/*.cpp)
     list(FILTER TOPO_UNITTEST_SOURCE_FILES EXCLUDE REGEX "root_info_generate")
     list(FILTER TOPO_UNITTEST_SOURCE_FILES EXCLUDE REGEX "aclshmemi_hal")
     set(ACLSHMEM_TOPO_UNITTEST_TARGET aclshmem_topo_unittest)

@@ -8,7 +8,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
-file(GLOB_RECURSE TEST_KERNEL_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*_kernel.cpp")
+file(GLOB_RECURSE TEST_KERNEL_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*_kernel.cpp")
 
 # SIMT UDMA device kernels require CANN >= 9.2.0.
 # Exclude them when the CANN version does not qualify so the remaining kernels
