@@ -100,11 +100,15 @@ ACLSHMEM_DEVICE uint64_t CombineThresholdNum(
 
 ACLSHMEM_DEVICE bool CombineWaitStatus(__gm__ int32_t* status_addr, int64_t rank, int64_t slot)
 {
+    AscendC::GlobalTensor<int32_t> status_tensor;
+    status_tensor.SetGlobalBuffer(status_addr);
     EXAMPLE_MSTX_FUSE_SCOPE_START();
     const uint64_t start_cycles = static_cast<uint64_t>(AscendC::GetSystemCycle());
     while (static_cast<uint64_t>(AscendC::GetSystemCycle()) - start_cycles < COMBINE_STATUS_WAIT_TIMEOUT_CYCLES) {
         dcci_cacheline(reinterpret_cast<__gm__ uint8_t*>(status_addr));
-        if (*reinterpret_cast<__gm__ volatile int32_t*>(status_addr) == COMBINE_STATUS_READY) {
+        // Prevent the compiler from hoisting or reusing the remotely updated status load.
+        __asm__ __volatile__("" ::: "memory");
+        if (status_tensor.GetValue(0) == COMBINE_STATUS_READY) {
             EXAMPLE_MSTX_FUSE_SCOPE_END();
             EXAMPLE_MSTX_SIGNAL_WAIT_REPORT(status_addr, ACLSHMEM_CMP_EQ, COMBINE_STATUS_READY);
             return true;
