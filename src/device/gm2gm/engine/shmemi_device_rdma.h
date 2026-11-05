@@ -200,13 +200,15 @@ ACLSHMEM_DEVICE void aclshmemi_roce_quiet(
 /**
  * @brief RDMA Sync function. Performs a synchronization operation on the specified team,
  * ensuring all PEs in the team reach the sync point before proceeding.
- * Uses RDMA-based dissemination algorithm with highlevel signal operations.
+ * Uses RDMA-based dissemination by default. Generic synchronization may enable
+ * MTE/direct signals for reachable peers through ALLOW_MTE.
  *
+ * @tparam ALLOW_MTE         Allow MTE/direct signals before falling back to RoCE.
  * @param team              [in] Pointer to the team on which to perform synchronization.
  * @param buf               [in] Pointer on local UB, available space larger than 128 Bytes.
  * @param sync_id           [in] ID used to Sync S\\MTE3 Event.
  */
-template <typename T>
+template <typename T, bool ALLOW_MTE = false>
 ACLSHMEM_DEVICE void aclshmemi_roce_team_sync(aclshmemx_team_t* team, __ubuf__ T* buf, uint32_t sync_id);
 
 /**

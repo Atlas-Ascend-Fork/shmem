@@ -186,10 +186,12 @@ ACLSHMEM_DEVICE void aclshmemi_roce_quiet(
     }
 }
 
-template <typename T>
+template <typename T, bool ALLOW_MTE>
 ACLSHMEM_DEVICE void aclshmemi_roce_team_sync(aclshmemx_team_t* team, __ubuf__ T* buf, uint32_t sync_id)
 {
-    int my_pe = aclshmemi_get_state()->team_pools[ACLSHMEM_TEAM_WORLD]->mype;
+    __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();
+    int my_pe = device_state->team_pools[ACLSHMEM_TEAM_WORLD]->mype;
+
     int start = team->start;
     int stride = team->stride;
     int size = team->size;
@@ -205,12 +207,25 @@ ACLSHMEM_DEVICE void aclshmemi_roce_team_sync(aclshmemx_team_t* team, __ubuf__ T
     while (shift < size) {
         int next_pe_in_team = (my_pe_in_team + shift) % size;
         int next_pe = start + next_pe_in_team * stride;
-
         // Each round has one incoming signal per PE. Index by round so every
         // access stays within this team's sync array, regardless of team size.
-        aclshmemi_highlevel_signal_set(
-            (__gm__ int32_t*)(sync_pool + round), (__gm__ int32_t*)sync_counter, next_pe, buf, sync_id);
-        aclshmemi_signal_wait_until_eq_for_barrier((__gm__ int32_t*)(sync_pool + round), count);
+        auto dst = (__gm__ int32_t*)(sync_pool + round);
+
+        if constexpr (ALLOW_MTE) {
+            uint8_t transport = device_state->topo_list[next_pe];
+            if (transport & ACLSHMEM_TRANSPORT_MTE) {
+                aclshmemi_signal_set((__gm__ int32_t*)aclshmem_ptr(dst, next_pe), count);
+            } else if (transport & ACLSHMEM_TRANSPORT_ROCE) {
+                aclshmemi_highlevel_signal_set(dst, (__gm__ int32_t*)sync_counter, next_pe, buf, sync_id);
+            } else {
+                ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "No reachable MTE or RoCE transport for team sync.\n");
+                return;
+            }
+        } else {
+            aclshmemi_highlevel_signal_set(dst, (__gm__ int32_t*)sync_counter, next_pe, buf, sync_id);
+        }
+
+        aclshmemi_signal_wait_until_eq_for_barrier(dst, count);
 
         shift *= SHIFT_MULTIPLIER;
         ++round;

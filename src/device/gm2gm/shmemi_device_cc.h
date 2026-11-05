@@ -517,37 +517,20 @@ ACLSHMEM_DEVICE void aclshmemi_sync_algo(aclshmem_team_t team_idx)
     __gm__ aclshmem_device_host_state_t* device_state = aclshmemi_get_state();
     aclshmemx_team_t* team_ptr = device_state->team_pools[team_idx];
 
-    bool intra_node_reaches_all = true;
-    bool roce_reaches = false;
-
-    if (team_idx == ACLSHMEM_TEAM_WORLD) {
-        uint8_t quiet_transport_mask =
-            aclshmemi_filter_unsupported_quiet_transports(aclshmemi_get_quiet_transport_mask());
-        if (quiet_transport_mask & ACLSHMEM_TRANSPORT_ROCE) {
-            roce_reaches = true;
+    // Select from the current team's direct reachability, independently of quiet's completion mask.
+    bool intra_domain_reaches_all = true;
+    for (int32_t team_pe = 0; team_pe < team_ptr->size; ++team_pe) {
+        int32_t global_pe = team_ptr->pe_mapping[team_pe];
+        if (global_pe == device_state->mype) {
+            continue;
         }
-    } else {
-        constexpr uint8_t intra_node_transport_mask =
-            ACLSHMEM_TRANSPORT_MTE | ACLSHMEM_TRANSPORT_SDMA | ACLSHMEM_TRANSPORT_UDMA;
-
-        for (int32_t team_pe = 0; team_pe < team_ptr->size; ++team_pe) {
-            int32_t global_pe = team_ptr->pe_mapping[team_pe];
-            uint8_t transport_mask = device_state->topo_list[global_pe];
-            intra_node_reaches_all = intra_node_reaches_all && ((transport_mask & intra_node_transport_mask) != 0);
-            roce_reaches = roce_reaches || ((transport_mask & ACLSHMEM_TRANSPORT_ROCE) != 0);
+        if ((device_state->topo_list[global_pe] & ACLSHMEM_TRANSPORT_MTE) == 0) {
+            intra_domain_reaches_all = false;
+            break;
         }
     }
 
-    if (roce_reaches) {
-        if ASCEND_IS_AIV {
-            if (AscendC::GetBlockIdx() == 0) {
-                uint64_t copy_ub = device_state->rdma_config.aclshmem_ub;
-                uint32_t sync_id = device_state->rdma_config.sync_id;
-                aclshmemi_roce_team_sync(team_ptr, reinterpret_cast<__ubuf__ char*>(copy_ub), sync_id);
-            }
-        }
-        aclshmemi_sync_core<IS_AIV_ONLY>();
-    } else if (intra_node_reaches_all) {
+    if (intra_domain_reaches_all) {
         // GetBlockNum is identical on AIC/AIV, keeping MIX on the same path.
         int32_t vec_size = AscendC::GetBlockNum();
         if (team_ptr->size <= SYNC_V3_SMALL_TEAM_SIZE || vec_size >= team_ptr->size) {
@@ -555,6 +538,15 @@ ACLSHMEM_DEVICE void aclshmemi_sync_algo(aclshmem_team_t team_idx)
         } else {
             aclshmemi_sync_npu_v4<IS_AIV_ONLY>(team_idx);
         }
+    } else {
+        if ASCEND_IS_AIV {
+            if (AscendC::GetBlockIdx() == 0) {
+                uint64_t copy_ub = device_state->rdma_config.aclshmem_ub;
+                uint32_t sync_id = device_state->rdma_config.sync_id;
+                aclshmemi_roce_team_sync<char, true>(team_ptr, reinterpret_cast<__ubuf__ char*>(copy_ub), sync_id);
+            }
+        }
+        aclshmemi_sync_core<IS_AIV_ONLY>();
     }
 }
 
@@ -716,11 +708,11 @@ ACLSHMEM_DEVICE void util_set_ffts_config(uint64_t config)
 #endif
 }
 
-ACLSHMEM_DEVICE void aclshmem_sync(aclshmem_team_t tid) { aclshmemi_sync<false>(tid); }
+ACLSHMEM_DEVICE void aclshmem_sync(aclshmem_team_t tid) { aclshmemi_sync<true>(tid); }
 
 ACLSHMEM_DEVICE int aclshmem_team_sync(aclshmem_team_t tid)
 {
-    aclshmemi_sync<false>(tid);
+    aclshmem_sync(tid);
     return 0;
 }
 
@@ -728,7 +720,7 @@ ACLSHMEM_DEVICE void aclshmem_sync_all() { aclshmem_sync(ACLSHMEM_TEAM_WORLD); }
 
 ACLSHMEM_DEVICE int aclshmem_barrier(aclshmem_team_t tid)
 {
-    aclshmemi_barrier<false>(tid);
+    aclshmemi_barrier<true>(tid);
     return 0;
 }
 
