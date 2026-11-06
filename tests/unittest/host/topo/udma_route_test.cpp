@@ -86,6 +86,17 @@ protected:
         EXPECT_EQ(local, defaultRoutes.front().localEidIndex);
         EXPECT_EQ(remote, defaultRoutes.front().remoteEidIndex);
     }
+
+    void SetRtp(uint32_t rank, size_t endpointIndex)
+    {
+        auto& endpoint = endpoints[rank][endpointIndex];
+        auto& raw = roots[rank].eidIndexToRankAddr.at(endpoint.eidIndex)->eidData;
+        raw[7] = 0x80;
+        endpoint.isUbRtp = EidConverter::IsUbRtp(raw);
+        // Exercise the same metadata serialization used for peer exchange.
+        const auto blob = nlohmann::json::to_msgpack(nlohmann::json(endpoint));
+        endpoint = nlohmann::json::from_msgpack(blob).get<SyncEndpoint>();
+    }
 };
 
 TEST_F(UdmaRouteTest, UbxDefaultMixedAndRepeatedClos)
@@ -143,14 +154,27 @@ TEST_F(UdmaRouteTest, UbxClosRejectsPeerFromAnotherNetworkInstance)
     EXPECT_TRUE(routes.empty());
 }
 
-TEST_F(UdmaRouteTest, MeshRejectsPeerFromAnotherServer)
+TEST_F(UdmaRouteTest, SuperpodMeshUsesSharedInstanceAndFullMeshLocalIds)
 {
-    Add(NetType::Mesh, "mesh", 0, 10, 1, 1, 0);
-    const std::vector<uint32_t> serverIds{1, 2};
-    TopoQuerier querier(roots[0], topo, 0, localIds, endpoints, {}, false, &serverIds);
-    std::vector<EidRoute> routes;
-    EXPECT_EQ(querier.GetEidRoutes(1, 1, routes), ACLSHMEM_NOT_SUPPORTED);
-    EXPECT_TRUE(routes.empty());
+    // Physical NPU 3 on server 0/1 maps to local ID 3/11 in a 16FM instance.
+    localIds = {3, 11};
+    Add(NetType::Mesh, "mesh", 0, 10, 1, 1, 0, "sp_42");
+    for (auto& rankEndpoints : endpoints) {
+        rankEndpoints[0].netType = NetType::TopoFileDesc;
+    }
+    Check({}, 2, {0}, false);
+    Check({{0, 0}}, 2, {0}, true);
+
+    // A different network instance must still reject the same topology edge.
+    endpoints[1][0].netInstanceId = "sp_43";
+    for (bool multiLink : {false, true}) {
+        for (uint32_t rank = 0; rank < 2; ++rank) {
+            TopoQuerier querier(roots[rank], topo, rank, localIds, endpoints, {}, multiLink);
+            std::vector<EidRoute> routes;
+            EXPECT_EQ(querier.GetEidRoutes(1 - rank, 1, routes), ACLSHMEM_NOT_SUPPORTED);
+            EXPECT_TRUE(routes.empty());
+        }
+    }
 }
 
 TEST_F(UdmaRouteTest, PodSortsShuffledPlanesAndKeepsCustomSelection)
@@ -273,6 +297,38 @@ TEST_F(UdmaRouteTest, CrossDomainIgnoresExplicitNetLayerPolicy)
     Check({{0, 0}}, 3, {1});
 }
 
+TEST_F(UdmaRouteTest, BaseClosCrossDomainAndPlaceholdersIgnoreMeshPolicy)
+{
+    for (const std::string instance : {"server-a", "", "unknown"}) {
+        SCOPED_TRACE(instance);
+        roots[0] = {};
+        roots[1] = {};
+        topo = {};
+        endpoints.assign(2, {});
+        for (auto& root : roots) {
+            root.levels.push_back(std::make_shared<LevelInfo>(LevelInfo{0, instance, NetType::Clos, ""}));
+        }
+        Add(NetType::Clos, "base", 0, 10, 1, 1, 0, instance);
+        Add(NetType::Clos, "superpod", 1, 11, 1, 1, 1, "sp_42");
+        if (instance == "server-a") {
+            endpoints[1][0].netInstanceId = "server-b";
+            Check({{0, 0}}, 2, {1});
+        } else {
+            Check({{0, 0}}, 2, {0, 1});
+        }
+    }
+}
+
+TEST_F(UdmaRouteTest, BaseClosPolicyIsIgnoredWithMultiLinkDisabled)
+{
+    for (auto& root : roots) {
+        root.levels.push_back(std::make_shared<LevelInfo>(LevelInfo{0, "server", NetType::Clos, ""}));
+    }
+    Add(NetType::Clos, "base", 0, 10, 1, 1, 0, "server");
+    Add(NetType::Clos, "superpod", 1, 11, 1, 1, 1, "sp_42");
+    Check({{0, 0}}, 2, {0, 1}, false);
+}
+
 TEST_F(UdmaRouteTest, UnknownInstanceUsesExplicitMeshOnlyForDirectPeer)
 {
     Add(NetType::Mesh, "mesh", 0, 10, 1, 1, 0, "unknown");
@@ -356,6 +412,70 @@ TEST_F(UdmaRouteTest, RejectsIpAddressCandidatesForDirectUdma)
     std::vector<EidRoute> routes;
     EXPECT_EQ(querier.GetEidRoutes(1, 1, routes), ACLSHMEM_NOT_SUPPORTED);
     EXPECT_TRUE(routes.empty());
+}
+
+TEST_F(UdmaRouteTest, RejectsRtpOnlyCrossDomainRoutes)
+{
+    Add(NetType::Clos, "plane_ub_rtp", 1, 11, 1, 1, 2, "cluster");
+    for (uint32_t rtpRank : {0U, 1U}) {
+        for (uint32_t rank = 0; rank < 2; ++rank) {
+            auto& endpoint = endpoints[rank][0];
+            auto& raw = roots[rank].eidIndexToRankAddr.at(endpoint.eidIndex)->eidData;
+            raw[7] = 0;
+            endpoint.isUbRtp = EidConverter::IsUbRtp(raw);
+        }
+        SetRtp(rtpRank, 0);
+        for (bool multiLink : {false, true}) {
+            for (uint32_t rank = 0; rank < 2; ++rank) {
+                TopoQuerier querier(roots[rank], topo, rank, localIds, endpoints, {}, multiLink);
+                std::vector<EidRoute> routes;
+                EXPECT_EQ(querier.GetEidRoutes(1 - rank, 1, routes), ACLSHMEM_NOT_SUPPORTED);
+                EXPECT_TRUE(routes.empty());
+            }
+        }
+    }
+    SetRtp(0, 0);
+    SetRtp(1, 0);
+    TopoQuerier querier(roots[0], topo, 0, localIds, endpoints, {}, true);
+    std::vector<EidRoute> routes;
+    EXPECT_EQ(querier.GetEidRoutes(1, 1, routes), ACLSHMEM_NOT_SUPPORTED);
+    EXPECT_TRUE(routes.empty());
+}
+
+TEST_F(UdmaRouteTest, MixedCtpAndRtpRoutesSelectOnlyCtp)
+{
+    Add(NetType::Clos, "ctp", 1, 11, 1, 1, 1, "superpod");
+    Add(NetType::Clos, "plane_ub_rtp", 2, 12, 4, 4, 2, "cluster");
+    SetRtp(0, 1);
+    SetRtp(1, 1);
+    // The higher-port-count RTP route would otherwise be preferred.
+    Check({}, 4, {1});
+    Check({}, 4, {1}, false);
+}
+
+TEST_F(UdmaRouteTest, RtpFlagRejectsRouteIndependentlyOfPlaneName)
+{
+    Add(NetType::Clos, "custom-plane", 1, 11, 1, 1, 2, "cluster");
+    SetRtp(1, 0);
+    TopoQuerier querier(roots[0], topo, 0, localIds, endpoints, {}, true);
+    std::vector<EidRoute> routes;
+    EXPECT_EQ(querier.GetEidRoutes(1, 1, routes), ACLSHMEM_NOT_SUPPORTED);
+    EXPECT_TRUE(routes.empty());
+}
+
+TEST_F(UdmaRouteTest, ClassifiesRtpProtocolAndPreservesLegacyCtpMetadata)
+{
+    EidData raw{};
+    EXPECT_FALSE(EidConverter::IsUbRtp(raw));
+    raw[7] = 0xbf;
+    EXPECT_TRUE(EidConverter::IsUbRtp(raw));
+    raw[7] = 0xc0;
+    EXPECT_FALSE(EidConverter::IsUbRtp(raw));
+    Add(NetType::Clos, "ctp", 1, 11, 1, 1);
+    auto json = nlohmann::json(endpoints[0][0]);
+    json.erase("isUbRtp");
+    const auto restored = json.get<SyncEndpoint>();
+    EXPECT_FALSE(restored.isUbRtp);
 }
 
 TEST_F(UdmaRouteTest, RejectsUnavailableNetLayerInvalidRankAndZeroCount)

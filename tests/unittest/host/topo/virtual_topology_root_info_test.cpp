@@ -206,7 +206,7 @@ TEST_F(VirtualTopologyRootInfoTest, UbxKeepsBaseLayerAndAppendsXmlRoceLayer)
     EXPECT_CALL(MockHal::instance(), get_mainboard_id(0))
         .WillOnce(testing::Return(std::optional<uint32_t>(ACLSHMEMI_MAIN_BOARD_ID_SERVER_UBX)));
     EXPECT_CALL(MockHal::instance(), get_driver_install_path()).WillOnce(testing::Return("/usr/local/Ascend"));
-    EXPECT_CALL(MockHal::instance(), get_server_id()).WillOnce(testing::Return("server-id"));
+    EXPECT_CALL(MockHal::instance(), get_server_id(0)).WillOnce(testing::Return("server-id"));
     EXPECT_CALL(MockHal::instance(), get_ue_list(0, testing::_)).WillOnce(testing::Invoke([](int, UEList* ue_list) {
         FillUbxUeList(ue_list);
         return 0;
@@ -228,7 +228,7 @@ TEST_F(VirtualTopologyRootInfoTest, UbxWithoutBaseEidFailsBeforeXmlLayer)
     EXPECT_CALL(MockHal::instance(), get_mainboard_id(0))
         .WillOnce(testing::Return(std::optional<uint32_t>(ACLSHMEMI_MAIN_BOARD_ID_SERVER_UBX)));
     EXPECT_CALL(MockHal::instance(), get_driver_install_path()).WillOnce(testing::Return("/usr/local/Ascend"));
-    EXPECT_CALL(MockHal::instance(), get_server_id()).WillOnce(testing::Return("server-id"));
+    EXPECT_CALL(MockHal::instance(), get_server_id(0)).WillOnce(testing::Return("server-id"));
     EXPECT_CALL(MockHal::instance(), get_ue_list(0, testing::_)).WillOnce(testing::Invoke([](int, UEList* ue_list) {
         *ue_list = {};
         return 0;

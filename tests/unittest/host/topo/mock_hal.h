@@ -53,7 +53,7 @@ public:
     MOCK_METHOD(std::optional<uint32_t>, get_user_id_from_phy_id, (uint32_t phy_id));
     MOCK_METHOD(std::optional<std::vector<uint32_t>>, get_visible_phy_ids, ());
     MOCK_METHOD(std::optional<int>, get_npu_count, ());
-    MOCK_METHOD(std::string, get_server_id, ());
+    MOCK_METHOD(std::optional<std::string>, get_server_id, (int phy_id));
     MOCK_METHOD(std::string, get_driver_install_path, ());
     MOCK_METHOD(int, get_ue_list, (int phy_id, UEList* ue_list));
     MOCK_METHOD(int, get_device_pcie_info, (int phy_id, struct dcmi_pcie_info_all* pcie_info));

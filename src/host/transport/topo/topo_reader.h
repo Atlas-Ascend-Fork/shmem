@@ -107,6 +107,7 @@ struct SyncEndpoint {
     std::vector<EidPort> ports{}; // used to reverse-map a peer port to its eidIndex
     uint32_t eidIndex{};
     RankAddrType addrType{RankAddrType::EID};
+    bool isUbRtp{false}; // Direct UDMA currently creates CTP connections only.
 };
 
 inline void to_json(nlohmann::json& json, const SyncEndpoint& endpoint)
@@ -117,6 +118,7 @@ inline void to_json(nlohmann::json& json, const SyncEndpoint& endpoint)
         {"netType", static_cast<uint32_t>(endpoint.netType)},
         {"fabric", static_cast<uint32_t>(endpoint.fabric)},
         {"addrType", static_cast<uint32_t>(endpoint.addrType)},
+        {"isUbRtp", endpoint.isUbRtp},
         {"planeId", endpoint.planeId},
         {"ports", endpoint.ports},
         {"eidIndex", endpoint.eidIndex},
@@ -155,6 +157,7 @@ inline void from_json(const nlohmann::json& json, SyncEndpoint& endpoint)
     json.at("planeId").get_to(endpoint.planeId);
     json.at("ports").get_to(endpoint.ports);
     json.at("eidIndex").get_to(endpoint.eidIndex);
+    endpoint.isUbRtp = json.value("isUbRtp", false);
 }
 
 struct EidRoute {
@@ -171,6 +174,7 @@ struct EidRoute {
 class EidConverter {
 public:
     static bool Convert(RankAddrType addrType, const nlohmann::json& addr, EidData& raw);
+    static bool IsUbRtp(const EidData& raw);
 
 private:
     static bool FromPlainEid(RankAddrType addrType, const nlohmann::json& addr, EidData& raw);
@@ -188,6 +192,8 @@ public:
     static bool GetEidCount(const RootInfo& root, uint32_t& count);
 
     static bool ParseRdmaNetAddr(uint32_t phyId, net_addr_t& outIp);
+    // Parse an already loaded RootInfo without repeating file or hardware queries.
+    static bool ParseRdmaNetAddrJson(const nlohmann::json& rootInfoJson, uint32_t phyId, net_addr_t& outIp);
 
 private:
     static bool LoadRootInfoJson(uint32_t phyId, nlohmann::json& out);
@@ -204,16 +210,14 @@ public:
     explicit TopoQuerier(
         const RootInfo& r, const TopoInfo& t, uint32_t myRank, const std::vector<uint32_t>& rankToLocalId,
         const std::vector<std::vector<SyncEndpoint>>& rankIdxToSyncEndpoint,
-        const std::map<uint32_t, uint32_t>& netLayerPolicy = {}, bool multiLinkEnabled = false,
-        const std::vector<uint32_t>* rankToServerId = nullptr)
+        const std::map<uint32_t, uint32_t>& netLayerPolicy = {}, bool multiLinkEnabled = false)
         : rootInfo_(r),
           topoInfo_(t),
           myRank_(myRank),
           rankToLocalId_(rankToLocalId),
           rankIdxToSyncEndpoint_(rankIdxToSyncEndpoint),
           netLayerPolicy_(netLayerPolicy),
-          multiLinkEnabled_(multiLinkEnabled),
-          rankToServerId_(rankToServerId)
+          multiLinkEnabled_(multiLinkEnabled)
     {}
 
     Result GetEidRoutes(uint32_t targetRank, uint32_t routeCount, std::vector<EidRoute>& routes);
@@ -231,7 +235,6 @@ private:
     const std::vector<std::vector<SyncEndpoint>>& rankIdxToSyncEndpoint_;
     std::map<uint32_t, uint32_t> netLayerPolicy_;
     bool multiLinkEnabled_{false};
-    const std::vector<uint32_t>* rankToServerId_{nullptr};
 };
 
 } // namespace transport

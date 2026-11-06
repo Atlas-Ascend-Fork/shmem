@@ -134,7 +134,7 @@ TEST_F(ProductStrategyTest, UbxProductBuildsHcommCompatibleBaseLayer)
     ASSERT_NE(strategy, nullptr);
 
     EXPECT_CALL(MockHal::instance(), get_driver_install_path()).WillOnce(testing::Return("/usr/local/Ascend"));
-    EXPECT_CALL(MockHal::instance(), get_server_id()).WillOnce(testing::Return("server-id"));
+    EXPECT_CALL(MockHal::instance(), get_server_id(0)).WillOnce(testing::Return("server-id"));
     EXPECT_CALL(MockHal::instance(), get_ue_list(0, testing::_)).WillOnce(testing::Invoke([](int, UEList* ue_list) {
         *ue_list = {};
         ue_list->ueNum = 2;

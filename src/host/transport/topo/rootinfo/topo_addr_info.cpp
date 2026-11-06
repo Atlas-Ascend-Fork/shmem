@@ -19,12 +19,13 @@
 
 #include "aclshmemi_hal.h"
 #include "aclshmemi_product_strategy.h"
+#include "aclshmemi_topo_addr_info_manager.h"
 #include "utils/shmemi_logger.h"
 
 namespace {
 constexpr int MAX_NPU_COUNT_LIMIT = 64; // 与 ACLSHMEMI_MAX_NPU_COUNT 一致
 constexpr int DEFAULT_RANKINFO_SIZE = 4096;
-}
+} // namespace
 
 int topo_addr_info_get_size(int phy_id, size_t* size)
 {
@@ -63,45 +64,25 @@ int topo_addr_info_get_topo_file_path(int phy_id, char* file_path, size_t buf_si
         return -1;
     }
 
-    auto& hal = shm::topo::aclshmemi_hal_t::instance();
-    auto mainboard_id = hal.get_mainboard_id(phy_id);
-    if (!mainboard_id) {
-        SHM_LOG_ERROR("topo_addr_info_get_topo_file_path failed: get_mainboard_id returned null for phy_id=" << phy_id);
+    auto topo_path = shm::topo::aclshmemi_topo_addr_info_manager_t::instance().get_topo_file_path(phy_id);
+    if (!topo_path) {
+        SHM_LOG_ERROR("topo_addr_info_get_topo_file_path failed for phy_id=" << phy_id);
         return -1;
     }
 
-    auto strategy = shm::topo::aclshmemi_product_strategy_t::create(*mainboard_id);
-    if (!strategy) {
+    if (topo_path->size() >= buf_size) {
         SHM_LOG_ERROR(
-            "topo_addr_info_get_topo_file_path failed: strategy creation failed for mainboard_id=0x" << std::hex
-                                                                                                     << *mainboard_id);
+            "topo_addr_info_get_topo_file_path failed: path size " << topo_path->size() << " >= buffer size "
+                                                                   << buf_size);
         return -1;
     }
 
-    auto root_info = strategy->get_root_info(phy_id, *mainboard_id);
-    if (!root_info) {
-        SHM_LOG_ERROR(
-            "topo_addr_info_get_topo_file_path failed: get_root_info returned null for phy_id="
-            << phy_id << ", mainboard_id=0x" << std::hex << *mainboard_id);
-        return -1;
-    }
-
-    auto topo_path = shm::topo::aclshmemi_root_info_get_topo_file_path(*root_info);
-    if (topo_path.size() >= buf_size) {
-        SHM_LOG_ERROR(
-            "topo_addr_info_get_topo_file_path failed: path size " << topo_path.size() << " >= buffer size "
-                                                                    << buf_size);
-        return -1;
-    }
-
-    int snprintf_ret = snprintf_s(file_path, buf_size, buf_size - 1, "%s", topo_path.c_str());
+    int snprintf_ret = snprintf_s(file_path, buf_size, buf_size - 1, "%s", topo_path->c_str());
     if (snprintf_ret < 0) {
         SHM_LOG_ERROR("topo_addr_info_get_topo_file_path failed: snprintf_s error");
         return -1;
     }
-    SHM_LOG_INFO(
-        "topo_addr_info_get_topo_file_path succeeded: phy_id=" << phy_id << ", mainboard_id=0x" << std::hex
-                                                                << *mainboard_id << ", path=" << file_path);
+    SHM_LOG_INFO("topo_addr_info_get_topo_file_path succeeded: phy_id=" << phy_id << ", path=" << file_path);
     return 0;
 }
 
@@ -243,7 +224,7 @@ int topo_addr_info_get_all(char* rank_info, size_t* buf_size)
     *buf_size = json_str.size();
     SHM_LOG_INFO(
         "topo_addr_info_get_all succeeded: npu_count=" << *npu_count << ", successful_phy_ids=" << successful_phy_ids
-                                                        << ", total_ranks=" << merged_root_info.ranks.size()
-                                                        << ", json_size=" << *buf_size);
+                                                       << ", total_ranks=" << merged_root_info.ranks.size()
+                                                       << ", json_size=" << *buf_size);
     return 0;
 }

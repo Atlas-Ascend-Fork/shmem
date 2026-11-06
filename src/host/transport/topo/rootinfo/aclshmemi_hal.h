@@ -64,7 +64,7 @@ public:
     // Physical IDs in Runtime user-device order; the list index is the user ID.
     std::optional<std::vector<uint32_t>> get_visible_phy_ids();
     std::optional<int> get_npu_count();
-    std::string get_server_id();
+    std::optional<std::string> get_server_id(int phy_id);
     std::string get_driver_install_path();
 
     int get_ue_list(int phy_id, UEList* ue_list);

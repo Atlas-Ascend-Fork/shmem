@@ -90,7 +90,10 @@ std::optional<std::vector<uint32_t>> aclshmemi_hal_t::get_visible_phy_ids()
 
 std::optional<int> aclshmemi_hal_t::get_npu_count() { return MockHal::instance().get_npu_count(); }
 
-std::string aclshmemi_hal_t::get_server_id() { return MockHal::instance().get_server_id(); }
+std::optional<std::string> aclshmemi_hal_t::get_server_id(int phy_id)
+{
+    return MockHal::instance().get_server_id(phy_id);
+}
 
 std::string aclshmemi_hal_t::get_driver_install_path() { return MockHal::instance().get_driver_install_path(); }
 

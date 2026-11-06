@@ -1799,6 +1799,7 @@ bool UdmaTransportManager::BuildSyncEndpoints(
         endpoint.netType = rank_addr->levelInfo->netType;
         endpoint.fabric = ResolveEndpointFabric(endpoint.netType, topo_info, rank_addr->ports);
         endpoint.addrType = rank_addr->addrType;
+        endpoint.isUbRtp = rank_addr->addrType == RankAddrType::EID && EidConverter::IsUbRtp(rank_addr->eidData);
         endpoint.planeId = rank_addr->planeId;
         endpoint.ports = rank_addr->ports;
         endpoint.eidIndex = item.first;
@@ -1848,7 +1849,6 @@ Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank
     RootInfo root_info;
     TopoInfo topo_info;
     uint32_t local_id = 0;
-    uint32_t local_server_id = 0;
     uint32_t eid_count = 0;
     int32_t phy_id = -1;
 
@@ -1876,13 +1876,6 @@ Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank
         SHM_LOG_ERROR("Failed to find local_id for phy_id: " << phy_id_);
         return ACLSHMEM_INNER_ERROR;
     }
-    uint32_t sd_id = 0;
-    uint32_t super_pod_id = 0;
-    ret = MemSegment::GetDeviceInfo(sd_id, local_server_id, super_pod_id);
-    if (ret != ACLSHMEM_SUCCESS) {
-        SHM_LOG_ERROR("Failed to get local server id for UDMA topology routing, ret = " << ret);
-        return ret;
-    }
     if (!TopoReader::GetEidCount(root_info, eid_count)) {
         SHM_LOG_ERROR("Failed to find eid count from rootinfo.");
         return ACLSHMEM_INNER_ERROR;
@@ -1899,8 +1892,6 @@ Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank
 
     std::vector<uint32_t> local_id_list(rank_count);
     g_boot_handle.allgather(&local_id, local_id_list.data(), sizeof(uint32_t), &g_boot_handle);
-    std::vector<uint32_t> server_id_list(rank_count);
-    g_boot_handle.allgather(&local_server_id, server_id_list.data(), sizeof(uint32_t), &g_boot_handle);
 
     std::vector<std::vector<SyncEndpoint>> rank_idx_to_sync_endpoint;
     if (!BuildSyncEndpoints(root_info, topo_info, rank_count, rank_idx_to_sync_endpoint)) {
@@ -1910,7 +1901,7 @@ Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank
 
     TopoQuerier topo_querier(
         root_info, topo_info, rank_id_, local_id_list, rank_idx_to_sync_endpoint, net_layer_policy_,
-        multi_link_enabled_, &server_id_list);
+        multi_link_enabled_);
 
     // Local outbound EID index toward each peer, later allgathered into the full N x N routing
     // matrix the relay path consumes. INVALID_EID_INDEX marks self / unroutable slots.

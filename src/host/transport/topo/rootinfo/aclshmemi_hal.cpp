@@ -362,27 +362,32 @@ std::optional<std::vector<uint32_t>> aclshmemi_hal_t::get_visible_phy_ids()
 }
 std::optional<int> aclshmemi_hal_t::get_npu_count() { return dcmi_.get_npu_count(); }
 
-std::string aclshmemi_hal_t::get_server_id()
+std::optional<std::string> aclshmemi_hal_t::get_server_id(int phy_id)
 {
-    std::string driver_path = get_driver_install_path();
-    std::ifstream file(driver_path + "/version.info");
-    if (!file.is_open()) {
-        file.open(driver_path + "/driver/version.info");
-        if (!file.is_open()) {
-            return "unknown";
-        }
+    if (phy_id < 0) {
+        SHM_LOG_ERROR("Invalid physical device ID for server identity: " << phy_id);
+        return std::nullopt;
     }
-
-    std::string line;
-    std::string server_id;
-    while (std::getline(file, line)) {
-        size_t pos = line.find("Version=");
-        if (pos != std::string::npos) {
-            server_id = trim_whitespace(line.substr(pos + 8));
-            break;
-        }
+    constexpr uint32_t INVALID_SUPER_POD_ID = UINT32_MAX;
+    constexpr uint32_t INVALID_SERVER_INDEX = UINT16_MAX;
+    dcmi_spod_info spod{};
+    const int ret = dcmi_.get_spod_info(phy_id, &spod);
+    if (ret == 0 && spod.super_pod_id != INVALID_SUPER_POD_ID && spod.server_index < INVALID_SERVER_INDEX) {
+        return "sp_" + std::to_string(spod.super_pod_id) + "_srv_" + std::to_string(spod.server_index);
     }
-    return server_id.empty() ? "unknown" : server_id;
+    // Use the full boot ID rather than namespace-specific MAC/IP or a truncated ID.
+    // Containers using this fallback must expose the host boot ID consistently.
+    std::ifstream file("/proc/sys/kernel/random/boot_id");
+    std::string boot_id;
+    if ((file >> boot_id) && !boot_id.empty()) {
+        SHM_LOG_WARN(
+            "Driver server identity unavailable for phy_id="
+            << phy_id << ", ret=" << ret << ", super_pod_id=" << spod.super_pod_id
+            << ", server_index=" << spod.server_index << "; using OS boot ID");
+        return "os_" + boot_id;
+    }
+    SHM_LOG_ERROR("No driver server identity or OS boot ID available for phy_id=" << phy_id << ", ret=" << ret);
+    return std::nullopt;
 }
 
 std::string aclshmemi_hal_t::get_driver_install_path()
