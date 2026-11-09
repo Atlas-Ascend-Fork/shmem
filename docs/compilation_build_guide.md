@@ -26,7 +26,7 @@ bash scripts/build.sh -soc_type Ascend950
 
 ### SHMEM编译相关说明
 
-SHMEM的基本编译命令是`bash build.sh`，默认构建模式下生成版本信息，并创建安装包(默认情况下不会编译RDMA能力、示例、测试、python接口)。后可跟参数，实现不同功能：
+SHMEM的基本编译命令是`bash scripts/build.sh`，默认构建模式下生成版本信息，并创建安装包(默认情况下不会编译RDMA能力、示例、测试、python接口)。后可跟参数，实现不同功能：
 
 - `-use_cxx11_abi1`：启用 `C++11 ABI`，默认
 - `-use_cxx11_abi0`：禁用 `C++11 ABI`
