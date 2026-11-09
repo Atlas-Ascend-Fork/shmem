@@ -317,6 +317,8 @@ public:
     }
 
 private:
+    static Result load_runtime_symbols();
+
     static std::mutex gMutex;
     static bool gLoaded;
     static void* rtHandle;

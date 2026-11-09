@@ -54,6 +54,20 @@ rtEnableP2PFunc DlAclApi::pRtEnableP2P = nullptr;
 aclrtReserveMemAddressFunc DlAclApi::pAclrtReserveMemAddress = nullptr;
 aclrtReleaseMemAddressFunc DlAclApi::pAclrtReleaseMemAddress = nullptr;
 
+Result DlAclApi::load_runtime_symbols()
+{
+    DL_LOAD_SYM(pRtDeviceGetBareTgid, rtDeviceGetBareTgidFunc, runtimeHandle, "rtDeviceGetBareTgid");
+    DL_LOAD_SYM(pRtGetDeviceInfo, rtGetDeviceInfoFunc, runtimeHandle, "rtGetDeviceInfo");
+    DL_LOAD_SYM(pRtSetIpcMemorySuperPodPid, rtSetIpcMemorySuperPodPidFunc, runtimeHandle, "rtSetIpcMemorySuperPodPid");
+    DL_LOAD_SYM(pRtIpcSetMemoryName, rtIpcSetMemoryNameFunc, runtimeHandle, "rtIpcSetMemoryName");
+    DL_LOAD_SYM(pRtIpcDestroyMemoryName, rtIpcDestroyMemoryNameFunc, runtimeHandle, "rtIpcDestroyMemoryName");
+    DL_LOAD_SYM(pRtIpcOpenMemory, rtIpcOpenMemoryFunc, runtimeHandle, "rtIpcOpenMemory");
+    DL_LOAD_SYM(pRtIpcCloseMemory, rtIpcCloseMemoryFunc, runtimeHandle, "rtIpcCloseMemory");
+    DL_LOAD_SYM(
+        pRtGetLogicDevIdByUserDevId, rtGetLogicDevIdByUserDevIdFunc, runtimeHandle, "rtGetLogicDevIdByUserDevId");
+    return ACLSHMEM_SUCCESS;
+}
+
 Result DlAclApi::LoadLibrary(const std::string& libDirPath)
 {
     std::lock_guard<std::mutex> guard(gMutex);
@@ -101,15 +115,7 @@ Result DlAclApi::LoadLibrary(const std::string& libDirPath)
     if (!AclrtExceptionInfoApisAvailable()) {
         SHM_LOG_DEBUG("Optional runtime exception report symbols are not fully loaded.");
     }
-    DL_LOAD_SYM(pRtDeviceGetBareTgid, rtDeviceGetBareTgidFunc, rtHandle, "rtDeviceGetBareTgid");
-    DL_LOAD_SYM(pRtGetDeviceInfo, rtGetDeviceInfoFunc, rtHandle, "rtGetDeviceInfo");
-    DL_LOAD_SYM(pRtSetIpcMemorySuperPodPid, rtSetIpcMemorySuperPodPidFunc, rtHandle, "rtSetIpcMemorySuperPodPid");
-    DL_LOAD_SYM(pRtIpcSetMemoryName, rtIpcSetMemoryNameFunc, rtHandle, "rtIpcSetMemoryName");
-    DL_LOAD_SYM(pRtIpcDestroyMemoryName, rtIpcDestroyMemoryNameFunc, rtHandle, "rtIpcDestroyMemoryName");
-    DL_LOAD_SYM(pRtIpcOpenMemory, rtIpcOpenMemoryFunc, rtHandle, "rtIpcOpenMemory");
-    DL_LOAD_SYM(pRtIpcCloseMemory, rtIpcCloseMemoryFunc, rtHandle, "rtIpcCloseMemory");
     DL_LOAD_SYM(pAclrtGetSocName, aclrtGetSocNameFunc, rtHandle, "aclrtGetSocName");
-    DL_LOAD_SYM(pRtGetLogicDevIdByUserDevId, rtGetLogicDevIdByUserDevIdFunc, rtHandle, "rtGetLogicDevIdByUserDevId");
 
     pAclrtGetUserDevIdByPhyDevId =
         reinterpret_cast<aclrtGetUserDevIdByPhyDevIdFunc>(dlsym(rtHandle, "aclrtGetUserDevIdByPhyDevId"));
@@ -150,6 +156,22 @@ Result DlAclApi::LoadLibrary(const std::string& libDirPath)
     }
     if (runtimeHandle == nullptr) {
         SHM_LOG_ERROR("Failed to open libruntime.so error: " << dlerror());
+        dlclose(rtHandle);
+        rtHandle = nullptr;
+        return ACLSHMEM_DL_FUNC_FAILED;
+    }
+
+    if (load_runtime_symbols() != ACLSHMEM_SUCCESS) {
+        pRtDeviceGetBareTgid = nullptr;
+        pRtGetDeviceInfo = nullptr;
+        pRtSetIpcMemorySuperPodPid = nullptr;
+        pRtIpcSetMemoryName = nullptr;
+        pRtIpcDestroyMemoryName = nullptr;
+        pRtIpcOpenMemory = nullptr;
+        pRtIpcCloseMemory = nullptr;
+        pRtGetLogicDevIdByUserDevId = nullptr;
+        // DL_LOAD_SYM closes runtimeHandle when a required symbol is missing.
+        runtimeHandle = nullptr;
         dlclose(rtHandle);
         rtHandle = nullptr;
         return ACLSHMEM_DL_FUNC_FAILED;
@@ -258,6 +280,8 @@ void DlAclApi::CleanupLibrary()
     pRtSetIpcMemorySuperPodPid = nullptr;
     pRtIpcDestroyMemoryName = nullptr;
     pRtIpcSetMemoryName = nullptr;
+    pRtIpcOpenMemory = nullptr;
+    pRtIpcCloseMemory = nullptr;
     pAclrtGetSocName = nullptr;
     pRtGetLogicDevIdByUserDevId = nullptr;
     pAclrtGetUserDevIdByPhyDevId = nullptr;
