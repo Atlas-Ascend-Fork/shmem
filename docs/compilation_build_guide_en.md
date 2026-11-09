@@ -207,6 +207,37 @@ query the actual network layer of an established route.
    - `release.sh`: automatic build and packaging script
    - `set_env.sh`: SHMEM environment variable settings
 ### run.sh Script Usage
+
+#### Optional Coverage Tools
+
+Installing and using SHMEM does not require `lcov`. After running unit tests, `scripts/run.sh` attempts to
+generate host code coverage reports. If no working `lcov` is detected, the script prints a message and skips
+coverage generation; the unit tests still run.
+
+To generate coverage reports, install `lcov`, including `genhtml`. For example, on Ubuntu/Debian:
+
+```bash
+sudo apt-get update
+sudo apt-get install lcov
+lcov --version
+genhtml --version
+gcov --version
+```
+
+For other systems, use the appropriate package manager or follow the
+[LCOV installation and dependency instructions](https://github.com/linux-test-project/lcov#readme).
+Ensure that both `lcov` and `genhtml` are on `PATH`, and that `gcov` matches the GCC version used to compile
+the host test code. The report entry point is `build/coverage/result/index.html`.
+
+The warning about slow `JSON::PP` processing only affects coverage processing speed. Install `JSON::XS` or
+`Cpanel::JSON::XS` as suggested to improve performance. GoogleTest macro-generated functions may cause
+`mismatched end line` warnings. The script tolerates the corresponding error category according to the lcov
+version, but still prints warnings. Check unit test results and coverage generation results separately.
+Other coverage errors may still make the script exit with a nonzero status. Check tool versions and build
+artifacts; passing unit tests alone does not mean that a coverage report was generated.
+
+#### Running Tests
+
 UT case execution script
 ```sh
 bash scripts/run.sh

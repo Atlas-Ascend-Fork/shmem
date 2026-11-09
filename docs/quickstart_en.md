@@ -136,8 +136,12 @@ source install/set_env.sh
 
 3. Install the wheel package generated in the `dist` directory.
 
+Install PyTorch and TorchNPU compatible with your CANN, Python, and CPU architecture first, as described
+in the prerequisites above. `--no-deps` skips dependency installation so that reinstalling SHMEM does not
+replace these packages.
+
 ```sh
-python3 -m pip install --force-reinstall dist/cann_shmem-*.whl
+python3 -m pip install --no-deps --force-reinstall dist/cann_shmem-*.whl
 ```
 
 4. Decide whether to enable TLS authentication. By default, TLS authentication is enabled. To disable TLS authentication, use the following API:

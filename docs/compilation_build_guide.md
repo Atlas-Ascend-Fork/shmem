@@ -219,6 +219,32 @@ bash scripts/build.sh -examples -soc_type Ascend950 -multi_link -enable_relay
 
 UT（单元测试）测试用例运行脚本。
 
+#### 可选的覆盖率工具
+
+SHMEM 安装和正常使用不需要 `lcov`。`scripts/run.sh` 会在单元测试结束后尝试生成主机端代码覆盖率报告；
+未检测到可用的 `lcov` 时会提示并跳过覆盖率生成，单元测试仍会执行。
+
+需要覆盖率报告时，先安装 `lcov`（包含 `genhtml`）。例如 Ubuntu/Debian 环境可执行：
+
+```bash
+sudo apt-get update
+sudo apt-get install lcov
+lcov --version
+genhtml --version
+gcov --version
+```
+
+其他系统请使用对应的软件包管理器，或参考 [LCOV 安装与依赖说明](https://github.com/linux-test-project/lcov#readme)。
+确认 `lcov`、`genhtml` 均在 `PATH` 中，且 `gcov` 与编译测试主机端代码的 GCC 版本配套。
+报告入口为 `build/coverage/result/index.html`。
+
+`JSON::PP` 较慢的提示仅影响覆盖率处理速度，可按提示安装 `JSON::XS` 或 `Cpanel::JSON::XS`。
+GoogleTest 宏生成的函数可能触发 `mismatched end line` 告警；脚本已按 lcov 版本对相应错误类别做容错，
+但仍会打印告警。覆盖率告警不等于单元测试失败；应分别检查测试结果和报告生成结果。
+其他覆盖率错误仍可能使脚本返回非零，应检查工具版本和构建产物，不能仅凭测试通过认定报告已生成。
+
+#### 执行测试
+
 ```sh
 bash scripts/run.sh
 ```

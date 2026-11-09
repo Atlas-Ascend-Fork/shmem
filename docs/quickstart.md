@@ -296,8 +296,11 @@ python3 -m pip install cann-shmem \
 
 # 或构建并安装本地 wheel
 bash scripts/build.sh -python_extension
-python3 -m pip install --force-reinstall dist/cann_shmem-*.whl
+python3 -m pip install --no-deps --force-reinstall dist/cann_shmem-*.whl
 ```
+
+本地 wheel 安装命令中的 `--no-deps` 会跳过依赖安装，只重新安装 SHMEM，避免替换已配套安装的
+PyTorch 和 TorchNPU。执行前须先按上述前置依赖准备好这两个包。
 
 `--extra-index-url` 会让 pip 合并两个源中的全部候选版本，并不保证同名包优先从
 `--index-url` 下载。为避免依赖混淆以及自动选择到不匹配 CANN 的最新版 TorchNPU，生产环境
@@ -507,11 +510,14 @@ bash scripts/run_examples.sh
 
 ### 8.4 运行 Python 测试用例
 
+先按 [pip 安装](#513-方式三pip-安装)中的前置依赖说明安装配套的 PyTorch 和 TorchNPU。
+以下命令使用 `--no-deps` 保留已安装的依赖。
+
 ```bash
 # 构建同时包含 910 和 950 后端的 Python wheel
 bash scripts/build.sh -python_extension
 # 安装构建脚本生成的 wheel 包
-python3 -m pip install --force-reinstall dist/cann_shmem-*.whl
+python3 -m pip install --no-deps --force-reinstall dist/cann_shmem-*.whl
 # 确认运行环境选择了正确后端
 shmem-config --backend
 shmem-config --diagnose
