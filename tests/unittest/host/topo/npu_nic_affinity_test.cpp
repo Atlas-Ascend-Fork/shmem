@@ -35,14 +35,57 @@ public:
         : addresses_(std::move(addresses))
     {}
 
-    std::optional<std::string> resolve(const std::string& name) const override
+    std::optional<std::string> resolve(const std::string& name, int family) const override
     {
+        (void)family;
         auto it = addresses_.find(name);
         return it == addresses_.end() ? std::nullopt : std::optional<std::string>(it->second);
     }
 
 private:
     std::unordered_map<std::string, std::string> addresses_;
+};
+
+class dual_stack_nic_ip_resolver_t : public aclshmemi_nic_ip_resolver_t {
+public:
+    std::optional<std::string> resolve(const std::string& name, int family) const override
+    {
+        if (name != "eth0") {
+            return std::nullopt;
+        }
+        if (family == AF_INET6) {
+            return "2001:db8::10";
+        }
+        return "192.0.2.10";
+    }
+};
+
+class multi_port_system_resolver_t : public aclshmemi_system_nic_ip_resolver_t {
+public:
+    bool has_ipv4 = true;
+
+protected:
+    std::optional<std::string> get_interface_ip(const std::string& interface_name, int family) const override
+    {
+        if (family != AF_INET6 && interface_name == "eth1" && has_ipv4) {
+            return "192.0.2.1";
+        }
+        if (family != AF_INET && (interface_name == "eth0" || interface_name == "eth1")) {
+            if (interface_name == "eth1") {
+                return "2001:db8::2";
+            }
+            return "2001:db8::1";
+        }
+        return std::nullopt;
+    }
+
+    std::vector<std::string> get_hca_interfaces(const std::string& hca_name) const override
+    {
+        if (hca_name == "mlx5_0") {
+            return {"eth0", "eth1"};
+        }
+        return {};
+    }
 };
 
 } // namespace
@@ -111,6 +154,54 @@ TEST_F(NpuNicAffinityTest, SelectsIpFromUbAffinityGroup)
     auto ip = aclshmemi_get_roce_ip_from_xml(2, xml_path_, resolver);
     ASSERT_TRUE(ip.has_value());
     EXPECT_EQ(*ip, "10.0.0.2");
+}
+
+TEST_F(NpuNicAffinityTest, ExplicitFamilySelectsMatchingDualStackAddress)
+{
+    ExpectVisibleNpus(1);
+    WriteXml("<system><ub><nic><net name=\"eth0\"/></nic><npu chipphyid=\"0\"/></ub></system>");
+    dual_stack_nic_ip_resolver_t resolver;
+
+    auto ipv4 = aclshmemi_get_roce_ip_from_xml(0, xml_path_, resolver, AF_INET);
+    ASSERT_TRUE(ipv4.has_value());
+    EXPECT_EQ(*ipv4, "192.0.2.10");
+
+    auto ipv6 = aclshmemi_get_roce_ip_from_xml(0, xml_path_, resolver, AF_INET6);
+    ASSERT_TRUE(ipv6.has_value());
+    EXPECT_EQ(*ipv6, "2001:db8::10");
+
+    auto automatic = aclshmemi_get_roce_ip_from_xml(0, xml_path_, resolver, AF_UNSPEC);
+    ASSERT_TRUE(automatic.has_value());
+    EXPECT_EQ(*automatic, "192.0.2.10");
+}
+
+TEST_F(NpuNicAffinityTest, HcaAutomaticSelectionKeepsIpv4PriorityAcrossPorts)
+{
+    multi_port_system_resolver_t resolver;
+
+    auto automatic = resolver.resolve("mlx5_0", AF_UNSPEC);
+    ASSERT_TRUE(automatic.has_value());
+    EXPECT_EQ(*automatic, "192.0.2.1");
+
+    auto ipv4 = resolver.resolve("mlx5_0", AF_INET);
+    ASSERT_TRUE(ipv4.has_value());
+    EXPECT_EQ(*ipv4, "192.0.2.1");
+
+    auto ipv6 = resolver.resolve("mlx5_0", AF_INET6);
+    ASSERT_TRUE(ipv6.has_value());
+    EXPECT_EQ(*ipv6, "2001:db8::1");
+}
+
+TEST_F(NpuNicAffinityTest, HcaFallsBackToFirstIpv6OnlyWhenNoPortHasIpv4)
+{
+    multi_port_system_resolver_t resolver;
+    resolver.has_ipv4 = false;
+
+    auto automatic = resolver.resolve("mlx5_0", AF_UNSPEC);
+    ASSERT_TRUE(automatic.has_value());
+    EXPECT_EQ(*automatic, "2001:db8::1");
+    EXPECT_FALSE(resolver.resolve("mlx5_0", AF_INET).has_value());
+    EXPECT_FALSE(resolver.resolve("unknown", AF_UNSPEC).has_value());
 }
 
 TEST_F(NpuNicAffinityTest, SkipsUnresolvedNicWithinSameGroup)

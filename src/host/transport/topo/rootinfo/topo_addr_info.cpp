@@ -86,7 +86,7 @@ int topo_addr_info_get_topo_file_path(int phy_id, char* file_path, size_t buf_si
     return 0;
 }
 
-int topo_addr_info_get(int phy_id, char* rank_info, size_t* buf_size)
+int topo_addr_info_get_with_family(int phy_id, int family, char* rank_info, size_t* buf_size)
 {
     if (rank_info == NULL || buf_size == NULL) {
         SHM_LOG_ERROR("topo_addr_info_get failed: rank_info=" << rank_info << ", buf_size=" << buf_size);
@@ -108,7 +108,7 @@ int topo_addr_info_get(int phy_id, char* rank_info, size_t* buf_size)
         return -1;
     }
 
-    auto root_info = strategy->get_root_info(phy_id, *mainboard_id);
+    auto root_info = strategy->get_root_info_for_family(phy_id, *mainboard_id, family);
     if (!root_info) {
         SHM_LOG_ERROR(
             "topo_addr_info_get failed: get_root_info returned null for phy_id=" << phy_id << ", mainboard_id=0x"
@@ -134,6 +134,11 @@ int topo_addr_info_get(int phy_id, char* rank_info, size_t* buf_size)
         "topo_addr_info_get succeeded: phy_id=" << phy_id << ", mainboard_id=0x" << std::hex << *mainboard_id
                                                 << ", json_size=" << std::dec << *buf_size);
     return 0;
+}
+
+int topo_addr_info_get(int phy_id, char* rank_info, size_t* buf_size)
+{
+    return topo_addr_info_get_with_family(phy_id, AF_UNSPEC, rank_info, buf_size);
 }
 
 int topo_addr_info_get_all(char* rank_info, size_t* buf_size)

@@ -329,6 +329,84 @@ TEST_F(ServerRootinfoTest, RoceAddressWithoutPlaneRetainsLegacyBehavior)
     EXPECT_EQ(memcmp(&ip.ip.ipv6, &expected, sizeof(expected)), 0);
 }
 
+TEST_F(ServerRootinfoTest, RoceAddressMatchesRequestedIpFamily)
+{
+    const nlohmann::json json = {
+        {"rank_list",
+         {{{"device_id", 0},
+           {"local_id", 0},
+           {"level_list",
+            {{{"net_layer", 3},
+              {"net_type", "CLOS"},
+              {"rank_addr_list",
+               {{{"addr_type", "IPV6"}, {"addr", "2001:db8::9"}},
+                {{"addr_type", "IPV4"}, {"addr", "192.0.2.9"}}}}}}}}}}};
+
+    net_addr_t ip;
+    ip.type = IpV6;
+    ASSERT_TRUE(shm::transport::TopoReader::ParseRdmaNetAddrJson(json, 0, ip));
+    EXPECT_EQ(ip.type, IpV6);
+    in6_addr expected{};
+    ASSERT_EQ(inet_pton(AF_INET6, "2001:db8::9", &expected), 1);
+    EXPECT_EQ(memcmp(&ip.ip.ipv6, &expected, sizeof(expected)), 0);
+}
+
+TEST_F(ServerRootinfoTest, RoceAddressAutoSelectionPrefersIpv4)
+{
+    const nlohmann::json json = {
+        {"rank_list",
+         {{{"device_id", 0},
+           {"local_id", 0},
+           {"level_list",
+            {{{"net_type", "CLOS"},
+              {"rank_addr_list",
+               {{{"addr_type", "IPV6"}, {"addr", "2001:db8::9"}},
+                {{"addr_type", "IPV4"}, {"addr", "192.0.2.9"}}}}}}}}}}};
+
+    net_addr_t ip;
+    ASSERT_TRUE(shm::transport::TopoReader::ParseRdmaNetAddrJson(json, 0, ip));
+    EXPECT_EQ(ip.type, IpV4);
+    in_addr expected{};
+    ASSERT_EQ(inet_pton(AF_INET, "192.0.2.9", &expected), 1);
+    EXPECT_EQ(ip.ip.ipv4.s_addr, expected.s_addr);
+}
+
+TEST_F(ServerRootinfoTest, RoceAddressAutoSelectionFallsBackToGlobalIpv6)
+{
+    const nlohmann::json json = {
+        {"rank_list",
+         {{{"device_id", 0},
+           {"local_id", 0},
+           {"level_list",
+            {{{"net_type", "CLOS"},
+              {"rank_addr_list",
+               {{{"addr_type", "IPV6"}, {"addr", "fe80::1"}}, {{"addr_type", "IPV6"}, {"addr", "2001:db8::9"}}}}}}}}}}};
+
+    net_addr_t ip;
+    ASSERT_TRUE(shm::transport::TopoReader::ParseRdmaNetAddrJson(json, 0, ip));
+    EXPECT_EQ(ip.type, IpV6);
+    in6_addr expected{};
+    ASSERT_EQ(inet_pton(AF_INET6, "2001:db8::9", &expected), 1);
+    EXPECT_EQ(memcmp(&ip.ip.ipv6, &expected, sizeof(expected)), 0);
+}
+
+TEST_F(ServerRootinfoTest, RoceAddressAutoSelectionTreatsMappedIpv6AsIpv4)
+{
+    const nlohmann::json json = {
+        {"rank_list",
+         {{{"device_id", 0},
+           {"local_id", 0},
+           {"level_list",
+            {{{"net_type", "CLOS"}, {"rank_addr_list", {{{"addr_type", "IPV6"}, {"addr", "::ffff:192.0.2.9"}}}}}}}}}}};
+
+    net_addr_t ip;
+    ASSERT_TRUE(shm::transport::TopoReader::ParseRdmaNetAddrJson(json, 0, ip));
+    EXPECT_EQ(ip.type, IpV4);
+    in_addr expected{};
+    ASSERT_EQ(inet_pton(AF_INET, "192.0.2.9", &expected), 1);
+    EXPECT_EQ(ip.ip.ipv4.s_addr, expected.s_addr);
+}
+
 TEST_F(ServerRootinfoTest, FlexBoardsHaveSeparateEightNpuDomains)
 {
     for (uint32_t board : {0x2dU, 0x2fU}) {

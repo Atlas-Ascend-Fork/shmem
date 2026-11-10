@@ -40,6 +40,9 @@ int topo_addr_info_get_topo_file_path(int phy_id, char* file_path, size_t buf_si
  */
 int topo_addr_info_get(int phy_id, char* rank_info, size_t* buf_size);
 
+/** Generate rankinfo while selecting the requested address family (AF_INET, AF_INET6, or AF_UNSPEC). */
+int topo_addr_info_get_with_family(int phy_id, int family, char* rank_info, size_t* buf_size);
+
 /**
  * 获取所有NPU的rootinfo信息，包含所有phy_id的rank信息
  * param[out] rank_info   所有NPU的rootinfo内容，为json格式的字符串

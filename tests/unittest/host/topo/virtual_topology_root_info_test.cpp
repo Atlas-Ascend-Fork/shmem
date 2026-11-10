@@ -31,13 +31,25 @@ class fixed_nic_ip_resolver_t : public aclshmemi_nic_ip_resolver_t {
 public:
     explicit fixed_nic_ip_resolver_t(std::string ip) : ip_(std::move(ip)) {}
 
-    std::optional<std::string> resolve(const std::string& name) const override
+    std::optional<std::string> resolve(const std::string& name, int family) const override
     {
+        (void)family;
         return name == "hrn5_0" ? std::optional<std::string>(ip_) : std::nullopt;
     }
 
 private:
     std::string ip_;
+};
+
+class family_nic_ip_resolver_t : public aclshmemi_nic_ip_resolver_t {
+public:
+    std::optional<std::string> resolve(const std::string& name, int family) const override
+    {
+        if (name != "hrn5_0") {
+            return std::nullopt;
+        }
+        return family == AF_INET6 ? "2001:db8::40" : "192.0.2.40";
+    }
 };
 
 void FillUbxUeList(UEList* ue_list)
@@ -138,6 +150,39 @@ TEST_F(VirtualTopologyRootInfoTest, CardUsesOnlyXmlRoceLayer)
     EXPECT_EQ(layer.addr_list[0].plane_id, "plane0");
     ASSERT_EQ(layer.addr_list[0].ports.size(), 1U);
     EXPECT_EQ(layer.addr_list[0].ports[0], "d2h");
+}
+
+TEST_F(VirtualTopologyRootInfoTest, XmlIpv6AddressIsEmittedAsIpv6RootInfo)
+{
+    ExpectCardBaseGeneration();
+    WriteValidXml();
+    fixed_nic_ip_resolver_t resolver("2001:db8::40");
+
+    auto root_info = aclshmemi_generate_virtual_topology_root_info(0, xml_path_, resolver);
+    ASSERT_TRUE(root_info.has_value());
+    ASSERT_EQ(root_info->ranks.size(), 1U);
+    ASSERT_EQ(root_info->ranks[0].level_list.size(), 1U);
+    const auto& addr = root_info->ranks[0].level_list[0].addr_list[0];
+    EXPECT_EQ(addr.addr_type, "IPV6");
+    EXPECT_EQ(addr.addr, "2001:db8::40");
+
+    const auto root_info_json = aclshmemi_root_info_to_string(*root_info);
+    EXPECT_NE(root_info_json.find("\"addr_type\": \"IPV6\""), std::string::npos);
+    EXPECT_NE(root_info_json.find("\"addr\": \"2001:db8::40\""), std::string::npos);
+}
+
+TEST_F(VirtualTopologyRootInfoTest, ExplicitIpv6SelectsIpv6FromDualStackXmlNic)
+{
+    ExpectCardBaseGeneration();
+    WriteValidXml();
+    family_nic_ip_resolver_t resolver;
+
+    auto root_info = aclshmemi_generate_virtual_topology_root_info(0, xml_path_, resolver, AF_INET6);
+    ASSERT_TRUE(root_info.has_value());
+    ASSERT_EQ(root_info->ranks.size(), 1U);
+    const auto& addr = root_info->ranks[0].level_list[0].addr_list[0];
+    EXPECT_EQ(addr.addr_type, "IPV6");
+    EXPECT_EQ(addr.addr, "2001:db8::40");
 }
 
 TEST_F(VirtualTopologyRootInfoTest, XmlFailureFailsWholeGeneration)

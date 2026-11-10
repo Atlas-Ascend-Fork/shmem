@@ -10,6 +10,7 @@
 #include "aclshmemi_product_strategy.h"
 
 #include <algorithm>
+#include <arpa/inet.h>
 #include <climits>
 #include <utility>
 
@@ -17,6 +18,7 @@
 
 #include "aclshmemi_eid_parser.h"
 #include "aclshmemi_hal.h"
+#include "aclshmemi_npu_nic_affinity.h"
 #include "aclshmemi_server_rules.h"
 #include "host_rdma.h"
 #include "utils/shmemi_logger.h"
@@ -105,6 +107,13 @@ std::optional<aclshmemi_root_info_t> aclshmemi_product_strategy_t::get_root_info
     return get_root_info(phy_id, mainboard_id);
 }
 
+std::optional<aclshmemi_root_info_t> aclshmemi_product_strategy_t::get_root_info_for_family(
+    int phy_id, uint32_t mainboard_id, int family)
+{
+    (void)family;
+    return get_root_info(phy_id, mainboard_id);
+}
+
 std::unique_ptr<aclshmemi_product_strategy_t> aclshmemi_product_strategy_t::create(uint32_t mainboard_id)
 {
     switch (mainboard_id) {
@@ -134,7 +143,13 @@ std::unique_ptr<aclshmemi_product_strategy_t> aclshmemi_product_strategy_t::crea
 }
 std::optional<aclshmemi_root_info_t> aclshmemi_card_product_t::get_root_info(int phy_id, uint32_t mainboard_id)
 {
-    return build_root_info(phy_id, mainboard_id, true);
+    return build_root_info(phy_id, mainboard_id, true, AF_UNSPEC);
+}
+
+std::optional<aclshmemi_root_info_t> aclshmemi_card_product_t::get_root_info_for_family(
+    int phy_id, uint32_t mainboard_id, int family)
+{
+    return build_root_info(phy_id, mainboard_id, true, family);
 }
 
 std::optional<aclshmemi_root_info_t> aclshmemi_card_product_t::get_root_info_without_roce(
@@ -144,7 +159,7 @@ std::optional<aclshmemi_root_info_t> aclshmemi_card_product_t::get_root_info_wit
 }
 
 std::optional<aclshmemi_root_info_t> aclshmemi_card_product_t::build_root_info(
-    int phy_id, uint32_t mainboard_id, bool include_roce)
+    int phy_id, uint32_t mainboard_id, bool include_roce, int family)
 {
     auto& hal = aclshmemi_hal_t::instance();
 
@@ -199,7 +214,7 @@ std::optional<aclshmemi_root_info_t> aclshmemi_card_product_t::build_root_info(
         }
     }
     if (include_roce) {
-        auto roce_layer = process_roce_layer(phy_id);
+        auto roce_layer = process_roce_layer(phy_id, family);
         if (roce_layer) {
             aclshmemi_rank_add_net_layer(rank, *roce_layer);
         }
@@ -294,17 +309,33 @@ std::optional<aclshmemi_net_layer_t> aclshmemi_card_product_t::process_mesh2p_la
     return layer;
 }
 
-std::optional<aclshmemi_net_layer_t> aclshmemi_card_product_t::process_roce_layer(int phy_id)
+std::optional<aclshmemi_net_layer_t> aclshmemi_card_product_t::process_roce_layer(int phy_id, int family)
 {
     aclshmemi_net_layer_t layer;
     aclshmemi_net_layer_init(layer, 3, "cluster");
     aclshmemi_net_layer_set_net_type(layer, "CLOS");
 
     aclshmemi_addr_t addr;
-    char ip_addr[64] = {0};
-    if (get_npu_host_rdma_ip(phy_id, ip_addr, sizeof(ip_addr)) != 0) {
+    std::string ip_addr;
+#if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE)
+    char fallback_ip[INET6_ADDRSTRLEN] = {0};
+    if (get_npu_host_rdma_ip(phy_id, family, fallback_ip, sizeof(fallback_ip)) != 0) {
         return std::nullopt;
     }
+    ip_addr = fallback_ip;
+#else
+    auto xml_ip_addr = aclshmemi_get_roce_ip_from_xml(phy_id, family);
+    if (xml_ip_addr) {
+        ip_addr = *xml_ip_addr;
+    } else {
+        // Preserve the existing PCIe/NIC discovery path if virtual topology is unavailable.
+        char fallback_ip[INET6_ADDRSTRLEN] = {0};
+        if (get_npu_host_rdma_ip(phy_id, family, fallback_ip, sizeof(fallback_ip)) != 0) {
+            return std::nullopt;
+        }
+        ip_addr = fallback_ip;
+    }
+#endif
     aclshmemi_addr_set_ip(addr, ip_addr);
     aclshmemi_addr_set_plane_id(addr, ROCE_PLANE_ID);
     aclshmemi_addr_add_port(addr, "d2h");

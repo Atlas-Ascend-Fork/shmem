@@ -196,7 +196,7 @@ public:
     static bool ParseRdmaNetAddrJson(const nlohmann::json& rootInfoJson, uint32_t phyId, net_addr_t& outIp);
 
 private:
-    static bool LoadRootInfoJson(uint32_t phyId, nlohmann::json& out);
+    static bool LoadRootInfoJson(uint32_t phyId, nlohmann::json& out, int family = AF_UNSPEC);
     static bool ParseRootInfoJson(const nlohmann::json& rootInfoJson, uint32_t phyId, RootInfo& out);
     static bool ParseLevelInfo(const nlohmann::json& levelJson, LevelInfo& out);
     static bool ParseRankAddr(

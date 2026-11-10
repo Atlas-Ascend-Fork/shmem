@@ -190,7 +190,7 @@ const nlohmann::json* GetRequiredArray(
 
 } // namespace
 
-bool TopoReader::LoadRootInfoJson(uint32_t phyId, nlohmann::json& out)
+bool TopoReader::LoadRootInfoJson(uint32_t phyId, nlohmann::json& out, int family)
 {
     bool shouldFallback = false;
     std::ifstream rootInfoFile(ROOTINFO_PATH);
@@ -216,7 +216,7 @@ bool TopoReader::LoadRootInfoJson(uint32_t phyId, nlohmann::json& out)
     std::string generatedRootInfo;
 #if defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
     auto virtualTopologyRootInfo =
-        shm::topo::aclshmemi_generate_virtual_topology_root_info_json(static_cast<int>(phyId));
+        shm::topo::aclshmemi_generate_virtual_topology_root_info_json(static_cast<int>(phyId), family);
     if (!virtualTopologyRootInfo) {
         SHM_LOG_ERROR("Failed to generate virtual-topology rootinfo for phyId " << phyId);
         return false;
@@ -235,7 +235,7 @@ bool TopoReader::LoadRootInfoJson(uint32_t phyId, nlohmann::json& out)
 
     std::vector<char> rootInfoBuffer(rootInfoSize + 1, '\0');
     size_t actualSize = rootInfoSize;
-    ret = topo_addr_info_get(static_cast<int>(phyId), rootInfoBuffer.data(), &actualSize);
+    ret = topo_addr_info_get_with_family(static_cast<int>(phyId), family, rootInfoBuffer.data(), &actualSize);
     if (ret != 0 || actualSize == 0) {
         SHM_LOG_ERROR(
             "Failed to get generated rootinfo for phyId " << phyId << ", ret = " << ret
@@ -515,7 +515,13 @@ bool TopoReader::GetEidCount(const RootInfo& root, uint32_t& count)
 bool TopoReader::ParseRdmaNetAddr(uint32_t phyId, net_addr_t& outIp)
 {
     nlohmann::json rootInfoJson;
-    if (!LoadRootInfoJson(phyId, rootInfoJson)) {
+    int family = AF_UNSPEC;
+    if (outIp.type == IpV4) {
+        family = AF_INET;
+    } else if (outIp.type == IpV6) {
+        family = AF_INET6;
+    }
+    if (!LoadRootInfoJson(phyId, rootInfoJson, family)) {
         SHM_LOG_ERROR("Failed to load rootinfo for phyId " << phyId);
         return false;
     }
@@ -530,7 +536,10 @@ bool TopoReader::ParseRdmaNetAddrJson(const nlohmann::json& rootInfoJson, uint32
         return false;
     }
 
+    const IpType requestedType = outIp.type;
     bool found = false;
+    in6_addr ipv6Fallback{};
+    bool hasIpv6Fallback = false;
     const auto& rankListJson = rootInfoJson["rank_list"];
     for (const auto& rankJson : rankListJson) {
         if (!rankJson.contains("device_id") || !rankJson.contains("local_id")) {
@@ -583,6 +592,9 @@ bool TopoReader::ParseRdmaNetAddrJson(const nlohmann::json& rootInfoJson, uint32
                 std::string addrType = rankAddrJson["addr_type"].get<std::string>();
                 std::string addrStr = rankAddrJson["addr"].get<std::string>();
                 if (addrType == "IPV4") {
+                    if (requestedType != IPNONE && requestedType != IpV4) {
+                        continue;
+                    }
                     if (inet_pton(AF_INET, addrStr.c_str(), &outIp.ip.ipv4) != 1) {
                         SHM_LOG_WARN(
                             "Rootinfo: invalid IPv4 addr in CLOS entry, phyId " << phyId << ", addr " << addrStr);
@@ -590,18 +602,45 @@ bool TopoReader::ParseRdmaNetAddrJson(const nlohmann::json& rootInfoJson, uint32
                     }
                     outIp.type = IpV4;
                     found = true;
+                    if (requestedType == IPNONE) {
+                        return true;
+                    }
                 } else if (addrType == "IPV6") {
-                    if (inet_pton(AF_INET6, addrStr.c_str(), &outIp.ip.ipv6) != 1) {
+                    in6_addr ipv6{};
+                    if (inet_pton(AF_INET6, addrStr.c_str(), &ipv6) != 1) {
                         SHM_LOG_WARN(
                             "Rootinfo: invalid IPv6 addr in CLOS entry, phyId " << phyId << ", addr " << addrStr);
                         continue;
                     }
+                    if (requestedType == IPNONE && IN6_IS_ADDR_V4MAPPED(&ipv6)) {
+                        const auto* bytes = reinterpret_cast<const uint8_t*>(&ipv6);
+                        std::memcpy(&outIp.ip.ipv4.s_addr, bytes + 12, sizeof(outIp.ip.ipv4.s_addr));
+                        outIp.type = IpV4;
+                        return true;
+                    }
+                    if (IN6_IS_ADDR_LINKLOCAL(&ipv6) || (requestedType != IPNONE && requestedType != IpV6)) {
+                        continue;
+                    }
+                    if (requestedType == IPNONE) {
+                        if (!hasIpv6Fallback) {
+                            ipv6Fallback = ipv6;
+                            hasIpv6Fallback = true;
+                        }
+                        continue;
+                    }
+                    outIp.ip.ipv6 = ipv6;
                     outIp.type = IpV6;
                     found = true;
                 }
             }
         }
         break;
+    }
+
+    if (requestedType == IPNONE && hasIpv6Fallback) {
+        outIp.ip.ipv6 = ipv6Fallback;
+        outIp.type = IpV6;
+        return true;
     }
 
     if (!found) {

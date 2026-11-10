@@ -10,7 +10,7 @@
 #include "host_rdma.h"
 #include "pcie_nic.h"
 
-int get_npu_host_rdma_ip(int npu_id, char* ip_addr, size_t ip_addr_len)
+int get_npu_host_rdma_ip(int npu_id, int family, char* ip_addr, size_t ip_addr_len)
 {
-    return get_npu_roce_ip(npu_id, ip_addr, ip_addr_len);
+    return get_npu_roce_ip(npu_id, family, ip_addr, ip_addr_len);
 }

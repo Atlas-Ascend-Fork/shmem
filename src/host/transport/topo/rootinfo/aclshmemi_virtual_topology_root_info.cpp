@@ -24,9 +24,10 @@ namespace {
 
 std::optional<aclshmemi_net_layer_t> build_xml_roce_layer(const std::string& ip)
 {
-    struct in_addr address;
-    if (inet_pton(AF_INET, ip.c_str(), &address) != 1) {
-        SHM_LOG_ERROR("Invalid RoCE IPv4 address resolved from virtual topology: " << ip);
+    in_addr address4{};
+    in6_addr address6{};
+    if (inet_pton(AF_INET, ip.c_str(), &address4) != 1 && inet_pton(AF_INET6, ip.c_str(), &address6) != 1) {
+        SHM_LOG_ERROR("Invalid RoCE IP address resolved from virtual topology: " << ip);
         return std::nullopt;
     }
 
@@ -45,7 +46,7 @@ std::optional<aclshmemi_net_layer_t> build_xml_roce_layer(const std::string& ip)
 } // namespace
 
 std::optional<aclshmemi_root_info_t> aclshmemi_generate_virtual_topology_root_info(
-    int phy_id, const std::string& xml_path, const aclshmemi_nic_ip_resolver_t& resolver)
+    int phy_id, const std::string& xml_path, const aclshmemi_nic_ip_resolver_t& resolver, int family)
 {
     auto& hal = aclshmemi_hal_t::instance();
     auto mainboard_id = hal.get_mainboard_id(phy_id);
@@ -70,7 +71,7 @@ std::optional<aclshmemi_root_info_t> aclshmemi_generate_virtual_topology_root_in
         return std::nullopt;
     }
 
-    auto ip = aclshmemi_get_roce_ip_from_xml(phy_id, xml_path, resolver);
+    auto ip = aclshmemi_get_roce_ip_from_xml(phy_id, xml_path, resolver, family);
     if (!ip) {
         SHM_LOG_ERROR(
             "Generate virtual-topology rootinfo failed: virtual topology has no usable IP for phy_id=" << phy_id);
@@ -86,7 +87,7 @@ std::optional<aclshmemi_root_info_t> aclshmemi_generate_virtual_topology_root_in
             continue;
         }
         aclshmemi_rank_add_net_layer(rank, *roce_layer);
-        SHM_LOG_INFO("Generate virtual-topology rootinfo fallback success, phy_id=" << phy_id << ", RoCE IPv4=" << *ip);
+        SHM_LOG_INFO("Generate virtual-topology rootinfo fallback success, phy_id=" << phy_id << ", RoCE IP=" << *ip);
         return root_info;
     }
 
@@ -94,11 +95,11 @@ std::optional<aclshmemi_root_info_t> aclshmemi_generate_virtual_topology_root_in
     return std::nullopt;
 }
 
-std::optional<std::string> aclshmemi_generate_virtual_topology_root_info_json(int phy_id)
+std::optional<std::string> aclshmemi_generate_virtual_topology_root_info_json(int phy_id, int family)
 {
     aclshmemi_system_nic_ip_resolver_t resolver;
     auto root_info =
-        aclshmemi_generate_virtual_topology_root_info(phy_id, ACLSHMEMI_VIRTUAL_TOPOLOGY_XML_PATH, resolver);
+        aclshmemi_generate_virtual_topology_root_info(phy_id, ACLSHMEMI_VIRTUAL_TOPOLOGY_XML_PATH, resolver, family);
     if (!root_info) {
         return std::nullopt;
     }

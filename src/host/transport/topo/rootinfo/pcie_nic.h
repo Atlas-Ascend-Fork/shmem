@@ -16,9 +16,9 @@
 extern "C" {
 #endif
 
-int get_npu_roce_ip(int phy_id, char* ip_addr, size_t addr_len);
+int get_npu_roce_ip(int phy_id, int family, char* ip_addr, size_t addr_len);
 
-int get_ip_by_if_name(const char* ifname, char* ip, size_t addr_len);
+int get_ip_by_if_name(const char* ifname, int family, char* ip, size_t addr_len);
 
 #ifdef __cplusplus
 }

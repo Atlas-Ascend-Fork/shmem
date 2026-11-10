@@ -11,6 +11,7 @@
 
 #include <cerrno>
 #include <climits>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -18,8 +19,6 @@
 
 #include <arpa/inet.h>
 #include <dirent.h>
-#include <ifaddrs.h>
-#include <net/if.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -27,6 +26,7 @@
 #include <securec.h>
 
 #include "aclshmemi_hal.h"
+#include "aclshmemi_interface_address.h"
 #include "pcie_nic_matcher.h"
 #include "utils/shmemi_logger.h"
 
@@ -327,37 +327,12 @@ static void init_npus(NPU* npu, size_t npu_count)
     }
 }
 
-int get_ip_by_if_name(const char* ifname, char* ip, size_t addr_len)
+int get_ip_by_if_name(const char* ifname, int family, char* ip, size_t addr_len)
 {
-    struct ifaddrs* ifaddr = NULL;
-    if (getifaddrs(&ifaddr) == -1) {
-        return -1;
-    }
-    int found_interface = 0;
-    for (struct ifaddrs* ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-        if (!ifa->ifa_addr || !ifa->ifa_name) {
-            continue;
-        }
-        if (strcmp(ifname, ifa->ifa_name) != 0) {
-            continue;
-        }
-        found_interface = 1;
-        if (ifa->ifa_addr->sa_family == AF_INET) {
-            struct sockaddr_in* sin = reinterpret_cast<struct sockaddr_in*>(ifa->ifa_addr);
-            if (inet_ntop(AF_INET, &sin->sin_addr, ip, addr_len) != NULL) {
-                freeifaddrs(ifaddr);
-                return 0;
-            }
-            freeifaddrs(ifaddr);
-            return -1;
-        }
-    }
-    freeifaddrs(ifaddr);
-    errno = found_interface ? ENOENT : ENODEV;
-    return -1;
+    return shm::topo::detail::get_interface_address(ifname, family, ip, addr_len);
 }
 
-int get_npu_roce_ip(int npu_id, char* ip_addr, size_t ip_addr_len)
+int get_npu_roce_ip(int npu_id, int family, char* ip_addr, size_t ip_addr_len)
 {
     auto& hal = shm::topo::aclshmemi_hal_t::instance();
     auto npu_count_opt = hal.get_npu_count();
@@ -420,7 +395,7 @@ int get_npu_roce_ip(int npu_id, char* ip_addr, size_t ip_addr_len)
                 errno = ENODEV;
                 return -1;
             }
-            return get_ip_by_if_name(npus[i].nic_name, ip_addr, ip_addr_len);
+            return get_ip_by_if_name(npus[i].nic_name, family, ip_addr, ip_addr_len);
         }
     }
 

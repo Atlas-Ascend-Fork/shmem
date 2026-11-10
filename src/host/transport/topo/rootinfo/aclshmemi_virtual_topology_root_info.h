@@ -13,6 +13,7 @@
 
 #include <optional>
 #include <string>
+#include <sys/socket.h>
 
 #include "aclshmemi_npu_nic_affinity.h"
 #include "aclshmemi_types.h"
@@ -21,8 +22,8 @@ namespace shm {
 namespace topo {
 
 std::optional<aclshmemi_root_info_t> aclshmemi_generate_virtual_topology_root_info(
-    int phy_id, const std::string& xml_path, const aclshmemi_nic_ip_resolver_t& resolver);
-std::optional<std::string> aclshmemi_generate_virtual_topology_root_info_json(int phy_id);
+    int phy_id, const std::string& xml_path, const aclshmemi_nic_ip_resolver_t& resolver, int family = AF_UNSPEC);
+std::optional<std::string> aclshmemi_generate_virtual_topology_root_info_json(int phy_id, int family = AF_UNSPEC);
 
 } // namespace topo
 } // namespace shm
