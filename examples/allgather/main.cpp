@@ -54,7 +54,7 @@ constexpr uint32_t BLOCK_NUM_LARGE_DATA = 16;
 aclshmemx_uniqueid_t default_flag_uid;
 
 template <class T>
-int test_aclshmem_all_gather(int pe_id, int n_pes)
+int test_aclshmem_all_gather(int pe_id, int n_pes, bool write_results)
 {
     // ACLStream init
     int status = 0;
@@ -73,16 +73,19 @@ int test_aclshmem_all_gather(int pe_id, int n_pes)
 
     uint32_t BLOCK_NUM = 8;
 
-    std::string exec_path = __FILE__;
-    size_t pos = exec_path.find_last_of("/\\");
-    std::string dir_path = exec_path.substr(0, pos);
-    std::string result_path = dir_path + "/results.csv";
-    std::ofstream outFile(result_path);
-    if (!outFile.is_open()) {
-        std::cerr << "错误：无法创建文件！" << std::endl;
-        return 1;
+    std::ofstream outFile;
+    if (write_results) {
+        std::string exec_path = __FILE__;
+        size_t pos = exec_path.find_last_of("/\\");
+        std::string dir_path = exec_path.substr(0, pos);
+        std::string result_path = dir_path + "/results.csv";
+        outFile.open(result_path);
+        if (!outFile.is_open()) {
+            std::cerr << "错误：无法创建文件！" << std::endl;
+            return 1;
+        }
+        outFile << "M,N,Time(us)\n";
     }
-    outFile << "M,N,Time(us)\n";
 
     // magic is used to sync.
     int magic = 1;
@@ -159,19 +162,25 @@ int test_aclshmem_all_gather(int pe_id, int n_pes)
         aclrtFree(output_ptr);
 
         if (validation_status != 0) {
-            outFile.close();
+            if (outFile.is_open()) {
+                outFile.close();
+            }
             aclrtDestroyStream(stream);
             return validation_status;
         }
 
-        outFile << 1 << "," << trans_size << "," << " " << "\n";
+        if (outFile.is_open()) {
+            outFile << 1 << "," << trans_size << "," << " " << "\n";
+        }
 
         if (pe_id == 0) {
             std::cout << "Case: " << test_cases[i] << " Finished !! Result Correct !!" << std::endl;
         }
     }
 
-    outFile.close();
+    if (outFile.is_open()) {
+        outFile.close();
+    }
     status = aclrtDestroyStream(stream);
     return status;
 }
@@ -193,6 +202,7 @@ int main(int argc, char* argv[])
     f_npu = atoi(argv[INDEX6]);
     data_type = argv[INDEX7];
     perf_times = atoi(argv[INDEX8]);
+    const bool write_results = argc > INDEX9 && std::string(argv[INDEX9]) == "--write-results";
 
     // Acl && Shmem init
     int32_t device_id = pe_id % g_npus + f_npu;
@@ -221,11 +231,11 @@ int main(int argc, char* argv[])
     }
 
     if (std::string(data_type) == "int32_t") {
-        status = test_aclshmem_all_gather<int32_t>(pe_id, n_pes);
+        status = test_aclshmem_all_gather<int32_t>(pe_id, n_pes, write_results);
     } else if (std::string(data_type) == "float16_t") {
-        status = test_aclshmem_all_gather<fp16_t>(pe_id, n_pes);
+        status = test_aclshmem_all_gather<fp16_t>(pe_id, n_pes, write_results);
     } else if (std::string(data_type) == "bfloat16_t") {
-        status = test_aclshmem_all_gather<bfloat16>(pe_id, n_pes);
+        status = test_aclshmem_all_gather<bfloat16>(pe_id, n_pes, write_results);
     } else {
         std::cerr << "[ERROR] unsupported data_type: " << data_type << std::endl;
         status = 1;

@@ -20,7 +20,8 @@ GNPU_NUM="8"
 FIRST_NPU="0"
 FIRST_PE="0"
 TEST_TYPE="int32_t"
-TOOL="msprof"
+# Enable profiling only when explicitly requested with -tool msprof.
+TOOL=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -112,14 +113,16 @@ if ! python3 ./scripts/data_gen.py "$PE_SIZE" "$TEST_TYPE"; then
 fi
 
 # Kernel test
-rm -rf ./output
+if [[ "$TOOL" == "msprof" ]]; then
+    rm -rf ./output
+fi
 export SHMEM_UID_SESSION_ID=127.0.0.1:8899
 export LD_LIBRARY_PATH=${PROJECT_ROOT}/build/lib:${ASCEND_HOME_PATH}/lib64:$LD_LIBRARY_PATH
 pids=()
 for (( idx =0; idx < ${GNPU_NUM}; idx = idx + 1 )); do
     if [[ "$TOOL" == "msprof" ]]; then
         PERF_TIME=50
-        msprof --application="${PROJECT_ROOT}/build/bin/allgather $PE_SIZE $idx $IPPORT $GNPU_NUM $FIRST_PE $FIRST_NPU $TEST_TYPE $PERF_TIME" --output=${PROJECT_ROOT}/examples/allgather/output/ &
+        msprof --application="${PROJECT_ROOT}/build/bin/allgather $PE_SIZE $idx $IPPORT $GNPU_NUM $FIRST_PE $FIRST_NPU $TEST_TYPE $PERF_TIME --write-results" --output=${PROJECT_ROOT}/examples/allgather/output/ &
     else
         PERF_TIME=50
         ${PROJECT_ROOT}/build/bin/allgather $PE_SIZE $idx $IPPORT $GNPU_NUM $FIRST_PE $FIRST_NPU $TEST_TYPE $PERF_TIME &
@@ -140,17 +143,19 @@ for pid in "${pids[@]}"; do
 done
 
 if [[ $ret -ne 0 ]]; then
-    echo "[ERROR] allgather process failed, skip profiling data statistic."
+    echo "[ERROR] allgather process failed."
     cd "${CURRENT_DIR}" || exit "$ret"
     exit "$ret"
 fi
 
 # Profiling data statistic
-python3 ./scripts/data_statistic.py
-stat_ret=$?
-if [[ $stat_ret -ne 0 ]]; then
-    echo "[ERROR] profiling data statistic failed, ret=$stat_ret"
-    ret=$stat_ret
+if [[ "$TOOL" == "msprof" ]]; then
+    python3 ./scripts/data_statistic.py
+    stat_ret=$?
+    if [[ $stat_ret -ne 0 ]]; then
+        echo "[ERROR] profiling data statistic failed, ret=$stat_ret"
+        ret=$stat_ret
+    fi
 fi
 
 cd "${CURRENT_DIR}" || exit "$ret"
