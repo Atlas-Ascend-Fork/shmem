@@ -1,0 +1,273 @@
+name: Manual_SHMEM_Wheel
+
+on:
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: Build architecture
+        required: true
+        type: choice
+        default: arm64
+        options: [arm64, x86_64]
+      python_flavor:
+        description: Python version
+        required: true
+        type: choice
+        default: py311
+        options: [py310, py311, py312, py313]
+      package_version:
+        description: Package version override (empty uses source VERSION)
+        required: false
+        type: string
+        default: ""
+      shmem_ref:
+        description: SHMEM branch, tag or full commit SHA
+        required: true
+        type: string
+        default: master
+
+stages:
+  build:
+    name: Build_and_publish
+    jobs:
+      JOB_arm:
+        name: Build_wheel_ARM
+        if: ${{ inputs.architecture == 'arm64' }}
+        runs-on: [self-hosted, arch=arm64, spec=xlarge]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/hw-ascend/shmem-builder:cann9.2.0-aarch64-py310-py311-py312-py313
+        steps:
+          - name: Check_publish_permission
+            shell: bash
+            env:
+              INITIAL_ACTOR: ${{ atomgit.actor }}
+              ALLOWED_ACTORS: ${{ vars.SHMEM_RELEASE_ACTORS }}
+            run: |
+              set -eo pipefail
+              python3 - <<'PY'
+              import os
+              import sys
+
+              values = {
+                  name: os.environ.get(name, "").strip()
+                  for name in ("INITIAL_ACTOR", "ALLOWED_ACTORS")
+              }
+              if any(not value or "$" + "{{" in value for value in values.values()):
+                  sys.exit("Cannot verify publishing permission: configure SHMEM_RELEASE_ACTORS and check actor contexts")
+              allowed = set(values["ALLOWED_ACTORS"].replace(",", " ").split())
+              initial = values["INITIAL_ACTOR"]
+              print(f"Initial actor: {initial}", flush=True)
+              if initial not in allowed:
+                  sys.exit("Publishing denied: account is not in SHMEM_RELEASE_ACTORS")
+              print("Publishing permission granted")
+              PY
+          - name: Checkout
+            identifier: process_checkout
+            uses: checkout
+            with:
+              ref: ${{ atomgit.event.pull_request.merge_commit_sha || atomgit.sha }}
+              allow-unsafe-pr-checkout: true
+          - name: Fetch_source_and_build
+            shell: bash
+            env:
+              WORKSPACE: ${{ steps.process_checkout.outputs.path }}
+              PYTHON_FLAVOR: ${{ inputs.python_flavor }}
+              SHMEM_REF: ${{ inputs.shmem_ref }}
+              SHMEM_REPOSITORY: https://gitcode.com/cann/shmem.git
+              PACKAGE_VERSION: ${{ inputs.package_version }}
+            run: |
+              set -eo pipefail
+              source /opt/shmem-builder/activate.sh "$PYTHON_FLAVOR"
+              if [[ -n "$PACKAGE_VERSION" ]]; then
+                VERSION=$(python3 -c 'import os; from packaging.version import Version; print(Version(os.environ["PACKAGE_VERSION"]))')
+                export VERSION
+                printf 'Package version override: %s\n' "$VERSION"
+              else
+                unset VERSION
+                echo 'Package version: source VERSION file'
+              fi
+              case "$SHMEM_REF" in
+                ''|-*) echo 'Specify a SHMEM branch, tag or commit SHA' >&2; exit 2 ;;
+              esac
+              export SHMEM_OUTPUT_DIR="$WORKSPACE/output/wheels/$PYTHON_FLAVOR"
+              cd "$WORKSPACE"
+              mkdir -p "$SHMEM_OUTPUT_DIR"
+              rm -f "$SHMEM_OUTPUT_DIR"/cann_shmem-*.whl "$SHMEM_OUTPUT_DIR"/SHMEM_*.run \
+                "$SHMEM_OUTPUT_DIR"/build-info.txt "$SHMEM_OUTPUT_DIR"/SHA256SUMS
+              checkout_dir=$(mktemp -d "${TMPDIR:-/tmp}/shmem-source.XXXXXXXX")
+              trap 'rm -rf -- "$checkout_dir"' EXIT
+              git init "$checkout_dir"
+              git -C "$checkout_dir" remote add origin "$SHMEM_REPOSITORY"
+              git -C "$checkout_dir" fetch --depth 1 origin "$SHMEM_REF"
+              git -C "$checkout_dir" checkout --detach FETCH_HEAD
+              printf 'Selected SHMEM commit: '
+              git -C "$checkout_dir" rev-parse HEAD
+              if [ ! -f "$checkout_dir/3rdparty/json/single_include/nlohmann/json.hpp" ]; then
+                mkdir -p "$checkout_dir/3rdparty/json"
+                cp -a /opt/shmem/3rdparty/json/. "$checkout_dir/3rdparty/json/"
+              fi
+              export SHMEM_SOURCE_DIR="$checkout_dir"
+              bash /opt/shmem-builder/build-shmem.sh
+          - name: Upload_wheel
+            shell: bash
+            env:
+              WORKSPACE: ${{ steps.process_checkout.outputs.path }}
+              PYTHON_FLAVOR: ${{ inputs.python_flavor }}
+              TWINE_USERNAME: ${{ secrets.CANN_PYPI_USERNAME }}
+              TWINE_PASSWORD: ${{ secrets.CANN_PYPI_PASSWORD }}
+              TWINE_REPOSITORY_URL: https://mirror-centralrepo.devcloud.cn-north-4.huaweicloud.com/artifactory/api/pypi/cann-pypi
+            run: |
+              set +x
+              set -eo pipefail
+              source /opt/shmem-builder/activate.sh "$PYTHON_FLAVOR"
+              echo 'Upload credentials diagnostic v1'
+              credentials_ready=true
+              expression_prefix='$''{{'
+              for credential_name in TWINE_USERNAME TWINE_PASSWORD; do
+                if [[ ! -v "$credential_name" ]]; then
+                  credential_status=not_set
+                elif [[ -z "${!credential_name}" ]]; then
+                  credential_status=empty
+                elif [[ "${!credential_name}" == *"$expression_prefix"* ]]; then
+                  credential_status=unresolved_expression
+                else
+                  credential_status=present
+                fi
+                printf '%s=%s\n' "$credential_name" "$credential_status"
+                if [[ "$credential_status" != present ]]; then
+                  credentials_ready=false
+                fi
+              done
+              if [[ "$credentials_ready" != true ]]; then
+                echo 'Configure CANN_PYPI_USERNAME and CANN_PYPI_PASSWORD Secrets' >&2
+                exit 1
+              fi
+              shopt -s nullglob
+              wheels=("$WORKSPACE/output/wheels/$PYTHON_FLAVOR/"*.whl)
+              if [[ ${#wheels[@]} -eq 0 ]]; then
+                echo 'No wheel files produced' >&2
+                exit 1
+              fi
+              python3 -m twine check "${wheels[@]}"
+              python3 -m twine upload --non-interactive "${wheels[@]}"
+
+      JOB_x86:
+        name: Build_wheel_X86
+        if: ${{ inputs.architecture == 'x86_64' }}
+        runs-on: [self-hosted, arch=x64, spec=xlarge]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/hw-ascend/shmem-builder:cann9.2.0-x86_64-py310-py311-py312-py313
+        steps:
+          - name: Check_publish_permission
+            shell: bash
+            env:
+              INITIAL_ACTOR: ${{ atomgit.actor }}
+              ALLOWED_ACTORS: ${{ vars.SHMEM_RELEASE_ACTORS }}
+            run: |
+              set -eo pipefail
+              python3 - <<'PY'
+              import os
+              import sys
+
+              values = {
+                  name: os.environ.get(name, "").strip()
+                  for name in ("INITIAL_ACTOR", "ALLOWED_ACTORS")
+              }
+              if any(not value or "$" + "{{" in value for value in values.values()):
+                  sys.exit("Cannot verify publishing permission: configure SHMEM_RELEASE_ACTORS and check actor contexts")
+              allowed = set(values["ALLOWED_ACTORS"].replace(",", " ").split())
+              initial = values["INITIAL_ACTOR"]
+              print(f"Initial actor: {initial}", flush=True)
+              if initial not in allowed:
+                  sys.exit("Publishing denied: account is not in SHMEM_RELEASE_ACTORS")
+              print("Publishing permission granted")
+              PY
+          - name: Checkout
+            identifier: process_checkout
+            uses: checkout
+            with:
+              ref: ${{ atomgit.event.pull_request.merge_commit_sha || atomgit.sha }}
+              allow-unsafe-pr-checkout: true
+          - name: Fetch_source_and_build
+            shell: bash
+            env:
+              WORKSPACE: ${{ steps.process_checkout.outputs.path }}
+              PYTHON_FLAVOR: ${{ inputs.python_flavor }}
+              SHMEM_REF: ${{ inputs.shmem_ref }}
+              SHMEM_REPOSITORY: https://gitcode.com/cann/shmem.git
+              PACKAGE_VERSION: ${{ inputs.package_version }}
+            run: |
+              set -eo pipefail
+              source /opt/shmem-builder/activate.sh "$PYTHON_FLAVOR"
+              if [[ -n "$PACKAGE_VERSION" ]]; then
+                VERSION=$(python3 -c 'import os; from packaging.version import Version; print(Version(os.environ["PACKAGE_VERSION"]))')
+                export VERSION
+                printf 'Package version override: %s\n' "$VERSION"
+              else
+                unset VERSION
+                echo 'Package version: source VERSION file'
+              fi
+              case "$SHMEM_REF" in
+                ''|-*) echo 'Specify a SHMEM branch, tag or commit SHA' >&2; exit 2 ;;
+              esac
+              export SHMEM_OUTPUT_DIR="$WORKSPACE/output/wheels/$PYTHON_FLAVOR"
+              cd "$WORKSPACE"
+              mkdir -p "$SHMEM_OUTPUT_DIR"
+              rm -f "$SHMEM_OUTPUT_DIR"/cann_shmem-*.whl "$SHMEM_OUTPUT_DIR"/SHMEM_*.run \
+                "$SHMEM_OUTPUT_DIR"/build-info.txt "$SHMEM_OUTPUT_DIR"/SHA256SUMS
+              checkout_dir=$(mktemp -d "${TMPDIR:-/tmp}/shmem-source.XXXXXXXX")
+              trap 'rm -rf -- "$checkout_dir"' EXIT
+              git init "$checkout_dir"
+              git -C "$checkout_dir" remote add origin "$SHMEM_REPOSITORY"
+              git -C "$checkout_dir" fetch --depth 1 origin "$SHMEM_REF"
+              git -C "$checkout_dir" checkout --detach FETCH_HEAD
+              printf 'Selected SHMEM commit: '
+              git -C "$checkout_dir" rev-parse HEAD
+              if [ ! -f "$checkout_dir/3rdparty/json/single_include/nlohmann/json.hpp" ]; then
+                mkdir -p "$checkout_dir/3rdparty/json"
+                cp -a /opt/shmem/3rdparty/json/. "$checkout_dir/3rdparty/json/"
+              fi
+              export SHMEM_SOURCE_DIR="$checkout_dir"
+              bash /opt/shmem-builder/build-shmem.sh
+          - name: Upload_wheel
+            shell: bash
+            env:
+              WORKSPACE: ${{ steps.process_checkout.outputs.path }}
+              PYTHON_FLAVOR: ${{ inputs.python_flavor }}
+              TWINE_USERNAME: ${{ secrets.CANN_PYPI_USERNAME }}
+              TWINE_PASSWORD: ${{ secrets.CANN_PYPI_PASSWORD }}
+              TWINE_REPOSITORY_URL: https://mirror-centralrepo.devcloud.cn-north-4.huaweicloud.com/artifactory/api/pypi/cann-pypi
+            run: |
+              set +x
+              set -eo pipefail
+              source /opt/shmem-builder/activate.sh "$PYTHON_FLAVOR"
+              echo 'Upload credentials diagnostic v1'
+              credentials_ready=true
+              expression_prefix='$''{{'
+              for credential_name in TWINE_USERNAME TWINE_PASSWORD; do
+                if [[ ! -v "$credential_name" ]]; then
+                  credential_status=not_set
+                elif [[ -z "${!credential_name}" ]]; then
+                  credential_status=empty
+                elif [[ "${!credential_name}" == *"$expression_prefix"* ]]; then
+                  credential_status=unresolved_expression
+                else
+                  credential_status=present
+                fi
+                printf '%s=%s\n' "$credential_name" "$credential_status"
+                if [[ "$credential_status" != present ]]; then
+                  credentials_ready=false
+                fi
+              done
+              if [[ "$credentials_ready" != true ]]; then
+                echo 'Configure CANN_PYPI_USERNAME and CANN_PYPI_PASSWORD Secrets' >&2
+                exit 1
+              fi
+              shopt -s nullglob
+              wheels=("$WORKSPACE/output/wheels/$PYTHON_FLAVOR/"*.whl)
+              if [[ ${#wheels[@]} -eq 0 ]]; then
+                echo 'No wheel files produced' >&2
+                exit 1
+              fi
+              python3 -m twine check "${wheels[@]}"
+              python3 -m twine upload --non-interactive "${wheels[@]}"
