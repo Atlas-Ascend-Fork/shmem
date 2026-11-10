@@ -89,11 +89,7 @@ Result RdmaTransportManager::OpenDevice(const TransportOptions& options)
         return ACLSHMEM_INVALID_PARAM;
     }
 
-    if (options.type == IpV4) {
-        deviceIp_.type = IpV4;
-    } else if (options.type == IpV6) {
-        deviceIp_.type = IpV6;
-    }
+    deviceIp_.type = options.type == IpV6 ? IpV6 : IpV4;
 
     if (!PrepareOpenDevice(userId, phyId_, rankCount_, deviceIp_, rdmaHandle_)) {
         SHM_LOG_ERROR("phyId=" << phyId_ << " PrepareOpenDevice failed.");

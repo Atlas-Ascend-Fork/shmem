@@ -9,6 +9,7 @@
  */
 #include "aclshmemi_types.h"
 
+#include <arpa/inet.h>
 #include <iomanip>
 #include <sstream>
 
@@ -32,7 +33,8 @@ int aclshmemi_addr_set_eid(aclshmemi_addr_t& addr, const dcmi_urma_eid_t& eid)
 
 int aclshmemi_addr_set_ip(aclshmemi_addr_t& addr, const std::string& ip)
 {
-    addr.addr_type = "IPV4";
+    in6_addr ipv6{};
+    addr.addr_type = inet_pton(AF_INET6, ip.c_str(), &ipv6) == 1 ? "IPV6" : "IPV4";
     addr.addr = ip;
     return 0;
 }

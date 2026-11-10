@@ -67,7 +67,7 @@ struct TransportOptions {
     } rdmaQpConfig{};
     hybm_role_type role;
     std::string nic;
-    IpType type{IpV4};
+    IpType type{IPNONE};
     UdmaQpConfig udmaQpConfig{};
     // SDMA uses one device-only stream per configured QP; 1 by default.
     uint32_t sdmaQpNum{1};

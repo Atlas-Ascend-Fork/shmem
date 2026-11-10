@@ -13,8 +13,8 @@
 #include <algorithm>
 #include <arpa/inet.h>
 #include <cctype>
+#include <cstring>
 #include <dirent.h>
-#include <ifaddrs.h>
 #include <sys/socket.h>
 #include <unordered_map>
 #include <utility>
@@ -23,6 +23,7 @@
 #include <securec.h>
 
 #include "aclshmemi_hal.h"
+#include "aclshmemi_interface_address.h"
 #include "aclshmemi_xml_parser.h"
 #include "utils/shmemi_logger.h"
 
@@ -34,7 +35,7 @@ namespace {
 constexpr int MAX_AFFINITY_GROUP_COUNT = 16;
 constexpr int MAX_NIC_COUNT = 64;
 constexpr int MAX_NIC_NAME_LENGTH = 64;
-constexpr int MAX_IP_LENGTH = INET_ADDRSTRLEN;
+constexpr int MAX_IP_LENGTH = INET6_ADDRSTRLEN;
 constexpr const char* HCA_NET_PATH_PREFIX = "/sys/class/infiniband/";
 constexpr const char* HCA_NET_PATH_SUFFIX = "/device/net";
 
@@ -132,30 +133,6 @@ bool is_safe_device_name(const std::string& name)
         }
     }
     return true;
-}
-
-std::optional<std::string> get_interface_ipv4(const std::string& interface_name)
-{
-    struct ifaddrs* interfaces = nullptr;
-    if (getifaddrs(&interfaces) != 0) {
-        return std::nullopt;
-    }
-
-    std::optional<std::string> result;
-    for (struct ifaddrs* current = interfaces; current != nullptr; current = current->ifa_next) {
-        if (current->ifa_name == nullptr || current->ifa_addr == nullptr || interface_name != current->ifa_name ||
-            current->ifa_addr->sa_family != AF_INET) {
-            continue;
-        }
-        const auto* address = reinterpret_cast<const struct sockaddr_in*>(current->ifa_addr);
-        char buffer[MAX_IP_LENGTH] = {0};
-        if (inet_ntop(AF_INET, &address->sin_addr, buffer, sizeof(buffer)) != nullptr) {
-            result = std::string(buffer);
-            break;
-        }
-    }
-    freeifaddrs(interfaces);
-    return result;
 }
 
 std::vector<std::string> get_hca_interfaces(const std::string& hca_name)
@@ -369,14 +346,14 @@ bool build_affinity_info(
 
 std::optional<std::string> select_ip_round_robin(
     int phy_id, const std::vector<uint32_t>& visible_phy_ids, const affinity_info_t& info,
-    const aclshmemi_nic_ip_resolver_t& resolver)
+    const aclshmemi_nic_ip_resolver_t& resolver, int family)
 {
     std::vector<std::optional<std::string>> nic_ips;
     nic_ips.reserve(info.nic_names.size());
     for (const auto& name : info.nic_names) {
-        auto ip = resolver.resolve(name);
+        auto ip = resolver.resolve(name, family);
         if (!ip) {
-            SHM_LOG_WARN("Cannot resolve IPv4 address for topology NIC/HCA " << name);
+            SHM_LOG_WARN("Cannot resolve IP address for topology NIC/HCA " << name);
         }
         nic_ips.push_back(std::move(ip));
     }
@@ -402,24 +379,41 @@ std::optional<std::string> select_ip_round_robin(
     }
     const size_t nic_index = *assignment_nic_index[static_cast<size_t>(phy_id)];
     SHM_LOG_INFO(
-        "Resolved virtual-topology RoCE IPv4 for phy_id=" << phy_id << ", nic=" << info.nic_names[nic_index]
-                                                          << ", ip=" << *assignment[static_cast<size_t>(phy_id)]);
+        "Resolved virtual-topology RoCE IP for phy_id=" << phy_id << ", nic=" << info.nic_names[nic_index]
+                                                        << ", ip=" << *assignment[static_cast<size_t>(phy_id)]);
     return assignment[static_cast<size_t>(phy_id)];
 }
 
 } // namespace
 
-std::optional<std::string> aclshmemi_system_nic_ip_resolver_t::resolve(const std::string& name) const
+std::optional<std::string> aclshmemi_system_nic_ip_resolver_t::resolve(const std::string& name, int family) const
 {
     if (!is_safe_device_name(name)) {
         return std::nullopt;
     }
-    auto ip = get_interface_ipv4(name);
+    auto ip = get_interface_ip(name, family);
     if (ip) {
         return ip;
     }
-    for (const auto& interface_name : get_hca_interfaces(name)) {
-        ip = get_interface_ipv4(interface_name);
+    const auto interfaces = get_hca_interfaces(name);
+    if (family == AF_UNSPEC) {
+        // Preserve IPv4 priority across all ports belonging to an HCA, not just within each port.
+        for (const auto& interface_name : interfaces) {
+            ip = get_interface_ip(interface_name, AF_INET);
+            if (ip) {
+                return ip;
+            }
+        }
+        for (const auto& interface_name : interfaces) {
+            ip = get_interface_ip(interface_name, AF_INET6);
+            if (ip) {
+                return ip;
+            }
+        }
+        return std::nullopt;
+    }
+    for (const auto& interface_name : interfaces) {
+        ip = get_interface_ip(interface_name, family);
         if (ip) {
             return ip;
         }
@@ -427,10 +421,25 @@ std::optional<std::string> aclshmemi_system_nic_ip_resolver_t::resolve(const std
     return std::nullopt;
 }
 
-std::optional<std::string> aclshmemi_get_roce_ip_from_xml(
-    int phy_id, const std::string& xml_path, const aclshmemi_nic_ip_resolver_t& resolver)
+std::optional<std::string> aclshmemi_system_nic_ip_resolver_t::get_interface_ip(
+    const std::string& interface_name, int family) const
 {
-    SHM_LOG_INFO("Resolve RoCE IPv4 from virtual topology, phy_id=" << phy_id << ", xml_path=" << xml_path);
+    char buffer[MAX_IP_LENGTH] = {0};
+    if (detail::get_interface_address(interface_name.c_str(), family, buffer, sizeof(buffer)) != 0) {
+        return std::nullopt;
+    }
+    return std::string(buffer);
+}
+
+std::vector<std::string> aclshmemi_system_nic_ip_resolver_t::get_hca_interfaces(const std::string& hca_name) const
+{
+    return shm::topo::get_hca_interfaces(hca_name);
+}
+
+std::optional<std::string> aclshmemi_get_roce_ip_from_xml(
+    int phy_id, const std::string& xml_path, const aclshmemi_nic_ip_resolver_t& resolver, int family)
+{
+    SHM_LOG_INFO("Resolve RoCE IP from virtual topology, phy_id=" << phy_id << ", xml_path=" << xml_path);
     if (phy_id < 0 || phy_id >= ACLSHMEMI_MAX_NPU_COUNT) {
         SHM_LOG_ERROR("Invalid physical NPU id for virtual topology, phy_id=" << phy_id);
         return std::nullopt;
@@ -461,17 +470,17 @@ std::optional<std::string> aclshmemi_get_roce_ip_from_xml(
         return std::nullopt;
     }
 
-    auto ip = select_ip_round_robin(phy_id, *visible_phy_ids, info, resolver);
+    auto ip = select_ip_round_robin(phy_id, *visible_phy_ids, info, resolver, family);
     if (!ip) {
-        SHM_LOG_ERROR("No usable affined RoCE IPv4 address for phy_id=" << phy_id);
+        SHM_LOG_ERROR("No usable affined RoCE IP address for phy_id=" << phy_id);
     }
     return ip;
 }
 
-std::optional<std::string> aclshmemi_get_roce_ip_from_xml(int phy_id)
+std::optional<std::string> aclshmemi_get_roce_ip_from_xml(int phy_id, int family)
 {
     aclshmemi_system_nic_ip_resolver_t resolver;
-    return aclshmemi_get_roce_ip_from_xml(phy_id, ACLSHMEMI_VIRTUAL_TOPOLOGY_XML_PATH, resolver);
+    return aclshmemi_get_roce_ip_from_xml(phy_id, ACLSHMEMI_VIRTUAL_TOPOLOGY_XML_PATH, resolver, family);
 }
 
 } // namespace topo

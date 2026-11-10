@@ -118,7 +118,7 @@ if(SOC_TYPE STREQUAL "Ascend950")
         ${PROJECT_SOURCE_DIR}/src/host/transport/device_udma
         ${PROJECT_SOURCE_DIR}/src/host/transport/topo/rootinfo)
     target_link_directories(${ACLSHMEM_TOPO_UNITTEST_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/3rdparty/googletest/lib)
-    target_link_libraries(${ACLSHMEM_TOPO_UNITTEST_TARGET} PRIVATE gtest gmock gcov shmem_utils)
+    target_link_libraries(${ACLSHMEM_TOPO_UNITTEST_TARGET} PRIVATE gtest gmock gcov shmem_utils ${CMAKE_DL_LIBS})
 endif()
 
 add_library(aclshmem_unittest_host OBJECT ${ACLSHMEM_HOST_FILES} ${TEST_HOST_FILES} ${CONFIG_STORE_FILES} ${UNDER_API_FILES})

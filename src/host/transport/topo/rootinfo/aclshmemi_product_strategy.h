@@ -16,6 +16,7 @@
 #include <string>
 #include <optional>
 #include <vector>
+#include <sys/socket.h>
 #include "aclshmemi_types.h"
 #include "aclshmemi_hal.h"
 #include "aclshmemi_eid_parser.h"
@@ -64,6 +65,8 @@ public:
     virtual ~aclshmemi_product_strategy_t() = default;
 
     virtual std::optional<aclshmemi_root_info_t> get_root_info(int phy_id, uint32_t mainboard_id) = 0;
+    virtual std::optional<aclshmemi_root_info_t> get_root_info_for_family(
+        int phy_id, uint32_t mainboard_id, int family);
     virtual std::optional<aclshmemi_root_info_t> get_root_info_without_roce(int phy_id, uint32_t mainboard_id);
     virtual size_t get_root_info_size() const = 0;
 
@@ -73,16 +76,19 @@ public:
 class aclshmemi_card_product_t : public aclshmemi_product_strategy_t {
 public:
     std::optional<aclshmemi_root_info_t> get_root_info(int phy_id, uint32_t mainboard_id) override;
+    std::optional<aclshmemi_root_info_t> get_root_info_for_family(
+        int phy_id, uint32_t mainboard_id, int family) override;
     std::optional<aclshmemi_root_info_t> get_root_info_without_roce(int phy_id, uint32_t mainboard_id) override;
     size_t get_root_info_size() const override { return ACLSHMEMI_ROOT_INFO_SIZE; }
 
 private:
-    std::optional<aclshmemi_root_info_t> build_root_info(int phy_id, uint32_t mainboard_id, bool include_roce);
+    std::optional<aclshmemi_root_info_t> build_root_info(
+        int phy_id, uint32_t mainboard_id, bool include_roce, int family = AF_UNSPEC);
     std::optional<aclshmemi_net_layer_t> process_mesh_layer(
         int phy_id, const dcmi_urma_eid_info_t* eid_list, size_t eid_cnt);
     std::optional<aclshmemi_net_layer_t> process_mesh2p_layer(
         int phy_id, const dcmi_urma_eid_info_t* eid_list, size_t eid_cnt);
-    std::optional<aclshmemi_net_layer_t> process_roce_layer(int phy_id);
+    std::optional<aclshmemi_net_layer_t> process_roce_layer(int phy_id, int family);
 };
 
 class aclshmemi_server_product_t : public aclshmemi_product_strategy_t {
