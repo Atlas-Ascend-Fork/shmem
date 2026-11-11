@@ -157,10 +157,12 @@ install/aarch64/SHMEM_1.0.0_linux-aarch64.run
 
 ## Instructions
 
+Run the following commands from the repository root using the source-built `build/bin/root_info_generate`; for an installed tool, use `install/shmem/bin/root_info_generate` instead.
+
 ### Basic Syntax
 
 ```bash
-./root_info_generate <physical_ID>
+./build/bin/root_info_generate <physical_ID>
 ```
 
 **Parameter description**:
@@ -171,7 +173,7 @@ install/aarch64/SHMEM_1.0.0_linux-aarch64.run
 #### Example 1: Querying the NPU Whose ID Is 3
 
 ```bash
-./root_info_generate 3
+./build/bin/root_info_generate 3
 ```
 
 **Expected output**:
@@ -188,14 +190,14 @@ Root info generation completed successfully
 #### Example 2: Querying Other NPUs
 
 ```bash
-./root_info_generate 0
-./root_info_generate 5
+./build/bin/root_info_generate 0
+./build/bin/root_info_generate 5
 ```
 
 #### Example 3: Querying an NPU Using an Invalid Physical ID
 
 ```bash
-./root_info_generate 100
+./build/bin/root_info_generate 100
 ```
 
 **Output error**:
@@ -300,7 +302,7 @@ ls -l /dev/davinci*
 sudo usermod -a -G ascend <username>
 
 # Alternatively, run the tool with appropriate permissions.
-sudo ./root_info_generate 0
+sudo ./build/bin/root_info_generate 0
 ```
 
 ### Problem 5: Invalid Physical ID
@@ -332,7 +334,7 @@ Enable detailed logging for debugging:
 ```bash
 # Set up the debugging environment (if available).
 export SHMEM_LOG_LEVEL=DEBUG
-./root_info_generate 0
+./build/bin/root_info_generate 0
 ```
 
 ### Log Analysis

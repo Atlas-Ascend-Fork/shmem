@@ -165,10 +165,12 @@ install/aarch64/SHMEM_1.0.0_linux-aarch64.run
 
 ## 使用方法
 
+以下命令均在仓库根目录执行，使用源码编译生成的 `build/bin/root_info_generate`；若使用安装后的工具，可改用 `install/shmem/bin/root_info_generate`。
+
 ### 基本语法
 
 ```bash
-./root_info_generate <物理ID>
+./build/bin/root_info_generate <物理ID>
 ```
 
 **参数说明**:
@@ -180,7 +182,7 @@ install/aarch64/SHMEM_1.0.0_linux-aarch64.run
 #### 示例1：查询ID为3的NPU
 
 ```bash
-./root_info_generate 3
+./build/bin/root_info_generate 3
 ```
 
 **预期输出**:
@@ -198,14 +200,14 @@ Root info generation completed successfully
 #### 示例2：查询其他NPU
 
 ```bash
-./root_info_generate 0
-./root_info_generate 5
+./build/bin/root_info_generate 0
+./build/bin/root_info_generate 5
 ```
 
 #### 示例3：无效物理ID
 
 ```bash
-./root_info_generate 100
+./build/bin/root_info_generate 100
 ```
 
 **错误输出**:
@@ -324,7 +326,7 @@ ls -l /dev/davinci*
 sudo usermod -a -G ascend <用户名>
 
 # 或使用适当权限运行
-sudo ./root_info_generate 0
+sudo ./build/bin/root_info_generate 0
 ```
 
 ### 问题5：无效物理ID
@@ -359,7 +361,7 @@ Error: topo_addr_info_get_size failed with ret=-1
 ```bash
 # 设置调试环境（如果可用）
 export SHMEM_LOG_LEVEL=DEBUG
-./root_info_generate 0
+./build/bin/root_info_generate 0
 ```
 
 ### 日志分析
