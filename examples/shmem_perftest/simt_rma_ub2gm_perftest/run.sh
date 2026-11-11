@@ -102,8 +102,7 @@ Options:
   -gnpus <int>              Number of NPUs used on this node, must be 2. (default: 2)
   -fnpu <int>               First NPU id; device = pe_id % gnpus + fnpu. (default: 0)
   -fpe <int>                First PE id. Kept for CLI compatibility; unused. (default: 0)
-  -t|--test-type <put|get>  Operation type. Optional; if given it must match the
-                            compile-time OP_TYPE or the binary exits with an error.
+  -t|--test-type <put|get>  Operation to measure: put or get.        (default: get)
   -b|--block-size <int>     Cores (blocks) used per PE.                  (default: 32)
   --block-range <min> <max> Cores (blocks) sweep range, one CSV row per count. (default: 32 32)
   --block-list <b1,b2,...>  Explicit core counts, comma-separated (e.g. 1,8,16).

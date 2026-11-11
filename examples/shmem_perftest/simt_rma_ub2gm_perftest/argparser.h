@@ -103,7 +103,7 @@ inline void print_usage(const char* prog_name)
               << "  -fpe <int>               First PE id. Kept for CLI compatibility; unused. Default: 0\n"
               << "  -fnpu <int>              First NPU id; device = pe_id % gnpus + fnpu. Default: 0\n"
               << "  -ipport <ip:port>        Bootstrap address. Default: tcp://127.0.0.1:8760\n"
-              << "  -t, --test-type <put|get>   Must match the compile-time OP_TYPE, else error.\n"
+              << "  -t, --test-type <put|get>   Operation to measure. Default: get\n"
               << "  -b, --block-size <int>   Kernel grid (cores). Default: 32\n"
               << "  --block-range <min> <max>   Cores sweep range. Default: 32 32\n"
               << "  --block-list <b1,b2,...> Explicit core counts to test, comma-separated\n"

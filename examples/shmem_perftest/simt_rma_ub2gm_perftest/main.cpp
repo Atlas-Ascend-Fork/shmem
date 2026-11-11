@@ -42,8 +42,8 @@
 // drift apart.
 using T = int32_t;
 
-// Compile-time configuration (simplified)
-constexpr OpType OP_TYPE = OpType::Get;      // Put or Get
+// Compile-time configuration (simplified). The measured operation (put/get) is
+// not among them: it is selected at run time via -t/--test-type (default: get).
 constexpr int32_t DATA_SIZE = sizeof(T) * 8; // RMA interface data width, in bits
 constexpr int32_t THREAD_COUNT = 1024;
 constexpr int32_t UB_BUFFER_SIZE = 16384; // UB buffer size in elements (covers up to 2^16 B)
@@ -218,7 +218,10 @@ ACLSHMEM_DEVICE void copy_ub2gm(__gm__ Elem* dstGva, __ubuf__ Elem* srcUb, uint3
     AscendC::DataCopyPad(gmTensor, ubTensor, dataCopyParams);
 }
 
-// Main test kernel
+// Main test kernel. The op is a template parameter so each specialization is
+// resolved at compile time (no per-iteration branch in the timed loop); the
+// host selects the instantiation to launch based on -t/--test-type.
+template <OpType OP>
 __global__ __vector__ void run_demo_mem_ub2gm(__gm__ void* sym_addr, InvokeParameters invp, int32_t frame_id)
 {
     int32_t my_pe = aclshmem_my_pe();
@@ -241,7 +244,7 @@ __global__ __vector__ void run_demo_mem_ub2gm(__gm__ void* sym_addr, InvokeParam
     }
 
     // Preparation phase: initialize UB data (not timed)
-    if constexpr (OP_TYPE == OpType::Put) {
+    if constexpr (OP == OpType::Put) {
         __gm__ T* src_gm = reinterpret_cast<__gm__ T*>(sym_addr);
         copy_gm2ub(ub_buf, src_gm, invp.per_invocation_bytes);
         AscendC::PipeBarrier<PIPE_ALL>();
@@ -254,7 +257,7 @@ __global__ __vector__ void run_demo_mem_ub2gm(__gm__ void* sym_addr, InvokeParam
         __gm__ T* target_addr = reinterpret_cast<__gm__ T*>(reinterpret_cast<__gm__ int8_t*>(sym_addr) + offset);
 
         VSSync::start();
-        if constexpr (OP_TYPE == OpType::Put) {
+        if constexpr (OP == OpType::Put) {
             asc_vf_call<transfer_vf_put>(dim3(THREAD_COUNT), target_addr, ub_buf, count, next_pe);
         } else {
             asc_vf_call<transfer_vf_get>(dim3(THREAD_COUNT), ub_buf, target_addr, count, next_pe);
@@ -274,7 +277,7 @@ __global__ __vector__ void run_demo_mem_ub2gm(__gm__ void* sym_addr, InvokeParam
 
         VSSync::start();
 
-        if constexpr (OP_TYPE == OpType::Put) {
+        if constexpr (OP == OpType::Put) {
             asc_vf_call<transfer_vf_put>(dim3(THREAD_COUNT), target_addr, ub_buf, count, next_pe);
         } else {
             asc_vf_call<transfer_vf_get>(dim3(THREAD_COUNT), ub_buf, target_addr, count, next_pe);
@@ -287,7 +290,7 @@ __global__ __vector__ void run_demo_mem_ub2gm(__gm__ void* sym_addr, InvokeParam
     SHMEMI_PROF_END(frame_id);
     AscendC::PipeBarrier<PIPE_ALL>();
 
-    if constexpr (OP_TYPE == OpType::Get) {
+    if constexpr (OP == OpType::Get) {
         __gm__ T* seg_base = reinterpret_cast<__gm__ T*>(
             reinterpret_cast<__gm__ int8_t*>(sym_addr) + my_block_id * invp.logical_segment_bytes);
         copy_ub2gm(seg_base, ub_buf, invp.per_invocation_bytes);
@@ -310,7 +313,8 @@ int32_t execute_test_loop(const Config& config, aclrtStream stream)
 
     void* host_mem = nullptr;
     void* device_mem = nullptr;
-    PerfDataPrepValidator pdpv(mype, OP_TYPE);
+    OpType op_type = config.req_op_type.value_or(OpType::Get);
+    PerfDataPrepValidator pdpv(mype, op_type);
 
     ACL_CHECK_WITH_RET(aclrtMallocHost(&host_mem, max_bytes), ERROR_LOG("Failed to allocate host memory"), return -1);
     device_mem = aclshmem_malloc(max_bytes);
@@ -354,13 +358,17 @@ int32_t execute_test_loop(const Config& config, aclrtStream stream)
             ACL_CHECK(aclrtMemcpy(device_mem, used_bytes, host_mem, used_bytes, ACL_MEMCPY_HOST_TO_DEVICE));
 
             aclshmem_barrier_all();
-            run_demo_mem_ub2gm<<<block, 0, stream>>>(device_mem, invp, frame_id);
+            if (op_type == OpType::Put) {
+                run_demo_mem_ub2gm<OpType::Put><<<block, 0, stream>>>(device_mem, invp, frame_id);
+            } else {
+                run_demo_mem_ub2gm<OpType::Get><<<block, 0, stream>>>(device_mem, invp, frame_id);
+            }
             ACL_CHECK(aclrtSynchronizeStream(stream));
             aclshmem_barrier_all();
 
             ACL_CHECK(aclrtMemcpy(host_mem, used_bytes, device_mem, used_bytes, ACL_MEMCPY_DEVICE_TO_HOST));
 
-            size_t check_bytes = (OP_TYPE == OpType::Put) ? invp.logical_segment_bytes : invp.per_invocation_bytes;
+            size_t check_bytes = (op_type == OpType::Put) ? invp.logical_segment_bytes : invp.per_invocation_bytes;
             DataMismatch mm = pdpv.check_data(host_mem, check_bytes, block, invp.logical_segment_bytes);
             ever_failed = ever_failed || (!mm.ok);
             if (!mm.ok) {
@@ -372,7 +380,7 @@ int32_t execute_test_loop(const Config& config, aclrtStream stream)
                     "          first bad byte: block=%d, offset_in_block=%zu, absolute_offset=%zu, "
                     "expected=%d, actual=%d\n"
                     "          total mismatched bytes: %llu of %zu checked",
-                    mype, (mype == ACTIVE_PE ? "ACTIVE" : "PASSIVE"), to_string(OP_TYPE).c_str(), DATA_SIZE,
+                    mype, (mype == ACTIVE_PE ? "ACTIVE" : "PASSIVE"), to_string(op_type).c_str(), DATA_SIZE,
                     THREAD_COUNT, block, exp, invp.per_invocation_bytes, invp.logical_segment_bytes, used_bytes,
                     check_bytes, UB_BUFFER_SIZE, config.loop_count, WARMUP_LOOPS, frame_id, mm.block,
                     mm.offset_in_block, mm.absolute_offset, static_cast<int>(mm.expected), static_cast<int>(mm.actual),
@@ -417,7 +425,7 @@ int32_t execute_test_loop(const Config& config, aclrtStream stream)
         }
 
         std::string csv_filename = "output/ub2gm_" + std::to_string(DATA_SIZE) + "_" + block_segment + "_" +
-                                   to_string(OP_TYPE) + "_simt_" + std::to_string(config.bytes_in_exp_min) + "-" +
+                                   to_string(op_type) + "_simt_" + std::to_string(config.bytes_in_exp_min) + "-" +
                                    std::to_string(config.bytes_in_exp_max) + "_l" + std::to_string(config.loop_count) +
                                    "_t" + std::to_string(THREAD_COUNT) + "_ub" + std::to_string(UB_BUFFER_SIZE) +
                                    ".csv";
@@ -474,14 +482,6 @@ int32_t main(int argc, char* argv[])
         return 1;
     }
     Config config = *result;
-
-    // Verify compile-time test type matches request
-    if (config.req_op_type && *config.req_op_type != OP_TYPE) {
-        std::cerr << "[ERROR] --test-type " << to_string(*config.req_op_type)
-                  << " does not match compile-time OP_TYPE (" << to_string(OP_TYPE)
-                  << "). Rebuild with OP_TYPE = OpType::" << to_string(*config.req_op_type) << "\n";
-        return 1;
-    }
 
     int32_t ret = run_config_test(config);
     return ret;

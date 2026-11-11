@@ -1,7 +1,7 @@
 # 样例介绍
 
 本样例展示在 SIMD 与 SIMT 混合编译模式下，如何对 SIMT 远程内存访问（RMA）的 **ub2gm 接口**进行性能测试（Performance Test）。
-与 `simt_rma_perftest`（gm2gm）不同，本样例以 UB（Unified Buffer）作为通信的一端，测试用于评估单机两卡间 Device-to-Device 的 `ub2gm` 数据传输能力，覆盖**单向**的 `put` 与 `get` 操作，并输出带宽与时延统计。
+与 `simt_rma_perftest`（gm2gm）不同，本样例以 UB（Unified Buffer）作为通信的一端，测试用于评估单机两卡间 Device-to-Device 的 `ub2gm` 数据传输能力，覆盖**单向**的 `put` 与 `get` 操作（通过 `-t` 参数选择），并输出带宽与时延统计。
 
 | 操作 | 被测数据路径 |
 | --- | --- |
@@ -36,11 +36,10 @@
 
 ## 源文件宏定义配置
 
-部分测试维度通过 `main.cpp` 开头的常量定义控制。在编译前可直接修改其中的可配置项来改变被测接口的行为：
+被测操作（`put` / `get`）通过 `-t/--test-type` 参数在运行时选择（见下文）。其余测试维度通过 `main.cpp` 开头的常量定义控制，在编译前可直接修改其中的可配置项来改变被测接口的行为：
 
 | 常量定义 | 含义与作用 | 可选值 / 默认值 |
 | --- | --- | --- |
-| `OP_TYPE` | 性能测试执行的具体操作。 | `OpType::Get`（默认）、`OpType::Put` |
 | `T` | 传输负载的元素类型，`DATA_SIZE` 由其推导。 | 固定为 `int32_t` |
 | `DATA_SIZE` | 所调用 RMA 底层接口的数据位宽（单位：bit），由 `sizeof(T) * 8` 得出，不单独配置。 | 固定为 `32` |
 | `THREAD_COUNT` | SIMT 模式下单 Core 启动的线程数，决定向量指令流的并发规模。 | 默认 `1024` |
@@ -94,7 +93,7 @@
 | `-gnpus <int>` | 本机启动进程数 / NPU 数量。本测试固定为 2，传入其他值会报错。 | 2 |
 | `-fnpu <int>` | 首个 NPU ID，实际 device id 为 `pe_id % gnpus + fnpu`。 | 0 |
 | `-fpe <int>` | 保留为与 shmem_perftest 参数兼容，本样例不使用：PE rank 固定为 0 和 1，device id 由 `pe_id % gnpus + fnpu` 得出，均不受该参数影响。 | 0 |
-| `-t`/`--test-type <put\|get>` | 可选校验项；若指定，必须与源码编译期 `OP_TYPE` 一致，否则二进制报错。 | - |
+| `-t`/`--test-type <put\|get>` | 选择被测操作类型：`put` 或 `get`。 | `get` |
 | `-b`/`--block-size <int>` | 每个 PE 使用的 Core（Block）数量。 | 32 |
 | `--block-range <min> <max>` | Core（Block）数量扫描范围，每个核数各产出统计结果。 | 32 32 |
 | `--block-list <b1,b2,...>` | 以逗号分隔显式指定要测试的核数（如 `1,8,16`）。同时指定时优先于 `-b`/`--block-size` 与 `--block-range`。 | - |
@@ -111,6 +110,12 @@
 
 ```bash
 bash run.sh -b 4 --exponent-range 8 12
+```
+
+测试 `put` 操作（默认测 `get`）：
+
+```bash
+bash run.sh -t put -b 4 --exponent-range 8 12
 ```
 
 在多个核数上遍历：

@@ -1,7 +1,7 @@
 ## Overview
 
 This example demonstrates, in SIMD and SIMT hybrid compilation mode, how to run a performance test on the **ub2gm APIs** of SIMT remote memory access (RMA).
-Unlike `simt_rma_perftest` (gm2gm), this example uses UB (Unified Buffer) as one end of the communication. The test evaluates the single-node, two-card Device-to-Device `ub2gm` data transfer capability, covering the **one-directional** `put` and `get` operations, and reports bandwidth and latency statistics.
+Unlike `simt_rma_perftest` (gm2gm), this example uses UB (Unified Buffer) as one end of the communication. The test evaluates the single-node, two-card Device-to-Device `ub2gm` data transfer capability, covering the **one-directional** `put` and `get` operations (selected via the `-t` option), and reports bandwidth and latency statistics.
 
 | Operation | Data Path Under Test |
 | --- | --- |
@@ -36,11 +36,10 @@ To keep the statistics focused as much as possible on the overhead of the ub2gm 
 
 ## Source File Macro Configuration
 
-Some test dimensions are controlled by constants defined at the top of `main.cpp`. You can modify the configurable ones before compiling to change the behavior of the API under test:
+The operation under test (`put` / `get`) is selected at run time via `-t/--test-type` (see below); the remaining test dimensions are controlled by constants defined at the top of `main.cpp`, which you can modify before compiling to change the behavior of the API under test:
 
 | Constant | Meaning and Effect | Allowed Values / Default |
 | --- | --- | --- |
-| `OP_TYPE` | The specific operation the performance test runs. | `OpType::Get` (default), `OpType::Put` |
 | `T` | Element type of the transferred payload. `DATA_SIZE` is derived from it. | Fixed at `int32_t` |
 | `DATA_SIZE` | Data width, in bits, of the underlying RMA API being called. Derived from `sizeof(T) * 8`; not configured separately. | Fixed at `32` |
 | `THREAD_COUNT` | Number of threads launched per Core in SIMT mode, which determines the concurrency scale of the vector instruction stream. | Default `1024` |
@@ -97,7 +96,7 @@ Some test dimensions are controlled by constants defined at the top of `main.cpp
 | `-gnpus <int>` | Number of processes / NPUs started on this node. Fixed at 2 for this test; any other value reports an error. | 2 |
 | `-fnpu <int>` | First NPU ID. The actual device id is `pe_id % gnpus + fnpu`. | 0 |
 | `-fpe <int>` | Kept for compatibility with the shmem_perftest options and unused by this example: the PE ranks are fixed at 0 and 1, and the device id is derived from `pe_id % gnpus + fnpu`, so neither is affected by this option. | 0 |
-| `-t`/`--test-type <put\|get>` | Optional consistency check. If given, it must match the compile-time `OP_TYPE`, otherwise the binary reports an error. | - |
+| `-t`/`--test-type <put\|get>` | Selects the operation under test: `put` or `get`. | `get` |
 | `-b`/`--block-size <int>` | Number of Cores (blocks) used per PE. | 32 |
 | `--block-range <min> <max>` | Sweep range for the number of Cores (blocks). Each core count produces its own statistics. | 32 32 |
 | `--block-list <b1,b2,...>` | Explicitly specifies the core counts to test, separated by commas (for example, `1,8,16`). When given, it takes precedence over `-b`/`--block-size` and `--block-range`. | - |
@@ -114,6 +113,12 @@ For example, to test the performance of `4` Cores transferring $2^8$ to $2^{12}$
 
 ```bash
 bash run.sh -b 4 --exponent-range 8 12
+```
+
+To test the `put` operation (the default is `get`):
+
+```bash
+bash run.sh -t put -b 4 --exponent-range 8 12
 ```
 
 To sweep over several core counts:
