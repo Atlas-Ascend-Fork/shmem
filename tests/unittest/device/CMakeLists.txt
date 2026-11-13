@@ -18,10 +18,14 @@ if(NOT ACLSHMEM_SIMT_UDMA_SUPPORT OR ACLSHMEM_RELAY_SUPPORT)
     list(FILTER TEST_KERNEL_FILES EXCLUDE REGEX "simt_udma")
 endif()
 
+if(NOT SOC_TYPE STREQUAL "Ascend950")
+    list(FILTER TEST_KERNEL_FILES EXCLUDE REGEX "multi_instance/multi_instance_routing_kernel[.]cpp$")
+endif()
+
 set(CMAKE_C_COMPILER bisheng)
 set(CMAKE_CXX_COMPILER bisheng)
 
-add_library(aclshmem_unittest_device SHARED ${TEST_KERNEL_FILES} $<TARGET_OBJECTS:aclshmem_device>)
+add_library(aclshmem_unittest_device SHARED ${TEST_KERNEL_FILES} $<TARGET_OBJECTS:aclshmem_device> $<TARGET_OBJECTS:aclshmem_instance_quiet>)
 
 if(ACLSHMEM_SIMT_SUPPORT)
     target_compile_definitions(aclshmem_unittest_device PRIVATE USE_SIMT)

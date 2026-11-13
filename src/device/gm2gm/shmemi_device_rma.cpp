@@ -15,6 +15,77 @@
 #include "gm2gm/engine/shmem_device_rdma.hpp"
 #include "device/gm2gm/shmem_device_rma.h"
 #include "shmemi_device_mo.h"
+#if defined(MULTI_INSTANCE)
+#if ACLSHMEM_UDMA_SUPPORTED
+ACLSHMEM_DEVICE void aclshmemi_host_quiet_udma_queues()
+{
+    auto info = aclshmemi_udma_qp_info_fetch();
+    if (info == nullptr) {
+        return;
+    }
+    auto table = aclshmemi_udma_active_table(info);
+    const uint32_t ranks = static_cast<uint32_t>(aclshmemi_get_total_pe());
+    const uint32_t slots = ACLSHMEM_RELAY_SUPPORTED ? ranks * ranks : ranks;
+    auto wqs = reinterpret_cast<__gm__ aclshmemi_udma_wq_ctx_t*>(table->sq_ptr);
+    // One AIV owns completion for every UDMA queue. Shared-jetty aliases have
+    // the same state; once drained, cq_tail == cqe_cnt skips subsequent aliases.
+    // No producer may concurrently submit to these queues from another stream.
+    for (uint32_t slot = 0; slot < slots; ++slot) {
+        for (uint32_t qp = 0; qp < info->qp_num; ++qp) {
+            auto state = reinterpret_cast<__gm__ aclshmemi_udma_queue_state_t*>(
+                wqs[static_cast<uint64_t>(slot) * info->qp_num + qp].state_addr);
+            if (state == nullptr) {
+                continue; // Self and unconnected table slots have no queue.
+            }
+            dcci_cachelines(reinterpret_cast<__gm__ uint8_t*>(state), sizeof(*state));
+            const uint32_t target = state->cqe_cnt;
+            if (state->cq_tail != target) {
+                // Error paths inside poll_cq trap before returning non-zero, same as
+                // aclshmemi_udma_poll_cq_when_sq_overflow; the kernel does not resume.
+                (void)aclshmemi_udma_poll_cq(slot, qp, target);
+            }
+        }
+    }
+}
+#endif
+
+ACLSHMEM_DEVICE void aclshmemi_quiet_all_qps()
+{
+    const uint8_t mask = aclshmemi_filter_unsupported_quiet_transports(aclshmemi_get_quiet_transport_mask());
+    AscendC::PipeBarrier<PIPE_ALL>();
+    // Preserve existing per-core RoCE/SDMA completion without polling UDMA
+    // again on each block or limiting explicit UDMA traffic to QP 0.
+    if (mask & static_cast<uint8_t>(~ACLSHMEM_TRANSPORT_UDMA)) {
+        aclshmemi_quiet_all_reachable_transports(aclshmemi_get_state(), mask, false);
+    }
+#if ACLSHMEM_UDMA_SUPPORTED
+    if (AscendC::GetBlockIdx() == 0) {
+        aclshmemi_host_quiet_udma_queues();
+    }
+#endif
+    dcci_entire_cache();
+}
+
+ACLSHMEM_GLOBAL_VECTOR void k_aclshmemi_instance_quiet(uint64_t instance_id)
+{
+    aclshmemx_instance_ctx_set(instance_id);
+    aclshmemi_quiet_all_qps();
+}
+
+int32_t aclshmemi_post_instance_quiet(uint64_t instance_id, aclrtStream stream, size_t block_size)
+{
+    if (instance_id == 0) {
+        // Fall back to k_aclshmemi_quiet (shmemi_device_rma.cpp), which is built without
+        // MULTI_INSTANCE and always reads entity 0.
+        return aclshmemi_prepare_and_post_rma(
+            "aclshmemx_quiet_on_stream", ACLSHMEMI_OP_QUIET, false, nullptr, nullptr, 0, 0, 0, nullptr, 0, 0, 1, 1,
+            stream, block_size);
+    }
+    k_aclshmemi_instance_quiet<<<block_size, 0, stream>>>(instance_id);
+    return 0;
+}
+
+#else
 
 #define ACLSHMEM_TYPE_FUNC(FUNC) \
     FUNC(float, float);          \
@@ -215,3 +286,5 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEMI_TYPENAME_G)
 
 ACLSHMEM_TYPE_FUNC(ACLSHMEMI_TYPENAME_PREPARE_RMA_P)
 #undef ACLSHMEMI_TYPENAME_PREPARE_RMA_P
+
+#endif // MULTI_INSTANCE

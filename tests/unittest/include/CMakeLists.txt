@@ -12,7 +12,7 @@ file(GLOB_RECURSE TEST_INCLUDE_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_D
 set(CMAKE_C_COMPILER bisheng)
 set(CMAKE_CXX_COMPILER bisheng)
 
-add_library(aclshmem_unittest_include OBJECT ${TEST_INCLUDE_FILES} $<TARGET_OBJECTS:aclshmem_device>)
+add_library(aclshmem_unittest_include OBJECT ${TEST_INCLUDE_FILES} $<TARGET_OBJECTS:aclshmem_device> $<TARGET_OBJECTS:aclshmem_instance_quiet>)
 target_link_options(aclshmem_unittest_include PRIVATE --cce-fatobj-link)
 target_compile_options(aclshmem_unittest_include PRIVATE ${CMAKE_CCE_COMPILE_OPTIONS} ${CCE_AICORE_ARCH})
 target_include_directories(aclshmem_unittest_include PRIVATE

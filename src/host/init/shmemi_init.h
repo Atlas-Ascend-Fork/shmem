@@ -33,5 +33,7 @@ bool aclshmemi_user_buffer_heap_engine_supported(data_op_engine_type_t engine);
 
 int32_t update_device_state(void);
 int32_t aclshmemx_instance_ctx_set_impl(uint64_t instance_id);
+// Resolve a null stream and enqueue quiet while the selected Host context is locked.
+int32_t aclshmemi_enqueue_current_instance_quiet(aclrtStream& stream);
 
 #endif // ACLSHMEMI_INIT_H

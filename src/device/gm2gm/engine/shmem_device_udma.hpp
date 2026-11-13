@@ -109,7 +109,7 @@ ACLSHMEM_DEVICE void aclshmemi_dump_sq_wqe(
 ACLSHMEM_DEVICE __gm__ aclshmemi_aiv_udma_info_t* aclshmemi_udma_qp_info_fetch()
 {
     __gm__ aclshmemi_aiv_udma_info_t* udma_info =
-        (__gm__ aclshmemi_aiv_udma_info_t*)(aclshmemi_get_udma_info_address(0));
+        (__gm__ aclshmemi_aiv_udma_info_t*)(aclshmemi_get_udma_info_address(aclshmemi_get_current_entity_id()));
     return udma_info;
 }
 

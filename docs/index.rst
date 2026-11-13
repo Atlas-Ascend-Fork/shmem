@@ -45,6 +45,7 @@ Welcome to Shmem's Documentation!
     :name: Multi_Instance
 
     principles/multi_instance.md
+    principles/multi_instance_en.md
 
 .. toctree::
     :maxdepth: 2

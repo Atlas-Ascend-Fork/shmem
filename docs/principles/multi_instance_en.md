@@ -1,5 +1,7 @@
 # Multi-instance Support
 
+[简体中文](multi_instance.md)
+
 ## Overview
 
 The SHMEM multi-instance capability allows multiple independent SHMEM instances to be created within a single process. Each instance has its own communicator, memory space, and synchronization resources. The multi-instance capability is applicable to the following scenarios:
@@ -8,6 +10,8 @@ The SHMEM multi-instance capability allows multiple independent SHMEM instances 
 - **Resource isolation**: SHMEM resources for different tasks/modules are isolated to avoid mutual interference.
 - **Elastic scaling**: Creation and release of different instances do not affect each other.
 - **Dynamic instance management**: Instances are created or released by `instance_id` at runtime.
+
+Supported communication links are MTE and UDMA: UDMA operations are routed per instance, and the Host can complete UDMA operations submitted on a selected instance with `aclshmemx_quiet_on_stream`.
 
 ## Core Concepts
 
@@ -22,7 +26,7 @@ An SHMEM instance contains a complete set of initialization states, typically in
 The current repository uses `instance_id` (`uint64_t`) to identify instances. The instance lifecycle is managed by the initialization attributes and `finalize` API.
 
 ### Context Switching
-SHMEM uses the **global variable swap** to switch instances. During the switching, the global state of the current instance is written back first, and then the global state of the target instance is loaded.
+The Host uses **global variable swap** to save the current instance state and load the target instance state. Host and Device both use `aclshmemx_instance_ctx_set`, but select contexts in their respective execution domains. Device UDMA submission and matching completion must use the same instance; complete outstanding operations before switching. After Host quiet captures its instance at enqueue, Host selection may change. Preserve the old instance, streams and buffers until completion, establish cross-stream dependencies, and serialize Host selection and calls across threads.
 
 ## Architecture Design
 
@@ -50,7 +54,7 @@ SHMEM uses the **global variable swap** to switch instances. During the switchin
 |---|---|---|
 | Instance isolation| Independent `aclshmem_context` snapshot| Each instance stores independent `state`, `host_state`, `boot_handle` and `memory_manager`.|
 | Context management| Global variable swap| Switching through `aclshmemx_instance_ctx_set`|
-| Instance identifier| `instance_id` (`uint64_t`) | Located in `aclshmemx_init_attr_t` and used for `aclshmem_finalize(instance_id)`|
+| Instance identifier| `instance_id` (`uint64_t`) | Located in `aclshmemx_init_attr_t` and used for `aclshmemx_finalize(instance_id)`|
 | Device-side route| `instance_id << 1` | The kernel accesses the `state` of the corresponding instance through the hard-coded address.|
 
 ## Quick Start (Current Repository APIs)
@@ -59,12 +63,13 @@ SHMEM uses the **global variable swap** to switch instances. During the switchin
 
 ```cpp
 #include "shmem.h"
+#include <cstdio>
 
-aclshmemx_init_attr_t attr;
+aclshmemx_init_attr_t attr{};
 attr.my_pe = pe_id;
 attr.n_pes = pe_size;
 attr.local_mem_size = 1024UL * 1024UL * 1024UL;
-attr.ip_port = "tcp://x.x.x.x:0";       // Set the port to 0. A port will be allocated later.
+std::snprintf(attr.ip_port, sizeof(attr.ip_port), "%s", "tcp://x.x.x.x:0");       // Set the port to 0. A port will be allocated later.
 attr.comm_args = nullptr;               // default mode
 attr.instance_id = 2;
 
@@ -92,9 +97,34 @@ uint64_t cur_id = (ctx == nullptr) ? 0 : ctx->id;
 ### 4. Releasing the Instance
 
 ```cpp
-aclshmem_finalize(2);
+aclshmemx_finalize(2);
 ```
-You can also refer to the `examples/multi_instance` directory.
+You can also refer to the MTE-based example in [examples/multi_instance](../../examples/multi_instance/README.md) (using `aclshmemx_mte_put_nbi` / `aclshmemx_mte_get_nbi`).
+
+### 5. UDMA Multi-instance
+
+Set the UDMA engine when the Host creates an instance:
+
+```cpp
+attr.option_attr.data_op_engine_type = ACLSHMEM_DATA_OP_UDMA;
+aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr);
+```
+
+Build the Device kernel with `MULTI_INSTANCE`; every participating AIV sets the instance at entry and issues put and quiet within the same instance:
+
+```cpp
+aclshmemx_instance_ctx_set(instance_id);
+aclshmemx_udma_put_nbi<uint8_t, PIPE_S>(dst, src, ub, bytes, peer, 0);
+aclshmemx_udma_quiet(peer);
+```
+
+Alternatively, after the producer kernel, the Host can select the instance and call `aclshmemx_quiet_on_stream` to complete the UDMA operations submitted on that instance:
+
+```cpp
+aclshmemx_instance_ctx_set(2);
+aclshmemx_quiet_on_stream(stream);   // NULL selects the instance's default stream
+aclrtSynchronizeStream(stream);
+```
 
 ## Specifications and Restrictions (Code Implementation)
 
@@ -109,17 +139,22 @@ You can also refer to the `examples/multi_instance` directory.
 | Default multi-instance port range| Depending on `SHMEM_INSTANCE_PORT_RANGE=start:end`|
 | Default port allocation rule| The input port must be `0`. The actual port is = `start_port + instance_id`.|
 | Default available instance ID range| `instance_id <= end_port - start_port` (including the boundary)|
+| Supported communication links| MTE and UDMA|
+| UDMA QP configuration| Set the process-wide QP count with `aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, qp_num)` before the first initialization. It cannot change while an instance is active. Queue resources, metadata and completion state are isolated per instance|
+| Host UDMA quiet| `aclshmemx_quiet_on_stream(stream)` captures the current instance at enqueue; nonzero instances complete all QPs including shared Jetty queues; instance 0 retains QP0 completion and explicit nonzero QPs require `aclshmemx_udma_qp_quiet`|
+| UDMA instance ID range| HBM-only initialization supports 0–255; configurations creating a Host DRAM companion with `USE_ACLRT_MEM_FABRIC_HANDLE` support at most 254. Port ranges and resources impose additional limits. Initialization above the HBM limit returns `ACLSHMEM_INVALID_VALUE`. Quiet requires a successfully initialized live instance and rejects IDs above 255 before enqueue|
 
 ## Environment Variables and Running Requirements
 
 ### Kernel-side Usage Requirements
-- During the build, add the `MULTI_INSTANCE` macro, similar to `add_compile_definitions(MULTI_INSTANCE)`.
-- When multiple instances are used, `aclshmemx_instance_ctx_set(id)` must be placed at the beginning of the operator to specify the current instance.
-- Inter-instance switchover can be performed during operator execution.
+- Device APIs (including UDMA): build with `MULTI_INSTANCE` and select a successfully initialized live instance with `aclshmemx_instance_ctx_set(id)` in every participating AIV before communication. All builds check the ID range before calculating the context address and trap on out-of-range IDs; diagnostic printing is Debug-only. Callers must still ensure that an in-range instance is initialized and alive. Context consistency checks remain Debug diagnostics. Complete outstanding operations before switching instances; UDMA submission and matching completion must use the same instance.
+- A UDMA producer kernel must finish local staging and submit pending batches through public submission APIs before returning. The library publishes internal queue state. Order the producer and quiet on the same stream or with an explicit cross-stream event dependency, and do not concurrently submit to or quiet the same queues from another stream.
+- Explicit nonzero QPs use `aclshmemx_udma_qp_quiet(peer, qp)` for completion.
+- Keep the instance, streams and memory alive until communication completes.
 
 ### Default Multi-instance Mode
 - `SHMEM_INSTANCE_PORT_RANGE` must be set in the format of `start:end`.
-- The port in `ip_port` in the initialization attribute must be `0`, for example, `(attr.ip_port = "tcp://x.x.x.x:0")`.
+- The port in `ip_port` in the initialization attribute must be `0`, for example, `tcp://x.x.x.x:0`.
 
 ### Unique ID Mode
 - Follow the existing `SHMEM_UID_SESSION_ID` and `SHMEM_UID_SOCK_IFNAME` rules.
@@ -127,8 +162,11 @@ You can also refer to the `examples/multi_instance` directory.
 ## Precautions
 
 - If instances with the same `instance_id` are being created, a WARN log is generated and returned immediately (the instance will not be created repeatedly).
-- `aclshmem_finalize(instance_id)` switches to the target instance and then releases the instance to avoid incorrect release.
+- `aclshmemx_finalize(instance_id)` switches to the target instance and then releases the instance to avoid incorrect release.
 - The instance context-related API path is protected by a mutex lock.
+- Host instance selection is process-wide: when multiple Host threads are used, serialize the whole `aclshmemx_instance_ctx_set` plus quiet call sequence with one external lock, and all threads that change instances must follow this convention.
+- A Host UDMA quiet keeps the instance captured at enqueue, so later context switches do not redirect it. Keep the instance, stream and communication buffers alive until quiet completes; then synchronize the stream and coordinate receiving PEs before consuming data or releasing/finalizing the instance.
+- `aclshmemx_quiet_on_stream(NULL)` uses the instance's default stream; `aclshmem_quiet()` also waits for the captured default stream.
 
 ## Comparison with the Single-Instance Mode
 
@@ -136,17 +174,19 @@ You can also refer to the `examples/multi_instance` directory.
 |---|---|---|
 | Initialization identifier| `instance_id=0`| `instance_id>0` |
 | Resource isolation| Global sharing| Isolation by instance|
-| Context switch| Not required| `aclshmemx_instance_ctx_set` required|
-| Lifecycle management| `aclshmem_finalize()` | `aclshmem_finalize(instance_id)` |
+| Context switching| Default instance 0| Host/Device: `aclshmemx_instance_ctx_set`|
+| Lifecycle management| `aclshmem_finalize()` | `aclshmemx_finalize(instance_id)` |
+| Communication links| MTE, UDMA and RDMA/SDMA as supported by the platform configuration| MTE and UDMA with per-instance routing described here|
 | Advanced team operations| Supported| Supported only when `instance_id=0`|
 
 ## Related Code and Documents
 
-- Host initialization and multi-instance implementation: `src/host/init/shmem_init.cpp`
-- Device multi-instance state routing: `src/device/shmemi_device_common.hpp`
-- Team multi-instance restriction logic: `src/host/team/shmem_team.cpp`
-- Example: `examples/multi_instance`
+- Host initialization and multi-instance implementation: [src/host/init/shmem_init.cpp](../../src/host/init/shmem_init.cpp)
+- Device multi-instance state routing: [src/device/shmemi_device_common.hpp](../../src/device/shmemi_device_common.hpp)
+- Team multi-instance restriction logic: [src/host/team/shmem_team.cpp](../../src/host/team/shmem_team.cpp)
+- MTE example: [examples/multi_instance](../../examples/multi_instance/README.md)
+- UDMA multi-instance tests: [multi_instance_routing_host_test.cpp](../../tests/unittest/host/multi_instance/multi_instance_routing_host_test.cpp)
 
 ---
 
-Last updated: 2026-03-25
+Last updated: 2026-11-12
