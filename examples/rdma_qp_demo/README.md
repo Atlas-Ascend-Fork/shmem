@@ -100,6 +100,27 @@ bash examples/rdma_qp_demo/run.sh -pes 4 -fpe 2 -gnpus 2 -fnpu 0 -qp 4 \
 
 数据校验失败时，程序打印首个错误位置、实际值和期望值。`run.sh` 会等待当前机器上的所有 PE 进程，并在任意进程失败时返回非 0。
 
+### msprof 采集
+
+每个 PE 的采集结果分别保存到 `output/<时间戳>/pe_<PE号>`。`-n N` 指定每种所选操作的 kernel 启动次数，默认 1；初始化和缓冲区准备只执行一次，每种操作的最后一次结果用于校验。该参数也支持直接运行模式。
+
+```bash
+bash examples/rdma_qp_demo/run.sh -qp 4 -op put -tool msprof -n 100
+```
+
+`-tool none` 直接运行。跨机采集时，各机器必须使用相同的 `-n` 和 `-op`。msprof 通过临时 Shell 包装脚本启动程序，保留程序路径及参数边界。
+
+使用 Python 3 提取本机所有 PE 的算子调用次数、总时间和平均时间。脚本只依赖 Python 标准库，无需安装第三方包；时间单位沿用 msprof CSV 中的单位。
+
+```bash
+python3 examples/utils/extract_totaltime.py \
+    examples/rdma_qp_demo/output/<时间戳>
+```
+
+结果默认保存到采集目录下的 `totaltime.csv`，脚本结束时会打印生成文件的完整路径；可用 `-o FILE` 指定其他路径。输出列为 `PE`、`Op Name`、`N`（调用次数）、`Total Time` 和 `Avg Time`。
+
+每张卡的行还包含单次 kernel 的 `Min Time` 和 `Max Time`。每个算子增加一行 `PE=ALL` 汇总：`Mean PE Avg Time` 为各卡平均耗时的平均值，`Max PE Avg Time` 为各卡平均耗时的最大值，`Slowest PE` 为对应的慢卡编号。
+
 ### 运行参数
 
 | 参数 | 默认值 | 说明 |
@@ -111,3 +132,5 @@ bash examples/rdma_qp_demo/run.sh -pes 4 -fpe 2 -gnpus 2 -fnpu 0 -qp 4 \
 | `-qp` | `2` | 每个对端 PE 的 QP 数，范围 1~56 |
 | `-op` | `all` | `put`、`get`、`aggregate_put`、`aggregate_get` 或 `all` |
 | `-ipport` | 动态本机端口 | SHMEM 初始化地址 |
+| `-tool` | `none` | `msprof` 启用采集，`none` 直接运行 |
+| `-n` | `1` | 每种所选操作的 kernel 启动次数，必须为正整数 |

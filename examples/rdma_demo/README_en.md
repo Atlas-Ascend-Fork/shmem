@@ -92,11 +92,56 @@ bash scripts/build.sh -soc_type Ascend950 -enable_rdma -rdma_backend HNS_1825 -e
 
 - Run the example using the `run.sh` script.
 
-    `run.sh` supports the `-pes` parameter to specify the number of PEs to start. The default value is 2.
+    `run.sh` accepts PE and device placement options. The defaults are `-pes 2` and `-gnpus 2`. If `-gnpus` is omitted, it defaults to the value of `-pes`.
+
+    Run directly on two local devices (msprof is disabled by default):
 
     ```bash
-    bash run.sh -pes 4
+    bash run.sh
     ```
+
+    Cross-server four-device example: servers A and B each use local NPU 0 and 1. Assume server A's IP is `192.168.1.10`. Run on server A:
+
+    ```bash
+    bash run.sh -pes 4 -fpe 0 -gnpus 2 -fnpu 0 -ipport tcp://192.168.1.10:8899
+    ```
+
+    Run on server B:
+
+    ```bash
+    bash run.sh -pes 4 -fpe 2 -gnpus 2 -fnpu 0 -ipport tcp://192.168.1.10:8899
+    ```
+
+#### msprof Profiling
+
+Pass `-tool msprof` to profile each PE. The default is `-tool none`, which runs without profiling. Results are written by run timestamp and PE to `examples/rdma_demo/output/<timestamp>/pe_<PE_ID>`. `-n N` sets the number of AllGather kernel launches and defaults to 1:
+
+```bash
+bash run.sh -tool msprof -n 100
+```
+
+For multi-server profiling, all servers must use the same `-pes`, `-ipport`, and `-n`; `-ipport` must point to the server running PE 0.
+
+Use Python 3 to extract the operation count, total time, and average time for all PEs in a capture:
+
+```bash
+python3 ../utils/extract_totaltime.py \
+    output/<timestamp>
+```
+
+The result is saved as `totaltime.csv` in the capture directory, and the script prints the full output path when it finishes. Use `-o FILE` to choose another path. The output columns are `PE`, `Op Name`, `N` (call count), `Total Time`, and `Avg Time`; time units follow the msprof CSV. The script uses only the Python standard library, so no third-party packages need to be installed.
+
+Per-PE rows also include `Min Time` and `Max Time` for individual kernel launches. An `ALL` row per operation reports `Mean PE Avg Time` (mean of PE averages), `Max PE Avg Time` (maximum PE average), and `Slowest PE`.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `-pes` | `2` | Global PE count, at least 2 |
+| `-fpe` | `0` | First PE started on this server |
+| `-gnpus` | Same as `-pes` | Number of local PE/NPU processes |
+| `-fnpu` | `0` | First logical NPU ID used on this server |
+| `-ipport` | Random local port | SHMEM bootstrap address; for multi-server runs, points to the server running PE 0 |
+| `-tool` | `none` | See the msprof Profiling section |
+| `-n` | `1` | Number of AllGather kernel launches; must be a positive integer |
 
     > Note: On the Ascend950 platform, the `IBV_EXTEND_DRIVERS` environment variable must be set. See [Environment Variable Description](#ibv_extend_drivers-environment-variable).
 
