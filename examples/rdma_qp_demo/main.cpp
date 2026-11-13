@@ -41,6 +41,7 @@ struct Options {
     int fpe{0};
     int fnpu{0};
     uint32_t qp{2};
+    uint32_t iterations{1};
     std::string ipport{"tcp://127.0.0.1:8899"};
     std::string op{"all"};
 };
@@ -58,7 +59,7 @@ struct RuntimeResources {
 void PrintUsage(const char* program)
 {
     std::cerr << "Usage: " << program
-              << " -pe ID -pes N -gnpus N -fpe ID -fnpu ID [-qp N]"
+              << " -pe ID -pes N -gnpus N -fpe ID -fnpu ID [-qp N] [-n N]"
                  " [-op put|get"
                  "|aggregate_put|aggregate_get"
                  "|all] [-ipport tcp://IP:PORT]\n";
@@ -115,6 +116,10 @@ bool ParseOptions(int argc, char** argv, Options& options)
             if (value > ACLSHMEM_MAX_QP_NUM)
                 return false;
             options.qp = static_cast<uint32_t>(value);
+        } else if (key == "-n") {
+            if (value == 0 || value > std::numeric_limits<uint32_t>::max())
+                return false;
+            options.iterations = static_cast<uint32_t>(value);
         } else {
             return false;
         }
@@ -233,9 +238,11 @@ bool RunCase(
     }
 
     const int next_pe = options.pe + 1 == options.pes ? 0 : options.pe + 1;
-    launch_rdma_qp_demo(
-        options.qp, resources.stream, ffts_addr, resources.symmetric, elements, next_pe,
-        static_cast<int32_t>(operation), SYNC_ID);
+    for (uint32_t iteration = 0; iteration < options.iterations; ++iteration) {
+        launch_rdma_qp_demo(
+            options.qp, resources.stream, ffts_addr, resources.symmetric, elements, next_pe,
+            static_cast<int32_t>(operation), SYNC_ID);
+    }
     status = aclrtSynchronizeStream(resources.stream);
     if (status != 0) {
         std::cerr << "aclrtSynchronizeStream failed, status=" << status << std::endl;

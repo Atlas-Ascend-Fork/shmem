@@ -92,11 +92,56 @@ bash scripts/build.sh -soc_type Ascend950 -enable_rdma -rdma_backend HNS_1825 -e
 
 - 使用`run.sh`脚本执行
 
-    `run.sh`支持通过`-pes`参数指定启动的PE数量，默认为2。
+    `run.sh`可指定 PE 和设备分布。默认 `-pes 2`、`-gnpus 2`；如果不指定 `-gnpus`，其值与 `-pes` 相同。
+
+    单机双卡直接运行（默认不启用 msprof）：
 
     ```bash
-    bash run.sh -pes 4
+    bash run.sh
     ```
+
+    跨机四卡示例：机器 A、B 各使用本机 NPU 0、1。假设机器 A 的 IP 为 `192.168.1.10`，在机器 A 执行：
+
+    ```bash
+    bash run.sh -pes 4 -fpe 0 -gnpus 2 -fnpu 0 -ipport tcp://192.168.1.10:8899
+    ```
+
+    在机器 B 执行：
+
+    ```bash
+    bash run.sh -pes 4 -fpe 2 -gnpus 2 -fnpu 0 -ipport tcp://192.168.1.10:8899
+    ```
+
+#### msprof 采集
+
+使用 `-tool msprof` 为每个 PE 采集性能；默认 `-tool none`，直接运行且不采集。结果按运行时间和 PE 分别写入 `examples/rdma_demo/output/<时间戳>/pe_<PE号>`。`-n N` 指定 AllGather kernel 执行次数，默认 1：
+
+```bash
+bash run.sh -tool msprof -n 100
+```
+
+跨机采集时，各机器需使用相同的 `-pes`、`-ipport` 和 `-n`，且 `-ipport` 指向 PE 0 所在机器。
+
+使用 Python 3 提取本次采集所有 PE 的算子调用次数、总时间和平均时间：
+
+```bash
+python3 ../utils/extract_totaltime.py \
+    output/<时间戳>
+```
+
+结果默认保存到采集目录下的 `totaltime.csv`，脚本结束时会打印生成文件的完整路径。可用 `-o FILE` 指定其他路径。输出列为 `PE`、`Op Name`、`N`（调用次数）、`Total Time` 和 `Avg Time`，时间单位沿用 msprof CSV。脚本只依赖 Python 标准库，无需安装第三方包。
+
+每张卡的行还包含单次 kernel 的 `Min Time` 和 `Max Time`。每个算子增加一行 `PE=ALL` 汇总：`Mean PE Avg Time` 为各卡平均耗时的平均值，`Max PE Avg Time` 为各卡平均耗时的最大值，`Slowest PE` 为对应的慢卡编号。
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `-pes` | `2` | 全局 PE 数量，至少为 2 |
+| `-fpe` | `0` | 当前机器启动的首个 PE |
+| `-gnpus` | 与 `-pes` 相同 | 当前机器启动的 PE/NPU 进程数 |
+| `-fnpu` | `0` | 当前机器使用的首个逻辑 NPU 编号 |
+| `-ipport` | 随机本机端口 | SHMEM 初始化地址；跨机运行时指向 PE 0 所在机器 |
+| `-tool` | `none` | 见 msprof 采集说明 |
+| `-n` | `1` | AllGather kernel 执行次数，必须为正整数 |
 
     > 注：Ascend950 平台需设置 `IBV_EXTEND_DRIVERS` 环境变量，参见[环境变量说明](#ibv_extend_drivers-环境变量)。
 
