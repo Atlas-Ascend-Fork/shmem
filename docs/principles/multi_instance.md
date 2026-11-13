@@ -71,9 +71,9 @@ Host 通过**全局变量 swap 机制**完成实例切换：先回写当前实�
 | PE 上限 | `ACLSHMEM_MAX_PES = 16384` |
 | 本地内存上限 | `ACLSHMEM_MAX_LOCAL_SIZE = 40GB` |
 | 实例共享内存上限 | 目前为128GB， 超过128GB时底层虚拟地址冲突 |
-| 非 0 实例 Team 行为 | 初始化时仅保留 world team 槽位；team split/translate/get_config 等返回 `ACLSHMEM_NOT_SUPPORTED` |
+| 非 0 实例 Team 行为 | 初始化时仅保留 WORLD 槽位；Host 侧 team split/translate/get_config 等管理接口返回 `ACLSHMEM_NOT_SUPPORTED`；SIMT 支持 WORLD 查询和 WORLD 内 PE 映射 |
 | default 多实例端口分配 | 依赖环境变量 `SHMEM_INSTANCE_PORT_RANGE=start:end` (start、end由用户自行指定，每个实例用到的实际端口为 `start_port + instance_id`) |
-| 通信链路支持 | MTE、UDMA |
+| 通信引擎支持 | SIMD 调用支持 MTE、UDMA；SIMT 调用仅支持 MTE |
 | UDMA QP 配置 | 首次初始化前通过 `aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, qp_num)` 设置进程级 QP 数；存在活动实例时不能修改。队列资源、metadata 和完成状态按实例隔离 |
 | Host UDMA quiet | `aclshmemx_quiet_on_stream(stream)`：入流时捕获当前实例；非零实例等待所有 QP（含 shared Jetty），实例 0 保持原有 QP0 完成范围，非零 QP 使用 `aclshmemx_udma_qp_quiet` |
 | UDMA 实例 ID 范围 | HBM-only 初始化为 0～255；`USE_ACLRT_MEM_FABRIC_HANDLE` 创建 Host DRAM 伴生实体时最多 254。初始化超出 HBM 上界返回 `ACLSHMEM_INVALID_VALUE`；quiet 只接受已成功初始化且存活的实例，超出 255 在入流前拒绝 |
@@ -82,10 +82,11 @@ Host 通过**全局变量 swap 机制**完成实例切换：先回写当前实�
 
 ### 算子侧使用要求
 
-- Device 接口（含 UDMA）：编译时添加 `MULTI_INSTANCE`，每个参与的 AIV 在操作前调用 `aclshmemx_instance_ctx_set(id)`，ID 必须对应已成功初始化且存活的实例。所有构建均在计算上下文地址前检查 ID 范围，越界立即 trap；错误日志仅在 Debug 输出。范围内的 ID 是否已初始化且存活仍由调用者保证，上下文一致性检查仅作 Debug 诊断。切换实例前完成旧实例的未完成操作，UDMA batch 的提交和完成等待须使用同一实例。
+- SIMD 调用方式（含 UDMA）：编译时添加 `MULTI_INSTANCE`，每个参与通信的核 在操作前调用 `aclshmemx_instance_ctx_set(id)`，ID 必须对应已成功初始化且存活的实例。所有构建均在计算上下文地址前检查 ID 范围，越界立即 trap；错误日志仅在 Debug 输出。范围内的 ID 是否已初始化且存活仍由调用者保证，上下文一致性检查仅作 Debug 诊断。切换实例前完成旧实例的未完成操作，UDMA batch 的提交和完成等待须使用同一实例。
 - UDMA 发送 kernel 返回前须完成本地 staging，并通过公开提交接口提交待发送的 batch；库负责内部队列状态发布。发送与 quiet 须在同一 stream 上有序执行，或显式建立跨 stream 的 event 依赖，不能在其他 stream 上同时提交或 quiet 同一队列。
 - 显式使用非零 QP 时，用 `aclshmemx_udma_qp_quiet(peer, qp)` 完成等待。
 - 通信完成前保持对应实例、stream 和内存有效。
+- SIMT 调用方式：多实例 kernel 定义 `MULTI_INSTANCE`，在每个 VF 内所有线程一致调用 `simt::aclshmemx_instance_ctx_set(id)`，再调用原有接口；选择独立于 Host/SIMD。
 
 ### default 多实例模式
 
@@ -200,6 +201,26 @@ aclrtSynchronizeStream(stream);
 | 通信链路 | 支持平台配置下的 MTE、UDMA、RDMA/SDMA | 本文新增按实例路由的 MTE、UDMA |
 | Team 高级操作 | 支持 | 仅 `instance_id=0` 支持 |
 
+## SIMT 多实例选择
+
+SIMT MTE 沿用现有 MTE 多实例的使用方式：先通过 `simt::aclshmemx_instance_ctx_set(instance_id)` 选择实例，再调用原有 SIMT 通信接口，无需为通信接口额外传入实例参数。Host 侧的实例初始化、内存分配和释放流程保持一致。
+
+SIMT 在当前 block 的 UB 变量中保存所选实例的设备状态地址，后续接口据此读取对应实例的通信域和对称内存信息。`simt::aclshmemx_instance_ctx_get()` 返回该设备状态地址。SIMT 的实例选择独立于 Host 和 SIMD，需要在每次进入 VF 后设置，不能沿用上一次 VF 的选择。
+
+使用时启用 `ACLSHMEM_SIMT_SUPPORT=ON`，并为多实例 kernel 定义 `MULTI_INSTANCE`。同一 block 的所有线程必须以相同顺序、相同实例 ID 调用 set；切换前需完成旧实例尚未完成的通信。
+
+```cpp
+// 在 VF 内，由所有 block 线程一致选择实例。
+simt::aclshmemx_instance_ctx_set(instance_id);
+simt::aclshmemx_int32_put_nbi_block(dst, src, count, peer);
+```
+
+未定义 `MULTI_INSTANCE` 时，原有 SIMT 接口默认使用实例 0，无需设置。非零实例仅支持 WORLD team 查询。实例及相关内存必须保持有效，直至通信完成。
+
+当前 warp RMA 也使用整个 block 的屏障：所有 block 线程必须以相同顺序和次数调用，每个 warp 内参数一致，各 warp 可以不同。每个 warp 独立搬运完整的 `[0, count)` 区间；末尾不足 32 个线程的 warp 使用实际线程数作为步长完成同一区间，不支持各 warp 独立分支调用。
+
+当前仅支持 SIMT MTE 多实例，暂不支持 SIMT UDMA 多实例。set 本身不完成通信。
+
 ## 相关代码与文档
 
 - 初始化/终止流程（含多实例 ctx 创建、端口分配与 finalize）：[init_finalize.md](init_finalize.md)
@@ -208,7 +229,3 @@ aclrtSynchronizeStream(stream);
 - Team   多实例限制逻辑：[src/host/team/shmem_team.cpp](../../src/host/team/shmem_team.cpp)
 - MTE 示例：[examples/multi_instance](../../examples/multi_instance/README.md)
 - UDMA 多实例用例：[multi_instance_routing_host_test.cpp](../../tests/unittest/host/multi_instance/multi_instance_routing_host_test.cpp)
-
----
-
-最后更新：2026-11-12

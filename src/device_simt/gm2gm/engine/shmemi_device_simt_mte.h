@@ -7,8 +7,8 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
-#ifndef SHMEM_DEVICE_SIMT_GM2GM_MTE_HPP
-#define SHMEM_DEVICE_SIMT_GM2GM_MTE_HPP
+#ifndef SHMEMI_DEVICE_SIMT_GM2GM_MTE_H
+#define SHMEMI_DEVICE_SIMT_GM2GM_MTE_H
 
 #include "device/shmem_def.h"
 #include "shmemi_device_simt_common.h"
@@ -16,10 +16,10 @@
 
 namespace simt {
 
-__simt_callee__ inline bool is_host_mem_heap(__gm__ void *ptr)
+__simt_callee__ inline bool is_host_mem_heap(__gm__ void* ptr)
 {
-    __gm__ aclshmem_device_host_state_simt_t *device_state = simt::aclshmemi_get_state();
-    if ((__gm__ void *)device_state->host_heap_base == nullptr) {
+    __gm__ aclshmem_device_host_state_simt_t* device_state = simt::aclshmemi_get_state();
+    if ((__gm__ void*)device_state->host_heap_base == nullptr) {
         return false;
     }
     uint64_t ptr_uint = reinterpret_cast<uint64_t>(ptr);
@@ -28,43 +28,45 @@ __simt_callee__ inline bool is_host_mem_heap(__gm__ void *ptr)
     return (ptr_uint >= base_uint && ptr_uint < end_uint);
 }
 
-__simt_callee__ inline void assert_remote_ptr_valid(__gm__ void *ptr, uint64_t remote_ptr, int pe)
+__simt_callee__ inline void assert_remote_ptr_valid(__gm__ void* ptr, uint64_t remote_ptr, int pe)
 {
     if (!is_host_mem_heap(ptr)) {
         return;
     }
-    __gm__ aclshmem_device_host_state_simt_t *device_state = aclshmemi_get_state();
+    __gm__ aclshmem_device_host_state_simt_t* device_state = aclshmemi_get_state();
     uint64_t host_heap_offset =
         reinterpret_cast<uint64_t>(ptr) - reinterpret_cast<uint64_t>(device_state->host_heap_base);
-    uint64_t remote_host_ptr = reinterpret_cast<uint64_t>(((__gm__ uint64_t*)(device_state->p2p_host_heap_base))[pe]) + host_heap_offset;
+    uint64_t remote_host_ptr =
+        reinterpret_cast<uint64_t>(((__gm__ uint64_t*)(device_state->p2p_host_heap_base))[pe]) + host_heap_offset;
     if (remote_host_ptr != remote_ptr) {
-        ACLSHMEM_DEBUG_FUNC(simt::aclshmemi_kernel_abort, "Host mem remote ptr %lu is invalid, expect: %lu\n", remote_ptr, remote_host_ptr);
+        ACLSHMEM_DEBUG_FUNC(
+            simt::aclshmemi_kernel_abort, "Host mem remote ptr %lu is invalid, expect: %lu\n", remote_ptr,
+            remote_host_ptr);
     }
     return;
 }
 
-__simt_callee__ inline __gm__ void *aclshmem_ptr(__gm__ void *ptr, int pe)
+__simt_callee__ inline __gm__ void* aclshmemi_ptr(__gm__ void* ptr, int pe)
 {
     // Get Global State
-    __gm__ aclshmem_device_host_state_simt_t *device_state = simt::aclshmemi_get_state();
+    __gm__ aclshmem_device_host_state_simt_t* device_state = simt::aclshmemi_get_state();
     // Back to root address
     ptrdiff_t offset = reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(device_state->heap_base);
     // Address translate
-    uintptr_t remote_ptr = reinterpret_cast<uintptr_t>(((__gm__ uint64_t*)(device_state->p2p_device_heap_base))[pe]) + offset;
+    uintptr_t remote_ptr =
+        reinterpret_cast<uintptr_t>(((__gm__ uint64_t*)(device_state->p2p_device_heap_base))[pe]) + offset;
     ACLSHMEM_DEBUG_FUNC(assert_remote_ptr_valid, ptr, (uint64_t)remote_ptr, pe);
-    return reinterpret_cast<__gm__ void *>(remote_ptr);
+    return reinterpret_cast<__gm__ void*>(remote_ptr);
 }
 
-template<typename T, thread_group_t scope>
-__simt_callee__ inline void aclshmemi_mte_get_nbi(
-    __gm__ T *dst, __gm__ T *src, size_t elem_size, int pe
-) 
+template <typename T, thread_group_t scope>
+__simt_callee__ inline void aclshmemi_mte_get_nbi(__gm__ T* dst, __gm__ T* src, size_t elem_size, int pe)
 {
     aclshmemi_threadgroup_sync<scope>();
     size_t myIndex = aclshmemi_thread_id_in_threadgroup<scope>();
     size_t groupSize = aclshmemi_threadgroup_size<scope>();
 
-    __gm__ T* srcSym = (__gm__ T*)aclshmem_ptr(src, pe);
+    __gm__ T* srcSym = (__gm__ T*)aclshmemi_ptr(src, pe);
 
     for (size_t i = myIndex; i < elem_size; i += groupSize) {
         dst[i] = srcSym[i];
@@ -73,16 +75,14 @@ __simt_callee__ inline void aclshmemi_mte_get_nbi(
 }
 
 template <typename T, thread_group_t scope>
-__simt_callee__ inline void aclshmemi_mte_put_nbi(
-    __gm__ T *dst, __gm__ T *src, size_t elem_size, int pe
-)
+__simt_callee__ inline void aclshmemi_mte_put_nbi(__gm__ T* dst, __gm__ T* src, size_t elem_size, int pe)
 {
     aclshmemi_threadgroup_sync<scope>();
 
     size_t myIndex = aclshmemi_thread_id_in_threadgroup<scope>();
     size_t groupSize = aclshmemi_threadgroup_size<scope>();
 
-    __gm__ T* dstSym = (__gm__ T*)aclshmem_ptr(dst, pe);
+    __gm__ T* dstSym = (__gm__ T*)aclshmemi_ptr(dst, pe);
 
     for (size_t i = myIndex; i < elem_size; i += groupSize) {
         dstSym[i] = src[i];
@@ -90,42 +90,48 @@ __simt_callee__ inline void aclshmemi_mte_put_nbi(
     aclshmemi_threadgroup_sync<scope>();
 }
 
-template<typename T>
-__simt_callee__ inline void aclshmemx_mte_get_nbi(__gm__ T *dst, __gm__ T *src, size_t elem_size, int pe)
+// Preserve the original public function type and selected-instance behavior.
+__simt_callee__ inline __gm__ void* aclshmem_ptr(__gm__ void* ptr, int pe) { return aclshmemi_ptr(ptr, pe); }
+
+template <typename T>
+__simt_callee__ inline void aclshmemx_mte_get_nbi(__gm__ T* dst, __gm__ T* src, size_t elem_size, int pe)
 {
     aclshmemi_mte_get_nbi<T, ACLSHMEMI_THREADGROUP_THREAD>(dst, src, elem_size, pe);
 }
 
-template<typename T>
-__simt_callee__ inline void aclshmemx_mte_get_nbi_block(__gm__ T *dst, __gm__ T *src, size_t elem_size, int pe)
+template <typename T>
+__simt_callee__ inline void aclshmemx_mte_get_nbi_block(__gm__ T* dst, __gm__ T* src, size_t elem_size, int pe)
 {
     aclshmemi_mte_get_nbi<T, ACLSHMEMI_THREADGROUP_BLOCK>(dst, src, elem_size, pe);
 }
 
-template<typename T>
-__simt_callee__ inline void aclshmemx_mte_get_nbi_warp(__gm__ T *dst, __gm__ T *src, size_t elem_size, int pe)
+template <typename T>
+__simt_callee__ inline void aclshmemx_mte_get_nbi_warp(__gm__ T* dst, __gm__ T* src, size_t elem_size, int pe)
 {
     aclshmemi_mte_get_nbi<T, ACLSHMEMI_THREADGROUP_WARP>(dst, src, elem_size, pe);
 }
 
-template<typename T>
-__simt_callee__ inline void aclshmemx_mte_put_nbi(__gm__ T *dst, __gm__ T *src, size_t elem_size, int pe)
+template <typename T>
+__simt_callee__ inline void aclshmemx_mte_put_nbi(__gm__ T* dst, __gm__ T* src, size_t elem_size, int pe)
 {
     aclshmemi_mte_put_nbi<T, ACLSHMEMI_THREADGROUP_THREAD>(dst, src, elem_size, pe);
 }
 
-template<typename T>
-__simt_callee__ inline void aclshmemx_mte_put_nbi_block(__gm__ T *dst, __gm__ T *src, size_t elem_size, int pe)
+template <typename T>
+__simt_callee__ inline void aclshmemx_mte_put_nbi_block(__gm__ T* dst, __gm__ T* src, size_t elem_size, int pe)
 {
     aclshmemi_mte_put_nbi<T, ACLSHMEMI_THREADGROUP_BLOCK>(dst, src, elem_size, pe);
 }
 
-template<typename T>
-__simt_callee__ inline void aclshmemx_mte_put_nbi_warp(__gm__ T *dst, __gm__ T *src, size_t elem_size, int pe)
+template <typename T>
+__simt_callee__ inline void aclshmemx_mte_put_nbi_warp(__gm__ T* dst, __gm__ T* src, size_t elem_size, int pe)
 {
     aclshmemi_mte_put_nbi<T, ACLSHMEMI_THREADGROUP_WARP>(dst, src, elem_size, pe);
 }
 
 } // namespace simt
+
+// CAS uses the address translation implemented above.
+#include "gm2gm/shmemi_device_simt_amo.h"
 
 #endif

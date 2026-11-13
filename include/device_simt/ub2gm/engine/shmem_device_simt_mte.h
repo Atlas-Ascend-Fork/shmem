@@ -14,7 +14,7 @@
 #define SHMEM_DEVICE_SIMT_UB2GM_MTE_H
 
 #include "device_simt/shmem_simt_common_types.h"
-#include "ub2gm/mte/shmem_device_simt_mte.hpp"
+#include "ub2gm/mte/shmemi_device_simt_mte.h"
 
 namespace simt {
 

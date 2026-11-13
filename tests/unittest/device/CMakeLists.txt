@@ -9,6 +9,15 @@
 # -----------------------------------------------------------------------------------------------------------
 
 file(GLOB_RECURSE TEST_KERNEL_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*_kernel.cpp")
+if(NOT SOC_TYPE STREQUAL "Ascend950" OR NOT ACLSHMEM_SIMT_SUPPORT)
+    list(FILTER TEST_KERNEL_FILES EXCLUDE REGEX "multi_instance/simt_instance_routing_kernel[.]cpp$")
+    list(FILTER TEST_KERNEL_FILES EXCLUDE REGEX "multi_instance/simt_instance_selection_kernel[.]cpp$")
+    list(FILTER TEST_KERNEL_FILES EXCLUDE REGEX "multi_instance/simt_instance_extended_kernel[.]cpp$")
+    list(FILTER TEST_KERNEL_FILES EXCLUDE REGEX "multi_instance/simt_instance_api_compile_kernel[.]cpp$")
+    list(FILTER TEST_KERNEL_FILES EXCLUDE REGEX "multi_instance/simt_instance_header_compile_kernel[.]cpp$")
+    list(FILTER TEST_KERNEL_FILES EXCLUDE REGEX "multi_instance/simt_amo_header_compile_kernel[.]cpp$")
+endif()
+
 if(NOT SOC_TYPE STREQUAL "Ascend950")
     list(FILTER TEST_KERNEL_FILES EXCLUDE REGEX "multi_instance/multi_instance_routing_kernel[.]cpp$")
 endif()

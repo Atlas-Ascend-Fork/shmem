@@ -31,10 +31,12 @@
 // simt
 #if defined(USE_SIMT)
 #include "device_simt/gm2gm/shmem_device_simt_rma.h"
+#include "device_simt/gm2gm/shmem_device_simt_amo.h"
 #include "device_simt/gm2gm/engine/shmem_device_simt_mte.h"
 #include "device_simt/ub2gm/shmem_device_simt_rma.h"
 #include "device_simt/ub2gm/engine/shmem_device_simt_mte.h"
 #include "device_simt/team/shmem_device_simt_team.h"
+#include "device_simt/shmem_device_simt_instance.h"
 #endif
 #endif
 

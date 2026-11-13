@@ -12,7 +12,7 @@
 
 #include "device_simt/shmem_simt_common_types.h"
 #include "shmemi_def.h"
-#include "shmemi_device_simt_common.hpp"
+#include "shmemi_device_simt_common_impl.h"
 
 namespace simt {
 
