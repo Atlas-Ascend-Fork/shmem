@@ -1614,9 +1614,14 @@ Arguments:
             aclshmemx_quiet_on_stream(acl_stream);
         },
         py::call_guard<py::gil_scoped_release>(), py::arg("stream"), R"(
-Ensures completion of all previously issued operations on symmetric data objects
-issued by the calling PE. The quiet is queued on the given stream; the caller
-must synchronize the stream to observe completion from the host.
+Enqueues a completion point for the current Host instance on the given stream.
+The instance is captured at enqueue time. Instance 0 retains QP0-only UDMA
+completion; nonzero instances complete all submitted UDMA QPs. Explicit nonzero
+QPs of instance 0 require device aclshmemx_udma_qp_quiet.
+Order producers before this call, using explicit dependencies for other streams,
+and synchronize the quiet stream to observe completion. Keep the instance,
+streams and buffers alive until completion. Host threads must serialize instance
+selection together with this call. A zero stream selects the instance default.
 
 Arguments:
     stream               [in] ACL stream on which to queue the quiet operation.

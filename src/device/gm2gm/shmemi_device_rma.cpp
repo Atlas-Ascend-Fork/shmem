@@ -15,18 +15,89 @@
 #include "gm2gm/engine/shmem_device_rdma.hpp"
 #include "device/gm2gm/shmem_device_rma.h"
 #include "shmemi_device_mo.h"
+#if defined(MULTI_INSTANCE)
+#if ACLSHMEM_UDMA_SUPPORTED
+ACLSHMEM_DEVICE void aclshmemi_host_quiet_udma_queues()
+{
+    auto info = aclshmemi_udma_qp_info_fetch();
+    if (info == nullptr) {
+        return;
+    }
+    auto table = aclshmemi_udma_active_table(info);
+    const uint32_t ranks = static_cast<uint32_t>(aclshmemi_get_total_pe());
+    const uint32_t slots = ACLSHMEM_RELAY_SUPPORTED ? ranks * ranks : ranks;
+    auto wqs = reinterpret_cast<__gm__ aclshmemi_udma_wq_ctx_t*>(table->sq_ptr);
+    // One AIV owns completion for every UDMA queue. Shared-jetty aliases have
+    // the same state; once drained, cq_tail == cqe_cnt skips subsequent aliases.
+    // No producer may concurrently submit to these queues from another stream.
+    for (uint32_t slot = 0; slot < slots; ++slot) {
+        for (uint32_t qp = 0; qp < info->qp_num; ++qp) {
+            auto state = reinterpret_cast<__gm__ aclshmemi_udma_queue_state_t*>(
+                wqs[static_cast<uint64_t>(slot) * info->qp_num + qp].state_addr);
+            if (state == nullptr) {
+                continue; // Self and unconnected table slots have no queue.
+            }
+            dcci_cachelines(reinterpret_cast<__gm__ uint8_t*>(state), sizeof(*state));
+            const uint32_t target = state->cqe_cnt;
+            if (state->cq_tail != target) {
+                // Error paths inside poll_cq trap before returning non-zero, same as
+                // aclshmemi_udma_poll_cq_when_sq_overflow; the kernel does not resume.
+                (void)aclshmemi_udma_poll_cq(slot, qp, target);
+            }
+        }
+    }
+}
+#endif
+
+ACLSHMEM_DEVICE void aclshmemi_quiet_all_qps()
+{
+    const uint8_t mask = aclshmemi_filter_unsupported_quiet_transports(aclshmemi_get_quiet_transport_mask());
+    AscendC::PipeBarrier<PIPE_ALL>();
+    // Preserve existing per-core RoCE/SDMA completion without polling UDMA
+    // again on each block or limiting explicit UDMA traffic to QP 0.
+    if (mask & static_cast<uint8_t>(~ACLSHMEM_TRANSPORT_UDMA)) {
+        aclshmemi_quiet_all_reachable_transports(aclshmemi_get_state(), mask, false);
+    }
+#if ACLSHMEM_UDMA_SUPPORTED
+    if (AscendC::GetBlockIdx() == 0) {
+        aclshmemi_host_quiet_udma_queues();
+    }
+#endif
+    dcci_entire_cache();
+}
+
+ACLSHMEM_GLOBAL_VECTOR void k_aclshmemi_instance_quiet(uint64_t instance_id)
+{
+    aclshmemx_instance_ctx_set(instance_id);
+    aclshmemi_quiet_all_qps();
+}
+
+int32_t aclshmemi_post_instance_quiet(uint64_t instance_id, aclrtStream stream, size_t block_size)
+{
+    if (instance_id == 0) {
+        // Fall back to k_aclshmemi_quiet (shmemi_device_rma.cpp), which is built without
+        // MULTI_INSTANCE and always reads entity 0.
+        return aclshmemi_prepare_and_post_rma(
+            "aclshmemx_quiet_on_stream", ACLSHMEMI_OP_QUIET, false, nullptr, nullptr, 0, 0, 0, nullptr, 0, 0, 1, 1,
+            stream, block_size);
+    }
+    k_aclshmemi_instance_quiet<<<block_size, 0, stream>>>(instance_id);
+    return 0;
+}
+
+#else
 
 #define ACLSHMEM_TYPE_FUNC(FUNC) \
-    FUNC(float, float);       \
-    FUNC(double, double);     \
-    FUNC(int8, int8_t);       \
-    FUNC(int16, int16_t);     \
-    FUNC(int32, int32_t);     \
-    FUNC(int64, int64_t);     \
-    FUNC(uint8, uint8_t);     \
-    FUNC(uint16, uint16_t);   \
-    FUNC(uint32, uint32_t);   \
-    FUNC(uint64, uint64_t);   \
+    FUNC(float, float);          \
+    FUNC(double, double);        \
+    FUNC(int8, int8_t);          \
+    FUNC(int16, int16_t);        \
+    FUNC(int32, int32_t);        \
+    FUNC(int64, int64_t);        \
+    FUNC(uint8, uint8_t);        \
+    FUNC(uint16, uint16_t);      \
+    FUNC(uint32, uint32_t);      \
+    FUNC(uint64, uint64_t);      \
     FUNC(char, char)
 
 // kernels
@@ -96,17 +167,17 @@ ACLSHMEM_GLOBAL void aclshmemi_getbits(GM_ADDR dst, GM_ADDR src, non_contiguous_
     }
 }
 
-ACLSHMEM_GLOBAL_VECTOR void aclshmemi_putmem_signal(GM_ADDR dst, GM_ADDR src, uint32_t elem_size, GM_ADDR sig_addr, int32_t signal,
-                                       int sig_op, int pe)
+ACLSHMEM_GLOBAL_VECTOR void aclshmemi_putmem_signal(
+    GM_ADDR dst, GM_ADDR src, uint32_t elem_size, GM_ADDR sig_addr, int32_t signal, int sig_op, int pe)
 {
-    __gm__ int32_t *sig_addr_int32 = reinterpret_cast<__gm__ int32_t *>(sig_addr);
+    __gm__ int32_t* sig_addr_int32 = reinterpret_cast<__gm__ int32_t*>(sig_addr);
     aclshmem_uint8_put_signal(dst, src, elem_size, sig_addr_int32, signal, sig_op, pe);
 }
 
-ACLSHMEM_GLOBAL_VECTOR void aclshmemi_putmem_signal_nbi(GM_ADDR dst, GM_ADDR src, uint32_t elem_size, GM_ADDR sig_addr,
-                                           int32_t signal, int sig_op, int pe)
+ACLSHMEM_GLOBAL_VECTOR void aclshmemi_putmem_signal_nbi(
+    GM_ADDR dst, GM_ADDR src, uint32_t elem_size, GM_ADDR sig_addr, int32_t signal, int sig_op, int pe)
 {
-    __gm__ int32_t *sig_addr_int32 = reinterpret_cast<__gm__ int32_t *>(sig_addr);
+    __gm__ int32_t* sig_addr_int32 = reinterpret_cast<__gm__ int32_t*>(sig_addr);
     aclshmem_uint8_put_signal_nbi(dst, src, elem_size, sig_addr_int32, signal, sig_op, pe);
 }
 
@@ -115,16 +186,13 @@ ACLSHMEM_GLOBAL void k_aclshmem_getmem(GM_ADDR dst, GM_ADDR src, size_t elem_siz
     aclshmem_getmem(dst, src, elem_size, pe);
 }
 
-ACLSHMEM_GLOBAL void k_aclshmemi_quiet()
-{
-    aclshmemi_quiet();
-}
+ACLSHMEM_GLOBAL_VECTOR void k_aclshmemi_quiet() { aclshmemi_quiet(); }
 
 // kernel function calling entrance
-int32_t aclshmemi_prepare_and_post_rma(const char *api_name, aclshmemi_op_t desc, bool is_nbi, uint8_t *dst, uint8_t *src,
-                                    size_t n_elems, size_t elem_bytes, int pe, uint8_t *sig_addr, int32_t signal,
-                                    int sig_op, ptrdiff_t lstride, ptrdiff_t rstride, aclrtStream acl_strm,
-                                    size_t block_size)
+int32_t aclshmemi_prepare_and_post_rma(
+    const char* api_name, aclshmemi_op_t desc, bool is_nbi, uint8_t* dst, uint8_t* src, size_t n_elems,
+    size_t elem_bytes, int pe, uint8_t* sig_addr, int32_t signal, int sig_op, ptrdiff_t lstride, ptrdiff_t rstride,
+    aclrtStream acl_strm, size_t block_size)
 {
     if (is_nbi) {
         switch (desc) {
@@ -135,8 +203,8 @@ int32_t aclshmemi_prepare_and_post_rma(const char *api_name, aclshmemi_op_t desc
                 aclshmemi_getmem_nbi<<<block_size, 0, acl_strm>>>(dst, src, n_elems * elem_bytes, pe);
                 break;
             case ACLSHMEMI_OP_PUT_SIGNAL:
-                aclshmemi_putmem_signal_nbi<<<block_size, 0, acl_strm>>>(dst, src, n_elems * elem_bytes, sig_addr,
-                                                                      signal, sig_op, pe);
+                aclshmemi_putmem_signal_nbi<<<block_size, 0, acl_strm>>>(
+                    dst, src, n_elems * elem_bytes, sig_addr, signal, sig_op, pe);
                 break;
             case ACLSHMEMI_OP_QUIET:
                 k_aclshmemi_quiet<<<block_size, 0, acl_strm>>>();
@@ -155,8 +223,8 @@ int32_t aclshmemi_prepare_and_post_rma(const char *api_name, aclshmemi_op_t desc
                     aclshmemi_getmem<<<block_size, 0, acl_strm>>>(dst, src, n_elems * elem_bytes, pe);
                     break;
                 case ACLSHMEMI_OP_PUT_SIGNAL:
-                    aclshmemi_putmem_signal<<<block_size, 0, acl_strm>>>(dst, src, n_elems * elem_bytes, sig_addr, signal,
-                                                                    sig_op, pe);
+                    aclshmemi_putmem_signal<<<block_size, 0, acl_strm>>>(
+                        dst, src, n_elems * elem_bytes, sig_addr, signal, sig_op, pe);
                     break;
                 case ACLSHMEMI_OP_QUIET:
                     k_aclshmemi_quiet<<<block_size, 0, acl_strm>>>();
@@ -165,10 +233,9 @@ int32_t aclshmemi_prepare_and_post_rma(const char *api_name, aclshmemi_op_t desc
                     break;
             }
         } else {
-            non_contiguous_copy_param copy_params {static_cast<uint32_t>(n_elems),
-                                                   static_cast<uint32_t>(elem_bytes),
-                                                   static_cast<uint32_t>(rstride),
-                                                   static_cast<uint32_t>(lstride)};
+            non_contiguous_copy_param copy_params{
+                static_cast<uint32_t>(n_elems), static_cast<uint32_t>(elem_bytes), static_cast<uint32_t>(rstride),
+                static_cast<uint32_t>(lstride)};
             switch (desc) {
                 case ACLSHMEMI_OP_PUT:
                     aclshmemi_putbits<<<block_size, 0, acl_strm>>>(dst, src, copy_params, pe);
@@ -187,11 +254,11 @@ int32_t aclshmemi_prepare_and_post_rma(const char *api_name, aclshmemi_op_t desc
     return 0;
 }
 
-#define ACLSHMEMI_TYPENAME_P(NAME, TYPE)                                                \
+#define ACLSHMEMI_TYPENAME_P(NAME, TYPE)                                                   \
     ACLSHMEM_GLOBAL void aclshmemi_##NAME##_p(GM_ADDR dest_addr, const TYPE value, int pe) \
-    {                                                                                \
-        __gm__ TYPE *dst = (__gm__ TYPE *)dest_addr;                                 \
-        aclshmem_##NAME##_p(dst, value, pe);                                            \
+    {                                                                                      \
+        __gm__ TYPE* dst = (__gm__ TYPE*)dest_addr;                                        \
+        aclshmem_##NAME##_p(dst, value, pe);                                               \
     }
 
 ACLSHMEM_TYPE_FUNC(ACLSHMEMI_TYPENAME_P)
@@ -199,23 +266,25 @@ ACLSHMEM_TYPE_FUNC(ACLSHMEMI_TYPENAME_P)
 #undef ACLSHMEMI_TYPENAME_P
 
 // aclshmem_g
-#define ACLSHMEMI_TYPENAME_G(NAME, TYPE)                                            \
+#define ACLSHMEMI_TYPENAME_G(NAME, TYPE)                                               \
     ACLSHMEM_GLOBAL void aclshmemi_##NAME##_g(GM_ADDR src, int pe, GM_ADDR value_addr) \
-    {                                                                            \
-        __gm__ TYPE *src_addr = (__gm__ TYPE *)src;                              \
-        __gm__ TYPE *dst_addr = (__gm__ TYPE *)value_addr;                       \
-        *dst_addr = aclshmem_##NAME##_g(src_addr, pe);                              \
+    {                                                                                  \
+        __gm__ TYPE* src_addr = (__gm__ TYPE*)src;                                     \
+        __gm__ TYPE* dst_addr = (__gm__ TYPE*)value_addr;                              \
+        *dst_addr = aclshmem_##NAME##_g(src_addr, pe);                                 \
     }
 
 ACLSHMEM_TYPE_FUNC(ACLSHMEMI_TYPENAME_G)
 #undef ACLSHMEMI_TYPENAME_G
 
-#define ACLSHMEMI_TYPENAME_PREPARE_RMA_P(NAME, TYPE)                                                           \
-    void aclshmemi_prepare_and_post_rma_##NAME##_p(const char *api_name, uint8_t *dst_ptr, TYPE value, int pe, \
-                                                aclrtStream acl_strm, size_t block_size)                    \
-    {                                                                                                       \
-        aclshmemi_##NAME##_p<<<block_size, 0, acl_strm>>>(dst_ptr, value, pe);                                 \
+#define ACLSHMEMI_TYPENAME_PREPARE_RMA_P(NAME, TYPE)                                                         \
+    void aclshmemi_prepare_and_post_rma_##NAME##_p(                                                          \
+        const char* api_name, uint8_t* dst_ptr, TYPE value, int pe, aclrtStream acl_strm, size_t block_size) \
+    {                                                                                                        \
+        aclshmemi_##NAME##_p<<<block_size, 0, acl_strm>>>(dst_ptr, value, pe);                               \
     }
 
 ACLSHMEM_TYPE_FUNC(ACLSHMEMI_TYPENAME_PREPARE_RMA_P)
 #undef ACLSHMEMI_TYPENAME_PREPARE_RMA_P
+
+#endif // MULTI_INSTANCE

@@ -27,25 +27,31 @@ endif()
 file(GLOB_RECURSE ACLSHMEM_KERNEL_FILES ${CMAKE_CURRENT_SOURCE_DIR}/device/*.cpp)
 file(GLOB_RECURSE _TEMP_KERNEL_FILES ${CMAKE_CURRENT_SOURCE_DIR}/device_simt/*.cpp)
 list(APPEND ACLSHMEM_KERNEL_FILES ${_TEMP_KERNEL_FILES})
+# Compile the existing RMA source separately for the instance-aware quiet entry.
+add_library(aclshmem_instance_quiet OBJECT device/gm2gm/shmemi_device_rma.cpp)
+target_compile_definitions(aclshmem_instance_quiet PRIVATE MULTI_INSTANCE)
 add_library(aclshmem_device OBJECT ${ACLSHMEM_KERNEL_FILES})
-target_compile_options(aclshmem_device
-    PRIVATE
-    ${CMAKE_CCE_COMPILE_OPTIONS}
-    ${CCE_AICORE_ARCH}
-    ${SANITIZER_FLAGS}
-)
-target_include_directories(aclshmem_device
-    PUBLIC
-    ${PROJECT_SOURCE_DIR}/include/
-    ${PROJECT_SOURCE_DIR}/src/
-    ${PROJECT_SOURCE_DIR}/src/device/
-    ${PROJECT_SOURCE_DIR}/src/device_simt/
-)
-if(USE_MSSANITIZER)
-    target_include_directories(aclshmem_device PRIVATE
-        ${ASCEND_HOME_PATH}/tools/mssanitizer/include
+foreach(device_target aclshmem_device aclshmem_instance_quiet)
+    target_compile_options(${device_target}
+        PRIVATE
+        ${CMAKE_CCE_COMPILE_OPTIONS}
+        ${CCE_AICORE_ARCH}
+        ${SANITIZER_FLAGS}
     )
-endif()
+    target_include_directories(${device_target}
+        PUBLIC
+        ${PROJECT_SOURCE_DIR}/include/
+        ${PROJECT_SOURCE_DIR}/src/
+        ${PROJECT_SOURCE_DIR}/src/device/
+        ${PROJECT_SOURCE_DIR}/src/device_simt/
+    )
+    if(USE_MSSANITIZER)
+        target_include_directories(${device_target} PRIVATE
+            ${ASCEND_HOME_PATH}/tools/mssanitizer/include
+        )
+    endif()
+
+endforeach()
 
 file(GLOB_RECURSE ACLSHMEM_HOST_FILES ${CMAKE_CURRENT_SOURCE_DIR}/host/*.cpp)
 list(FILTER ACLSHMEM_HOST_FILES EXCLUDE REGEX "python_wrapper")
@@ -127,7 +133,7 @@ install(TARGETS shmem_utils
     LIBRARY DESTINATION lib
 )
 
-add_library(shmem SHARED $<TARGET_OBJECTS:aclshmem_device> $<TARGET_OBJECTS:aclshmem_host>)
+add_library(shmem SHARED $<TARGET_OBJECTS:aclshmem_device> $<TARGET_OBJECTS:aclshmem_instance_quiet> $<TARGET_OBJECTS:aclshmem_host>)
 target_link_options(shmem PRIVATE --cce-fatobj-link ${SANITIZER_FLAGS})
 if(SOC_TYPE STREQUAL "Ascend950")
     target_link_libraries(shmem PRIVATE shmem_utils hcomm)

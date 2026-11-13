@@ -17,8 +17,8 @@
 #include "host_device/shmem_common_types.h"
 
 /**
-* @brief The state of the ACLSHMEM host OP type.
-*/
+ * @brief The state of the ACLSHMEM host OP type.
+ */
 enum aclshmemi_op_t {
     ACLSHMEMI_OP_PUT = 0,
     ACLSHMEMI_OP_P,
@@ -31,17 +31,19 @@ enum aclshmemi_op_t {
     ACLSHMEMI_OP_SENTINEL = INT_MAX,
 };
 
-#define ACLSHMEMI_TYPENAME_PREPARE_RMA_P(NAME, TYPE)                                                           \
-    void aclshmemi_prepare_and_post_rma_##NAME##_p(const char *api_name, uint8_t *dst_ptr, TYPE value, int pe, \
-                                                aclrtStream acl_strm, size_t block_size)
+#define ACLSHMEMI_TYPENAME_PREPARE_RMA_P(NAME, TYPE) \
+    void aclshmemi_prepare_and_post_rma_##NAME##_p(  \
+        const char* api_name, uint8_t* dst_ptr, TYPE value, int pe, aclrtStream acl_strm, size_t block_size)
 
 ACLSHMEM_TYPE_FUNC(ACLSHMEMI_TYPENAME_PREPARE_RMA_P);
 #undef ACLSHMEMI_TYPENAME_PREPARE_RMA_P
 
 // internal kernels calling
-int32_t aclshmemi_prepare_and_post_rma(const char *api_name, aclshmemi_op_t desc, bool is_nbi, uint8_t *dst, uint8_t *src,
-                                    size_t n_elems, size_t elem_bytes, int pe, uint8_t *sig_addr, int32_t signal,
-                                    int sig_op, ptrdiff_t lstride = 1, ptrdiff_t rstride = 1,
-                                    aclrtStream acl_strm = nullptr, size_t block_size = 1);
+int32_t aclshmemi_post_instance_quiet(uint64_t instance_id, aclrtStream stream, size_t block_size);
+
+int32_t aclshmemi_prepare_and_post_rma(
+    const char* api_name, aclshmemi_op_t desc, bool is_nbi, uint8_t* dst, uint8_t* src, size_t n_elems,
+    size_t elem_bytes, int pe, uint8_t* sig_addr, int32_t signal, int sig_op, ptrdiff_t lstride = 1,
+    ptrdiff_t rstride = 1, aclrtStream acl_strm = nullptr, size_t block_size = 1);
 
 #endif

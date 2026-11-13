@@ -51,7 +51,7 @@ ACLSHMEM_DEVICE uint8_t aclshmemi_get_quiet_transport_mask()
 }
 
 ACLSHMEM_DEVICE void aclshmemi_quiet_all_reachable_transports(
-    __gm__ aclshmem_device_host_state_t* state, uint8_t quiet_transport_mask)
+    __gm__ aclshmem_device_host_state_t* state, uint8_t quiet_transport_mask, bool include_udma = true)
 {
     uint64_t sdma_ub = state->sdma_config.aclshmem_ub;
     uint32_t sdma_ub_size = state->sdma_config.ub_size;
@@ -75,7 +75,7 @@ ACLSHMEM_DEVICE void aclshmemi_quiet_all_reachable_transports(
         }
 
 #if ACLSHMEM_UDMA_SUPPORTED
-        if (topo & ACLSHMEM_TRANSPORT_UDMA) {
+        if (include_udma && (topo & ACLSHMEM_TRANSPORT_UDMA)) {
             aclshmemx_udma_quiet(pe);
         }
 #endif

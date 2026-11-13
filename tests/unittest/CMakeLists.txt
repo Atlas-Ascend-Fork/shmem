@@ -17,6 +17,8 @@ set(CMAKE_C_COMPILER gcc)
 set(CMAKE_CXX_COMPILER g++)
 
 add_executable(aclshmem_unittest $<TARGET_OBJECTS:aclshmem_unittest_host>)
+# Host initialization dlopens this plugin; build the matching revision for UTs.
+add_dependencies(aclshmem_unittest aclshmem_bootstrap_config_store)
 target_link_directories(aclshmem_unittest PRIVATE
     ${PROJECT_SOURCE_DIR}/3rdparty/googletest/lib
 )

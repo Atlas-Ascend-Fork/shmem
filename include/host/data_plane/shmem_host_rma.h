@@ -684,18 +684,41 @@ ACLSHMEM_HOST_API int aclshmemx_set_rdma_config(uint64_t offset, uint32_t ub_siz
 ACLSHMEM_HOST_API int aclshmemx_set_udma_config(uint64_t offset, uint32_t ub_size, uint32_t sync_id);
 
 /**
- * @brief Ensures completion of all previously issued operations on symmetric data objects
- *        issued by the calling PE. The quiet is queued on the given stream; the caller must
- *        synchronize the stream to observe completion from the host.
+ * @brief Enqueue a completion point for the current Host instance on the given stream.
+ *        Synchronize the stream to observe completion from the host.
  *
  * @param stream            [in] ACL stream on which to queue the quiet operation. Passing NULL uses the default stream.
  *
- * @note Quiet operations are scoped to the issuing context: quiet called from the host ensures completion
- *       of host-issued operations; quiet called from a device kernel ensures completion of operations
- *       issued by that kernel.
+ * @note The quiet covers only operations ordered on this stream. Work on another stream
+ *       needs an explicit cross-stream dependency. The call returns after enqueueing;
+ *       synchronize the stream to observe completion. The current Host instance and its default
+ *       stream are captured when this call enqueues the quiet. Later Host context switches do
+ *       not change that selection. For nonzero instances, submitted UDMA operations on all QPs are
+ *       completed, including shared Jetty queues. Instance 0 retains QP0-only completion; use
+ *       aclshmemx_udma_qp_quiet for explicit nonzero QPs. Producers must complete local staging and
+ *       submit pending batches before returning; quiet does not submit an unfinished batch.
+ *       Do not concurrently submit to or quiet the same queues from another stream. Keep the
+ *       instance, streams and communication buffers alive until completion. Receiving PEs still
+ *       need coordination before reading or releasing their buffers.
+ *       The selected instance ID must be in [0, 255]; an out-of-range ID is rejected before enqueue.
+ *       Host context selection is process-wide: serialize ctx_set plus this call when using
+ *       multiple Host threads. All threads changing the Host instance must share that serialization.
  */
 ACLSHMEM_HOST_API void aclshmemx_quiet_on_stream(aclrtStream stream);
 #define shmemx_quiet_on_stream aclshmemx_quiet_on_stream
+
+/**
+ * @brief Complete symmetric-data operations previously queued on the library-managed
+ *        default stream, blocking until they finish.
+ *
+ * @note Only work ordered on the default stream is covered. Work queued on another
+ *       stream has no implicit ordering with this call; synchronize that stream or
+ *       establish an explicit dependency before relying on this quiet. The current Host instance
+ *       is captured at enqueue time; this call waits for that instance's captured default stream.
+ *       The queue ownership and lifetime requirements of aclshmemx_quiet_on_stream also apply.
+ */
+ACLSHMEM_HOST_API void aclshmem_quiet(void);
+#define shmem_quiet aclshmem_quiet
 
 #ifdef __cplusplus
 }

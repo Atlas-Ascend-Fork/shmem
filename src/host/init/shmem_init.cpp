@@ -24,6 +24,8 @@
 #include "acl/error_codes/rt_error_codes.h"
 #include "shmemi_host_common.h"
 #include "shmemi_init.h"
+#include "gm2gm/shmemi_device_rma.h"
+#include "entity/mem_entity_def.h"
 #include "shmemi_user_buffer_heap.h"
 #include "transport_def.h"
 #include "host/shmem_host_def.h"
@@ -1035,6 +1037,10 @@ static int32_t aclshmemi_instance_port_selection(aclshmemx_init_attr_t* attribut
 static int aclshmemi_instance_ctx_create(aclshmemx_init_attr_t* attributes)
 {
     uint64_t instance_id = attributes->instance_id;
+    // Preserve the initialization range error before bootstrap or entity-ID narrowing.
+    if (instance_id > (shm::HYBM_ENTITY_NUM_MAX - 1) / 2) {
+        return ACLSHMEM_INVALID_VALUE;
+    }
     if (instance_id == 0) {
         // Do Nothing.
         return ACLSHMEM_SUCCESS;
@@ -1112,6 +1118,29 @@ aclshmem_instance_ctx* aclshmemx_instance_ctx_get()
 {
     std::lock_guard<std::mutex> lock(g_aclshmem_ctx_mutex);
     return g_instance_ctx;
+}
+
+int32_t aclshmemi_enqueue_current_instance_quiet(aclrtStream& stream)
+{
+    std::lock_guard<std::mutex> lock(g_aclshmem_ctx_mutex);
+    if (g_instance_ctx == nullptr) {
+        return ACLSHMEM_NOT_INITED;
+    }
+    const uint64_t instance_id = g_instance_ctx->id;
+    if (instance_id > (shm::HYBM_ENTITY_NUM_MAX - 1) / 2) {
+        return ACLSHMEM_INVALID_PARAM;
+    }
+    const auto it = aclshmem_resource_domain.find(static_cast<uint32_t>(instance_id));
+    if (it == aclshmem_resource_domain.end() || it->second == nullptr) {
+        return ACLSHMEM_NOT_INITED;
+    }
+    if (!g_state.is_aclshmem_initialized) {
+        return ACLSHMEM_NOT_INITED;
+    }
+    if (stream == nullptr) {
+        stream = g_state_host.default_stream;
+    }
+    return aclshmemi_post_instance_quiet(instance_id, stream, g_state_host.default_block_num);
 }
 
 int aclshmemx_instance_ctx_set(uint64_t instance_id)

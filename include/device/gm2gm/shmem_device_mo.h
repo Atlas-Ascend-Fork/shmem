@@ -26,19 +26,21 @@ extern "C" {
  *        On systems with only scale-up network (HCCS), updates are globally visible, whereas on systems with
  *        both scale-up network HCCS and scale-out network (RDMA), ACLSHMEM only guarantees that updates to the
  *        memory of a given PE are visible to that PE.
- *        Quiet operations issued on the CPU and the NPU only complete communication operations that were
- *        issued from the CPU and the NPU, respectively. To ensure completion of NPU-side operations from
- *        the CPU, using aclrtSynchronizeStream/aclrtDeviceSynchronize or stream-based API.
+ *        Complete asynchronous communication in the Device execution scope before reusing its buffers.
+ *        Device UDMA quiet completes QP0; explicit nonzero QPs require aclshmemx_udma_qp_quiet.
+ *        After the producer submits its operations, Host aclshmemx_quiet_on_stream can complete QP0
+ *        for instance 0 or all QPs for a nonzero selected Host instance. Order the producer before that quiet,
+ *        keep the instance and buffers valid, and synchronize the quiet stream before observing completion.
+ *        Host quiet cannot submit an unfinished batch or complete kernel-local staging after its lifetime.
  *
  */
 ACLSHMEM_DEVICE void aclshmem_quiet(void);
 #define shmem_quiet aclshmem_quiet
 
 /**
- * @brief In OpenACLSHMEM specification, aclshmem_fence assures ordering of delivery of Put, AMOs, and memory store routines
- *        to symmetric data objects, but does not guarantee the completion of these operations.
- *        However, due to hardware capabilities, we implemented aclshmem_fence same as aclshmem_quiet, ensuring both ordering
- *        and completion.
+ * @brief In OpenACLSHMEM specification, aclshmem_fence assures ordering of delivery of Put, AMOs, and memory store
+ * routines to symmetric data objects, but does not guarantee the completion of these operations. However, due to
+ * hardware capabilities, we implemented aclshmem_fence same as aclshmem_quiet, ensuring both ordering and completion.
  *        Fence operations issued on the CPU and the NPU only order communication operations that were issued from the
  *        CPU and the NPU, respectively. To ensure completion of NPU-side operations from the CPU,
  *        using aclrtSynchronizeStream/aclrtDeviceSynchronize or stream-based API.

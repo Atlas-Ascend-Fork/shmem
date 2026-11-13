@@ -104,7 +104,7 @@ ACLSHMEM_DEVICE void aclshmemi_dump_sq_wqe(
 ACLSHMEM_DEVICE __gm__ aclshmemi_aiv_udma_info_t* aclshmemi_udma_qp_info_fetch()
 {
     __gm__ aclshmemi_aiv_udma_info_t* udma_info =
-        (__gm__ aclshmemi_aiv_udma_info_t*)(aclshmemi_get_udma_info_address(0));
+        (__gm__ aclshmemi_aiv_udma_info_t*)(aclshmemi_get_udma_info_address(aclshmemi_get_current_entity_id()));
     return udma_info;
 }
 
@@ -460,15 +460,13 @@ ACLSHMEM_DEVICE void assert_remote_jetty_type_valid(__gm__ aclshmemi_ubmem_info_
 // Credit is computed against the shared queue state: slots on one jetty consume one SQ. Callers
 // resolve state from qp_ctx_entry->state_addr once and pass it in, keeping the GM load off the
 // per-post hot path.
-ACLSHMEM_DEVICE bool aclshmemi_udma_sq_has_credit(
-    __gm__ aclshmemi_udma_queue_state_t* state, uint32_t wqe_bb_cnt)
+ACLSHMEM_DEVICE bool aclshmemi_udma_sq_has_credit(__gm__ aclshmemi_udma_queue_state_t* state, uint32_t wqe_bb_cnt)
 {
     uint32_t used_after_post = state->sq_head + wqe_bb_cnt - state->sq_tail;
     return used_after_post + ACLSHMEM_UDMA_AGGREGATE_CREDIT_GUARD < shm::UDMA_SQ_BASKBLK_CNT;
 }
 
-ACLSHMEM_DEVICE bool aclshmemi_udma_sq_has_capacity(
-    __gm__ aclshmemi_udma_queue_state_t* state, uint32_t wqe_bb_cnt)
+ACLSHMEM_DEVICE bool aclshmemi_udma_sq_has_capacity(__gm__ aclshmemi_udma_queue_state_t* state, uint32_t wqe_bb_cnt)
 {
     return state->sq_head + wqe_bb_cnt - state->sq_tail < shm::UDMA_SQ_BASKBLK_CNT;
 }
