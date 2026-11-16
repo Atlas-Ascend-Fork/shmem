@@ -17,6 +17,7 @@
 #include <iomanip>
 #include <map>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <unordered_map>
 #include <string>
@@ -107,6 +108,8 @@ struct SyncEndpoint {
     std::vector<EidPort> ports{}; // used to reverse-map a peer port to its eidIndex
     uint32_t eidIndex{};
     RankAddrType addrType{RankAddrType::EID};
+    // Canonical Endpoint index for shared direct UDMA; preserves the route's eidIndex.
+    std::optional<EidIndex> endpointEidIndex{};
 };
 
 inline void to_json(nlohmann::json& json, const SyncEndpoint& endpoint)
@@ -121,6 +124,9 @@ inline void to_json(nlohmann::json& json, const SyncEndpoint& endpoint)
         {"ports", endpoint.ports},
         {"eidIndex", endpoint.eidIndex},
     };
+    if (endpoint.endpointEidIndex.has_value()) {
+        json["endpointEidIndex"] = *endpoint.endpointEidIndex;
+    }
 }
 
 inline void from_json(const nlohmann::json& json, SyncEndpoint& endpoint)
@@ -155,6 +161,10 @@ inline void from_json(const nlohmann::json& json, SyncEndpoint& endpoint)
     json.at("planeId").get_to(endpoint.planeId);
     json.at("ports").get_to(endpoint.ports);
     json.at("eidIndex").get_to(endpoint.eidIndex);
+    endpoint.endpointEidIndex.reset();
+    if (json.contains("endpointEidIndex")) {
+        endpoint.endpointEidIndex = json.at("endpointEidIndex").get<EidIndex>();
+    }
 }
 
 struct EidRoute {
@@ -183,6 +193,7 @@ public:
     static constexpr const char* ROOTINFO_PATH = "/etc/hccl_rootinfo.json";
     static bool ParseRootInfo(uint32_t phyId, RootInfo& out);
     static bool ParseTopoInfo(const std::string& path, TopoInfo& out);
+    static void AssignCanonicalEidIndices(const RootInfo& rootInfo, std::vector<SyncEndpoint>& endpoints);
     static bool GetLocalId(const RootInfo& root, uint32_t deviceId, uint32_t& localId);
 
     static bool GetEidCount(const RootInfo& root, uint32_t& count);

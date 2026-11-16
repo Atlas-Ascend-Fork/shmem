@@ -190,8 +190,8 @@ Result WaitHcommChannelReady(const std::vector<ChannelHandle>& channels)
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(CHANNEL_STATUS_POLL_INTERVAL_MS));
-        elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - start).count();
+        elapsed_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     }
 
     SHM_LOG_ERROR(
@@ -417,6 +417,7 @@ Result UdmaTransportManager::OpenDevice(const TransportOptions& options)
     net_layer_policy_ = options.udmaQpConfig.netLayerPolicy;
     multi_link_enabled_ = options.udmaQpConfig.multiLinkEnabled;
     peer_routes_.clear();
+    endpoint_eid_aliases_.clear();
     all_local_routes_.clear();
     const Result prepare_result = PrepareOpenDevice(device_id, rank_count_);
     if (prepare_result != ACLSHMEM_SUCCESS) {
@@ -1015,8 +1016,7 @@ void UdmaTransportManager::PrintSharedJettyGrouping(
         const uint32_t peer_id = route_entry.first;
         const auto& route_info = route_entry.second;
         const auto add_peer = [&endpoint_to_peers, peer_id, this](uint32_t local_eid_index, uint32_t qp_idx) {
-            auto& peers =
-                endpoint_to_peers[EndpointMapKey{local_eid_index, EndpointPeerRank(peer_id), EndpointQpSlot(qp_idx)}];
+            auto& peers = endpoint_to_peers[ResolveEndpointKey(rank_id_, local_eid_index, peer_id, qp_idx)];
             if (std::find(peers.begin(), peers.end(), peer_id) == peers.end()) {
                 peers.push_back(peer_id);
             }
@@ -1057,7 +1057,7 @@ void UdmaTransportManager::PrintSharedJettyGrouping(
             // Local endpoints this peer's channels egress on: one per distinct (local EID, qp slot).
             std::vector<EndpointMapKey> endpoints;
             const auto add_endpoint = [&endpoints, peer = dst_pes[i], this](uint32_t local_eid_index, uint32_t qp_idx) {
-                const EndpointMapKey key{local_eid_index, EndpointPeerRank(peer), EndpointQpSlot(qp_idx)};
+                const auto key = ResolveEndpointKey(rank_id_, local_eid_index, peer, qp_idx);
                 if (std::find(endpoints.begin(), endpoints.end(), key) == endpoints.end()) {
                     endpoints.push_back(key);
                 }
@@ -1505,9 +1505,8 @@ Result UdmaTransportManager::CreateChannelsForSlot(
 {
     // Endpoint keys for this batch; all current callers pass channel_num == 1, so the qp
     // dimension is the channel's qp_idx.
-    const EndpointMapKey local_endpoint_key{local_eid_index, EndpointPeerRank(dst_pe), EndpointQpSlot(first_qp_idx)};
-    const EndpointMapKey remote_endpoint_key{
-        remote_eid_index, EndpointPeerRank(rank_id_), EndpointQpSlot(first_qp_idx)};
+    const auto local_endpoint_key = ResolveEndpointKey(rank_id_, local_eid_index, dst_pe, first_qp_idx);
+    const auto remote_endpoint_key = ResolveEndpointKey(dst_pe, remote_eid_index, rank_id_, first_qp_idx);
     auto endpoint_it = endpoint_handle_map_.find(local_endpoint_key);
     if (endpoint_it == endpoint_handle_map_.end() || endpoint_it->second == nullptr) {
         SHM_LOG_ERROR(
@@ -1902,6 +1901,7 @@ bool UdmaTransportManager::BuildSyncEndpoints(
     std::vector<std::vector<SyncEndpoint>>& out)
 {
     std::vector<SyncEndpoint> local_endpoints;
+    const bool share_eid_aliases = CanShareEquivalentEndpoints();
     for (const auto& item : root_info.eidIndexToRankAddr) {
         const auto& rank_addr = item.second;
         if (rank_addr == nullptr || rank_addr->levelInfo == nullptr) {
@@ -1917,6 +1917,10 @@ bool UdmaTransportManager::BuildSyncEndpoints(
         endpoint.ports = rank_addr->ports;
         endpoint.eidIndex = item.first;
         local_endpoints.push_back(std::move(endpoint));
+    }
+
+    if (share_eid_aliases) {
+        TopoReader::AssignCanonicalEidIndices(root_info, local_endpoints);
     }
 
     const std::vector<uint8_t> local_blob = nlohmann::json::to_msgpack(nlohmann::json(local_endpoints));
@@ -1954,7 +1958,38 @@ bool UdmaTransportManager::BuildSyncEndpoints(
             return false;
         }
     }
+    // Enable mapping only when every rank publishes it.
+    endpoint_eid_aliases_.clear();
+    const bool all_ranks_publish_endpoint_mapping = std::all_of(out.begin(), out.end(), [](const auto& endpoints) {
+        return !endpoints.empty() && std::all_of(endpoints.begin(), endpoints.end(), [](const auto& endpoint) {
+            return endpoint.endpointEidIndex.has_value();
+        });
+    });
+    const bool use_endpoint_mapping = share_eid_aliases && all_ranks_publish_endpoint_mapping;
+    if (use_endpoint_mapping) {
+        endpoint_eid_aliases_.resize(out.size());
+        for (size_t rank = 0; rank < out.size(); ++rank) {
+            for (const auto& endpoint : out[rank]) {
+                if (*endpoint.endpointEidIndex != endpoint.eidIndex) {
+                    endpoint_eid_aliases_[rank].emplace(endpoint.eidIndex, *endpoint.endpointEidIndex);
+                }
+            }
+        }
+    }
     return true;
+}
+
+UdmaTransportManager::EndpointMapKey UdmaTransportManager::ResolveEndpointKey(
+    uint32_t owner_rank, uint32_t eid_index, uint32_t peer, uint32_t qp_idx) const
+{
+    if (CanShareEquivalentEndpoints() && owner_rank < endpoint_eid_aliases_.size()) {
+        const auto& aliases = endpoint_eid_aliases_[owner_rank];
+        const auto it = aliases.find(eid_index);
+        if (it != aliases.end()) {
+            eid_index = it->second;
+        }
+    }
+    return {eid_index, EndpointPeerRank(peer), EndpointQpSlot(qp_idx)};
 }
 
 Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank_count)
@@ -2059,7 +2094,7 @@ Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank
                 route.localEidIndex, route.remoteEidIndex, route.netType, route.netLayer, route.netInstanceId,
                 route.planeId, route.portCount});
             // route_idx maps 1:1 to qp_idx on the direct build (route_count == qp_num_).
-            const EndpointMapKey key{route.localEidIndex, EndpointPeerRank(peer), EndpointQpSlot(route_idx)};
+            const auto key = ResolveEndpointKey(rank_id_, route.localEidIndex, peer, route_idx);
             if (!CreateEndpoint(key, route.localEidRaw)) {
                 SHM_LOG_ERROR(
                     "CreateEndpoint failed for peer " << peer << " route_idx " << route_idx << " with EID index "
@@ -2399,6 +2434,7 @@ void UdmaTransportManager::CleanupResources()
     }
     endpoint_handle_map_.clear();
     peer_routes_.clear();
+    endpoint_eid_aliases_.clear();
     endpoint_desc_map_.clear();
     endpoint_listen_port_map_.clear();
     channel_handles_.clear();

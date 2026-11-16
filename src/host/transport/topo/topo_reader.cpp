@@ -190,6 +190,25 @@ const nlohmann::json* GetRequiredArray(
 
 } // namespace
 
+void TopoReader::AssignCanonicalEidIndices(const RootInfo& rootInfo, std::vector<SyncEndpoint>& endpoints)
+{
+    std::map<std::tuple<EidData, TopoFabric, std::string, std::vector<EidPort>>, EidIndex> canonicalIndices;
+    // The local records follow RootInfo's index order, so the first match has the lowest index.
+    for (auto& endpoint : endpoints) {
+        endpoint.endpointEidIndex = endpoint.eidIndex;
+        if (endpoint.addrType != RankAddrType::EID || endpoint.fabric == TopoFabric::Unknown ||
+            endpoint.planeId.empty() || endpoint.ports.empty()) {
+            continue;
+        }
+        const auto& address = rootInfo.eidIndexToRankAddr.at(endpoint.eidIndex);
+        auto ports = endpoint.ports;
+        std::sort(ports.begin(), ports.end());
+        ports.erase(std::unique(ports.begin(), ports.end()), ports.end());
+        const auto identity = std::make_tuple(address->eidData, endpoint.fabric, endpoint.planeId, std::move(ports));
+        endpoint.endpointEidIndex = canonicalIndices.emplace(identity, endpoint.eidIndex).first->second;
+    }
+}
+
 bool TopoReader::LoadRootInfoJson(uint32_t phyId, nlohmann::json& out)
 {
     bool shouldFallback = false;

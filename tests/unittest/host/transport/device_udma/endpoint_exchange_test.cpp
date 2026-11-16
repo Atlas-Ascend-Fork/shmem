@@ -98,6 +98,18 @@ protected:
         return ACLSHMEM_SUCCESS;
     }
 
+    static int GatherEndpointPair(const void* send, void* recv, int len, aclshmemi_bootstrap_handle_t* handle)
+    {
+        MirrorAllGather(send, recv, len, handle);
+        lengths_.push_back(len);
+        if (lengths_.size() == 1) {
+            static_cast<uint32_t*>(recv)[1] = static_cast<uint32_t>(peer_endpoint_blob_.size());
+        } else {
+            std::memcpy(static_cast<uint8_t*>(recv) + len, peer_endpoint_blob_.data(), peer_endpoint_blob_.size());
+        }
+        return ACLSHMEM_SUCCESS;
+    }
+
     static Result Gather(uint32_t chunk_count, Exchange& exchange)
     {
         exchange.max_count = 5;
@@ -228,6 +240,18 @@ protected:
         return manager.BuildSyncEndpoints(root_info, topo_info, rank_count, endpoints);
     }
 
+    static void SetEndpointAliases(UdmaTransportManager& manager, std::vector<std::map<EidIndex, EidIndex>> aliases)
+    {
+        manager.endpoint_eid_aliases_ = std::move(aliases);
+    }
+
+    static std::pair<uint32_t, uint32_t> ResolveResourceKey(
+        UdmaTransportManager& manager, uint32_t owner, uint32_t eid, uint32_t peer, uint32_t qp)
+    {
+        const auto key = manager.ResolveEndpointKey(owner, eid, peer, qp);
+        return {key.eid_index, key.qp_slot};
+    }
+
     static int ConfigAllGather(const void* send, void* recv, int len, aclshmemi_bootstrap_handle_t* handle)
     {
         lengths_.push_back(len);
@@ -273,6 +297,7 @@ protected:
     inline static std::vector<EndpointHandle> channel_endpoints_;
     inline static std::vector<std::string> channel_names_;
     inline static std::vector<uint64_t> mask_matrix_;
+    inline static std::vector<uint8_t> peer_endpoint_blob_;
     inline static uint32_t config_mismatch_{0};
     inline static uintptr_t next_handle_{1000};
 };
@@ -400,6 +425,154 @@ TEST_F(UdmaEndpointExchangeTest, KeepsGenuinelyAmbiguousLocalTopologyUnclassifie
     std::vector<std::vector<SyncEndpoint>> endpoints;
     ASSERT_TRUE(BuildSyncEndpointsForTest(manager, root, topo, 1, endpoints));
     EXPECT_EQ(endpoints[0][0].fabric, TopoFabric::Unknown);
+}
+
+TEST_F(UdmaEndpointExchangeTest, SharedDirectUdmaDeduplicatesOnlyEquivalentEndpointResources)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        GTEST_SKIP() << "Endpoint sharing across peers applies to direct builds";
+    }
+    g_boot_handle.npes = 1;
+    g_boot_handle.allgather = MirrorAllGather;
+    RootInfo root;
+    TopoInfo topo;
+    topo.closTopoEdges.push_back({0, 0, 0, {"0/0", "0/1"}});
+    topo.closTopoEdges.push_back({1, 0, 0, {"0/0", "0/1"}});
+    topo.meshTopoEdges.push_back({0, 1, {"0/0", "0/1"}, {"0/2"}});
+    auto first = std::make_shared<RankAddr>();
+    first->eidData[0] = 1;
+    first->planeId = "plane";
+    first->ports = {"0/0", "0/1"};
+    first->levelInfo = std::make_shared<LevelInfo>(LevelInfo{0, "local", NetType::Clos, ""});
+    root.eidIndexToRankAddr.emplace(0, first);
+
+    auto alias = std::make_shared<RankAddr>(*first);
+    alias->levelInfo = std::make_shared<LevelInfo>(LevelInfo{1, "global", NetType::Clos, ""});
+    alias->ports = {"0/1", "0/0"};
+    root.eidIndexToRankAddr.emplace(1, alias);
+    auto other_eid = std::make_shared<RankAddr>(*alias);
+    other_eid->eidData[0] = 2;
+    root.eidIndexToRankAddr.emplace(2, other_eid);
+    auto other_plane = std::make_shared<RankAddr>(*alias);
+    other_plane->planeId = "other-plane";
+    root.eidIndexToRankAddr.emplace(3, other_plane);
+    auto other_ports = std::make_shared<RankAddr>(*alias);
+    other_ports->ports = {"0/1"};
+    root.eidIndexToRankAddr.emplace(4, other_ports);
+    auto mesh = std::make_shared<RankAddr>(*first);
+    mesh->levelInfo = std::make_shared<LevelInfo>(LevelInfo{0, "local", NetType::Mesh, ""});
+    root.eidIndexToRankAddr.emplace(5, mesh);
+    root.eidIndexToRankAddr.emplace(6, std::make_shared<RankAddr>(*mesh));
+    // Same-layer duplicates also share resources.
+    auto same_layer = std::make_shared<RankAddr>(*first);
+    same_layer->ports = {"0/1", "0/0", "0/1"};
+    root.eidIndexToRankAddr.emplace(7, same_layer);
+
+    UdmaTransportManager manager;
+    EnableSharedJetty(manager);
+    std::vector<std::vector<SyncEndpoint>> endpoints;
+    ASSERT_TRUE(BuildSyncEndpointsForTest(manager, root, topo, 1, endpoints));
+    ASSERT_EQ(endpoints[0].size(), 8U);
+    EXPECT_EQ(endpoints[0][1].eidIndex, 1U);
+    EXPECT_EQ(endpoints[0][1].netLayer, 1U);
+    EXPECT_EQ(endpoints[0][1].netInstanceId, "global");
+    EXPECT_EQ(endpoints[0][1].endpointEidIndex, 0U);
+    for (EidIndex index : {0U, 2U, 3U, 4U, 5U}) {
+        EXPECT_EQ(endpoints[0][index].endpointEidIndex, index);
+    }
+    EXPECT_EQ(endpoints[0][6].endpointEidIndex, 5U);
+    EXPECT_EQ(endpoints[0][7].endpointEidIndex, 0U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, EndpointMappingDoesNotApplyOutsideSharedDirectUdma)
+{
+    UdmaTransportManager manager;
+    ConfigureManager(manager, 0, 3, 2);
+    // Ignore existing aliases outside shared direct mode.
+    SetEndpointAliases(manager, {{{1, 0}}});
+    EXPECT_EQ(ResolveResourceKey(manager, 0, 1, 2, 0).first, 1U);
+    EnableSharedJetty(manager);
+    const uint32_t expected = ACLSHMEM_UDMA_RELAY_ENABLED ? 1U : 0U;
+    EXPECT_EQ(ResolveResourceKey(manager, 0, 1, 2, 0).first, expected);
+    EXPECT_EQ(ResolveResourceKey(manager, 1, 1, 2, 0).first, 1U);
+    if constexpr (!ACLSHMEM_UDMA_RELAY_ENABLED) {
+        EXPECT_EQ(ResolveResourceKey(manager, 0, 1, 2, 0).second, 0U);
+        EXPECT_EQ(ResolveResourceKey(manager, 0, 1, 2, 1).second, 1U);
+    }
+}
+
+TEST_F(UdmaEndpointExchangeTest, NonSharedModeDoesNotPublishEndpointMapping)
+{
+    g_boot_handle.npes = 1;
+    g_boot_handle.allgather = MirrorAllGather;
+    RootInfo root;
+    TopoInfo topo;
+    auto record = std::make_shared<RankAddr>();
+    record->eidData[0] = 1;
+    record->planeId = "plane";
+    record->ports = {"0/0"};
+    record->levelInfo = std::make_shared<LevelInfo>(LevelInfo{0, "local", NetType::Clos, ""});
+    root.eidIndexToRankAddr.emplace(0, record);
+    root.eidIndexToRankAddr.emplace(1, std::make_shared<RankAddr>(*record));
+    UdmaTransportManager manager;
+    std::vector<std::vector<SyncEndpoint>> endpoints;
+    ASSERT_TRUE(BuildSyncEndpointsForTest(manager, root, topo, 1, endpoints));
+    ASSERT_EQ(endpoints[0].size(), 2U);
+    EXPECT_FALSE(endpoints[0][0].endpointEidIndex.has_value());
+    EXPECT_FALSE(endpoints[0][1].endpointEidIndex.has_value());
+}
+
+TEST_F(UdmaEndpointExchangeTest, MissingEndpointMappingFieldRemainsAbsent)
+{
+    SyncEndpoint original;
+    original.eidIndex = 1;
+    original.netLayer = 2;
+    original.netInstanceId = "instance";
+    nlohmann::json legacy = original;
+    EXPECT_FALSE(legacy.contains("endpointEidIndex"));
+    SyncEndpoint decoded;
+    decoded.endpointEidIndex = 0;
+    from_json(legacy, decoded);
+    EXPECT_FALSE(decoded.endpointEidIndex.has_value());
+    EXPECT_EQ(decoded.eidIndex, 1U);
+    EXPECT_EQ(decoded.netLayer, 2U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, MissingPeerMappingDisablesEndpointAliasesAcrossRanks)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        GTEST_SKIP() << "Endpoint alias exchange applies to direct builds";
+    }
+    auto address = std::make_shared<RankAddr>();
+    address->eidData[0] = 1;
+    address->planeId = "plane";
+    address->ports = {"0/0"};
+    address->levelInfo = std::make_shared<LevelInfo>(LevelInfo{0, "local", NetType::Clos, ""});
+    RootInfo root;
+    root.eidIndexToRankAddr = {{0, address}, {1, address}};
+
+    UdmaTransportManager manager;
+    ConfigureManager(manager, 0, 2, 2);
+    EnableSharedJetty(manager);
+    g_boot_handle.npes = 2;
+    g_boot_handle.allgather = GatherEndpointPair;
+    for (bool peer_publishes_mapping : {true, false}) {
+        SCOPED_TRACE(peer_publishes_mapping);
+        std::vector<SyncEndpoint> peer(2);
+        peer[0].eidIndex = 2;
+        peer[1].eidIndex = 3;
+        if (peer_publishes_mapping) {
+            peer[0].endpointEidIndex = 2;
+            peer[1].endpointEidIndex = 2;
+        }
+        peer_endpoint_blob_ = nlohmann::json::to_msgpack(nlohmann::json(peer));
+        lengths_.clear();
+        std::vector<std::vector<SyncEndpoint>> endpoints;
+        ASSERT_TRUE(BuildSyncEndpointsForTest(manager, root, TopoInfo{}, 2, endpoints));
+        ASSERT_EQ(lengths_.size(), 2U);
+        EXPECT_EQ(ResolveResourceKey(manager, 0, 1, 1, 1), std::make_pair(peer_publishes_mapping ? 0U : 1U, 1U));
+        EXPECT_EQ(ResolveResourceKey(manager, 1, 3, 0, 1), std::make_pair(peer_publishes_mapping ? 2U : 3U, 1U));
+    }
 }
 
 TEST_F(UdmaEndpointExchangeTest, ValidatesSymmetricMasksAtEp256And512)
@@ -743,11 +916,12 @@ TEST_F(UdmaEndpointExchangeTest, SharedJettyKeepsQpEndpointsSeparateWithLayerRou
     UdmaTransportManager manager;
     ConfigureManager(manager, 0, 3, 2);
     EnableSharedJetty(manager);
-    // Both peers converge on the same EID, but each QP retains its own endpoint
-    // and its resolved network layer, even while sharing with the other peer.
+    // Rank-local aliases preserve QP isolation across layers.
+    SetEndpointAliases(manager, {{{11, 10}}, {{21, 20}}, {{21, 22}}});
     for (uint32_t peer : {1U, 2U}) {
-        AddRoute(manager, peer, 10, 20, 0);
-        AddRoute(manager, peer, 10, 20, 1);
+        const uint32_t local_eid = peer == 1 ? 10 : 11;
+        AddRoute(manager, peer, local_eid, 21, 0);
+        AddRoute(manager, peer, local_eid, 21, 1);
         AddEndpoint(manager, 10, peer, 10, 0);
         AddEndpoint(manager, 10, peer, 11, 1);
     }
@@ -765,7 +939,7 @@ TEST_F(UdmaEndpointExchangeTest, SharedJettyKeepsQpEndpointsSeparateWithLayerRou
     exchange.descs.resize(6);
     for (uint32_t peer : {1U, 2U}) {
         for (uint32_t qp = 0; qp < 2; ++qp) {
-            AddRemoteDescriptor(exchange, peer, qp, 0xFFFFFFFFU, 20, qp);
+            AddRemoteDescriptor(exchange, peer, qp, 0xFFFFFFFFU, peer == 1 ? 20 : 22, qp);
             uint32_t layer = 99;
             ASSERT_EQ(manager.GetQpNetLayer(ACLSHMEM_DATA_OP_UDMA, peer, qp, layer), ACLSHMEM_SUCCESS);
             EXPECT_EQ(layer, qp);

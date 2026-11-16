@@ -166,6 +166,8 @@ private:
         std::map<size_t, std::vector<uint32_t>> state_idx_to_dst_pes;
         std::map<std::pair<uint32_t, uint32_t>, size_t> peer_qp_to_state_idx;
     };
+    bool CanShareEquivalentEndpoints() const { return !ACLSHMEM_UDMA_RELAY_ENABLED && shared_jetty_enabled_; }
+    EndpointMapKey ResolveEndpointKey(uint32_t owner_rank, uint32_t eid_index, uint32_t peer, uint32_t qp_idx) const;
     bool CreateEndpoint(const EndpointMapKey& endpoint_key, const std::array<uint8_t, 16>& target_eid_raw);
     Result PrepareOpenDevice(uint32_t device_id, uint32_t rank_count);
     // Allgather the local HCOMM endpoint descriptors into `exchange`.
@@ -291,6 +293,8 @@ private:
     // peerRankId -> route state. default_route is the first resolved route and is used by
     // relay/legacy slots; qp_routes is used by direct multi-QP slots.
     std::map<uint32_t, PeerRouteInfo> peer_routes_;
+    // Per-rank Endpoint aliases; route indices and QP slots remain unchanged.
+    std::vector<std::map<EidIndex, EidIndex>> endpoint_eid_aliases_;
     // N x N routing matrix: [rank * rank_count_ + peer] = local-port eid_index `rank` uses to reach
     // `peer`. Only read on the relay path to resolve each (actual_pe, relay_pe) slot's target EID.
     std::vector<int32_t> all_local_routes_;
