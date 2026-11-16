@@ -306,5 +306,5 @@ SHMEM编译文件，一般无需更改。
 
 ### 环境变量设置文件`set_env.sh`
 
-​**文件名**​：`scripts/set_env.sh`
+**文件名**：`scripts/set_env.sh`
 SHMEM安装完成后，提供进程级环境变量设置脚本`set_env.sh`，以自动完成环境变量设置，用户进程结束后自动失效。

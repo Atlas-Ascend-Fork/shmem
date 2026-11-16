@@ -281,5 +281,5 @@ File name: `scripts/build.sh`
 SHMEM compilation file, which does not need to be modified
 
 ### set_env.sh
-​File name: `scripts/set_env.sh`
+File name: `scripts/set_env.sh`
 After SHMEM is installed, the process-level environment variable setting script `set_env.sh` is provided to automatically set environment variables. The environment variables automatically become invalid after the user process ends.
