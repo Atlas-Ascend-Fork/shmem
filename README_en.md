@@ -151,6 +151,7 @@ shmem/                                  # Project root directory
 │   │   ├── team/                       # Device-side team management
 │   │   └── ub2gm/                      # Data plane APIs ub2gm driven by AI Core
 │   │       └── engine/                 # Low-level APIs ub2gm directly driven by AI Core
+│   ├── device_simt/                    # SIMT-side header files (SIMT-driven data plane APIs, parallel to device/)
 │   ├── host/                           # Host-side header files
 │   │   ├── data_plane/                 # Host-side data plane APIs
 │   │   ├── init/                       # Host-side initialization APIs
@@ -166,6 +167,7 @@ shmem/                                  # Project root directory
 │   │   ├── team/                       # Device-side team management
 │   │   └── ub2gm/                      # Data plane APIs ub2gm driven by AI Core
 │   │       └── mte/                    # Low-level APIs ub2gm directly driven by AI Core
+│   ├── device_simt/                    # SIMT-side implementation (a second implementation set parallel to device/)
 │   ├── host/                           # Host-side implementation
 │   │   ├── bootstrap/                  # bootstrap
 │   │   ├── data_plane/                 # Host-side data plane API implementation

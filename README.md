@@ -153,6 +153,7 @@ shmem/                                  # 项目根目录
 │   │   ├── team/                       # Device 侧通信域管理
 │   │   └── ub2gm/                      # AICore 驱动 ub2gm 数据面接口
 │   │       └── engine/                 # AICore 直驱 ub2gm 低阶接口
+│   ├── device_simt/                    # SIMT 侧头文件（SIMT 驱动数据面接口，与 device/ 的 AICore 驱动并列）
 │   ├── host/                           # Host 侧头文件
 │   │   ├── data_plane/                 # Host 侧数据面接口
 │   │   ├── init/                       # Host 侧初始化接口
@@ -168,6 +169,7 @@ shmem/                                  # 项目根目录
 │   │   ├── team/                       # Device 侧通信域管理
 │   │   └── ub2gm/                      # AICore 驱动 ub2gm 数据面接口
 │   │       └── mte/                    # AICore 直驱 ub2gm 低阶接口
+│   ├── device_simt/                    # SIMT 侧实现（与 device/ 并列的另一套 SIMT 驱动实现）
 │   ├── host/                           # Host 侧实现
 │   │   ├── bootstrap/                  # bootstrap
 │   │   ├── data_plane/                 # Host 侧数据面接口实现
