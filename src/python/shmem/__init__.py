@@ -196,10 +196,14 @@ def _run_pre_import_env_check():
         return
 
     try:
-        subprocess.run(
+        result = subprocess.run(
             [str(check_script), "--package", str(_PKG_ROOT)],
             timeout=15
         )
+        if result.returncode != 0:
+            logging.warning("[SHMEM env check] 环境检测返回非零状态码：%s", result.returncode)
+            _env_already_checked = True
+            return
     except subprocess.TimeoutExpired:
         print("\n[SHMEM env check] 环境检测超时（>15s），跳过。请手动运行 shmem-config --check。",
               file=sys.stderr)
