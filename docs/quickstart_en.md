@@ -29,6 +29,8 @@ For details, see [Organizational Structure of Code](code_organization_en.md).
 CMake 3.19 or later
 GLIBC 2.28 or later
 
+SHMEM calls HCCP APIs when using RDMA on Atlas A2 and A3 products, so compatibility with CANN T releases is documented separately here. The currently supported CANN T releases are `8.2.T101`, `8.3.T101`, `8.5.T101`, `9.0.T101`, `9.1.T101`, and `9.2.T101`.
+
 ## Quick Start
  - Set CANN environment variable.<br>
     ```sh

@@ -9,16 +9,13 @@
  */
 
 #include <dlfcn.h>
-#include <sys/stat.h>
-#include <sys/sysmacros.h>
-#include <algorithm>
 #include <atomic>
-#include <cstdio>
 #include <cstring>
-#include <sstream>
 #include <vector>
+#include <sstream>
 #include "shmemi_functions.h"
 #include "dl_hccp_api.h"
+#include "dl_comm_def.h"
 #include "host/shmem_host_def.h"
 #include "utils/shmemi_logger.h"
 
@@ -57,6 +54,57 @@ raDeregisterMrFunc DlHccpApi::gRaDeregisterMR;
 raMrRegFunc DlHccpApi::gRaMrReg;
 raSetQpAttrQosFunc DlHccpApi::gRaSetQpAttrQos;
 tsdOpenFunc DlHccpApi::gTsdOpen;
+
+int DlHccpApi::SelectSocketConnectInfoStride(const std::string& hcommVersion, const std::string& cannVersion)
+{
+    unsigned int hcommMajor = 0;
+    unsigned int hcommMinor = 0;
+    unsigned int hcommPatch = 0;
+    char firstSeparator = 0;
+    char secondSeparator = 0;
+    std::istringstream hcomm(hcommVersion);
+    // hcomm 9.2 needs the CANN release type to distinguish the socket layouts.
+    if (hcommVersion.find_first_not_of("0123456789.") == std::string::npos &&
+        (hcomm >> hcommMajor >> firstSeparator >> hcommMinor >> secondSeparator >> hcommPatch) &&
+        firstSeparator == '.' && secondSeparator == '.' && hcomm.eof()) {
+        int stride = hcommMajor > 9 || (hcommMajor == 9 && hcommMinor >= 3) ? sizeof(HccpSocketConnectInfoV2) :
+                                                                              sizeof(HccpSocketConnectInfo);
+        if (hcommMajor == 9 && hcommMinor == 2) {
+            const bool legacyRelease =
+                cannVersion.find("beta") != std::string::npos || cannVersion.find('T') != std::string::npos;
+            stride = legacyRelease ? sizeof(HccpSocketConnectInfo) : sizeof(HccpSocketConnectInfoV2);
+        }
+        SHM_LOG_INFO("hcomm version=" << hcommVersion << ", SocketConnectInfoT stride=" << stride);
+        return stride;
+    }
+
+    SHM_LOG_WARN(
+        "hcomm version unavailable or invalid [" << hcommVersion << "], falling back to CANN version judgement ["
+                                                 << cannVersion << "]");
+    // Preserve the CANN fallback parser: accepting T suffixes would misclassify 9.2.T530 as V2.
+    const auto legacyFallback = [&cannVersion]() {
+        SHM_LOG_WARN(
+            "Using V1(224) socket layout from CANN version fallback ["
+            << cannVersion << "]; this is only safe for CANN < 9.3. Verify if CANN >= 9.3.");
+        return sizeof(HccpSocketConnectInfo);
+    };
+    // The two 9.2.0 beta releases still use the legacy connect/listen ABI.
+    if (cannVersion == "9.2.0-beta.1" || cannVersion == "9.2.0-beta.2" || cannVersion == "9.2.0.beta.1" ||
+        cannVersion == "9.2.0.beta.2") {
+        return legacyFallback();
+    }
+
+    unsigned int major = 0;
+    unsigned int minor = 0;
+    unsigned int patch = 0;
+    char firstDot = 0;
+    char secondDot = 0;
+    std::istringstream version(cannVersion);
+    if (!(version >> major >> firstDot >> minor >> secondDot >> patch) || firstDot != '.' || secondDot != '.') {
+        return legacyFallback();
+    }
+    return major > 9 || (major == 9 && minor >= 2) ? sizeof(HccpSocketConnectInfoV2) : legacyFallback();
+}
 
 Result DlHccpApi::LoadLibrary()
 {
@@ -121,189 +169,22 @@ Result DlHccpApi::LoadLibrary()
 
     DL_LOAD_SYM(gTsdOpen, tsdOpenFunc, tsdHandle, "TsdOpen");
 
-    /* 探测 libra.so 的 SocketConnectInfoT 布局(224/232); 探测失败时降级为 V1 直传(等价于兼容层引入前的行为),
-     * 避免因个别环境(如容器 overlayfs)下镜像定位失败而连带关闭整个 RDMA 能力 */
-    bool strideDetected = true;
-    gConnectInfoStride = DetectConnectInfoStride(reinterpret_cast<void*>(gRaSocketBatchConnect));
-    if (gConnectInfoStride != sizeof(HccpSocketConnectInfo) && gConnectInfoStride != sizeof(HccpSocketConnectInfoV2)) {
-        SHM_LOG_WARN(
-            "Cannot detect SocketConnectInfoT layout of ["
-            << gRaLibName << "], got stride=" << gConnectInfoStride
-            << ", fall back to V1 pass-through, stride=" << sizeof(HccpSocketConnectInfo));
-        gConnectInfoStride = sizeof(HccpSocketConnectInfo);
-        strideDetected = false;
-    }
+    const std::string hcommVersion = GetHcommVersion();
+    const std::string cannVersion = GetCannVersion();
+    gConnectInfoStride = SelectSocketConnectInfoStride(hcommVersion, cannVersion);
     Dl_info libInfo = {};
     const char* libPath =
         (dladdr(reinterpret_cast<void*>(gRaSocketBatchConnect), &libInfo) != 0 && libInfo.dli_fname != nullptr) ?
             libInfo.dli_fname :
             gRaLibName;
     SHM_LOG_INFO(
-        "LoadLibrary for DlHccpApi success, libra=" << libPath << ", SocketConnectInfoT stride=" << gConnectInfoStride
-                                                    << (gConnectInfoStride == sizeof(HccpSocketConnectInfoV2) ?
-                                                            " (V2, conn array auto-converted)" :
-                                                        strideDetected ? " (V1, conn array used as-is)" :
-                                                                         " (V1, degraded, conn array used as-is)"));
+        "LoadLibrary for DlHccpApi success, libra="
+        << libPath << ", hcomm version=" << hcommVersion << ", CANN version=" << cannVersion
+        << ", SocketConnectInfoT stride=" << gConnectInfoStride
+        << (gConnectInfoStride == sizeof(HccpSocketConnectInfoV2) ? " (V2, conn array auto-converted)" :
+                                                                    " (V1, conn array used as-is)"));
     gLoaded = true;
     return ACLSHMEM_SUCCESS;
-}
-
-namespace {
-constexpr const char kV2Marker[] = "tagChkDis";
-constexpr size_t kV2MarkerLen = sizeof(kV2Marker) - 1;
-/* 文件内容回退扫描的分块大小, 读取时保留 kV2MarkerLen - 1 字节跨块重叠, 防止标记串被块边界截断 */
-constexpr size_t kScanChunkSize = 4096U;
-
-/* 在 [begin, end) 中搜索 V2 标记串 */
-bool RangeContainsV2Marker(const char* begin, const char* end)
-{
-    return std::search(begin, end, kV2Marker, kV2Marker + kV2MarkerLen) != end;
-}
-
-bool ParseMapsLine(
-    const char* line, uintptr_t& start, uintptr_t& end, char* perms, size_t permsSize, unsigned int& devMajor,
-    unsigned int& devMinor, unsigned long long& inode)
-{
-    std::istringstream stream(line);
-    std::string permsStr;
-    std::string offsetStr; /* offset 为 16 进制(可含字母), 仅作占位跳过, 不做数值解析 */
-    stream >> std::hex >> start;
-    if (stream.fail() || stream.peek() != '-') {
-        return false;
-    }
-    stream.ignore(1);
-    if (!(stream >> end >> permsStr >> offsetStr)) {
-        return false;
-    }
-    /* dev 字段: "major:minor", 内核以 16 进制输出, 冒号留在流中单独跳过 */
-    stream >> std::hex >> devMajor;
-    if (stream.fail() || stream.peek() != ':') {
-        return false;
-    }
-    stream.ignore(1);
-    if (!(stream >> devMinor >> std::dec >> inode)) {
-        return false;
-    }
-    if (permsStr.size() + 1 > permsSize) {
-        return false;
-    }
-    std::memcpy(perms, permsStr.c_str(), permsStr.size() + 1);
-    return true;
-}
-/* 方式一: 按 dev/ino 定位库文件在 /proc/self/maps 中的可读映射段, 扫描运行时镜像。
- * 返回 1(命中 V2 标记) / 0(完整扫描未命中) / -1(未能定位到本库的映射段) */
-int ScanMappedImageForV2Marker(const struct stat& target)
-{
-    FILE* maps = fopen("/proc/self/maps", "r");
-    if (maps == nullptr) {
-        return -1;
-    }
-    bool rangeFound = false;
-    bool markerFound = false;
-    char line[1024] = {0};
-    while (fgets(line, sizeof(line), maps) != nullptr && !markerFound) {
-        uintptr_t start = 0;
-        uintptr_t end = 0;
-        char perms[8] = {0};
-        unsigned int devMajor = 0;
-        unsigned int devMinor = 0;
-        unsigned long long inode = 0;
-        if (!ParseMapsLine(line, start, end, perms, sizeof(perms), devMajor, devMinor, inode)) {
-            continue;
-        }
-        if (perms[0] != 'r') {
-            continue;
-        }
-        if (major(target.st_dev) != devMajor || minor(target.st_dev) != devMinor ||
-            static_cast<unsigned long long>(target.st_ino) != inode) {
-            continue;
-        }
-        rangeFound = true;
-        markerFound = RangeContainsV2Marker(reinterpret_cast<const char*>(start), reinterpret_cast<const char*>(end));
-    }
-    fclose(maps);
-    if (!rangeFound) {
-        return -1;
-    }
-    return markerFound ? 1 : 0;
-}
-
-/* 方式二(回退): 直接扫描库文件内容。容器 overlayfs 等场景下 stat() 与 /proc/self/maps 的 dev/ino
- * 可能不一致导致方式一定位失败, 而 V2 标记串同样存在于文件镜像的 .rodata 中。
- * 返回值语义同上; 文件不可读或为空时返回 -1 */
-int ScanFileForV2Marker(const char* path)
-{
-    FILE* file = fopen(path, "rb");
-    if (file == nullptr) {
-        return -1;
-    }
-    const int stride = DlHccpApi::DetectStrideFromFile(file);
-    fclose(file);
-    return stride == sizeof(HccpSocketConnectInfoV2) ? 1 : stride == sizeof(HccpSocketConnectInfo) ? 0 : -1;
-}
-} /* namespace */
-
-int DlHccpApi::DetectStrideFromFile(std::FILE* file)
-{
-    if (file == nullptr) {
-        return 0;
-    }
-    std::vector<char> buf(kScanChunkSize + kV2MarkerLen - 1);
-    size_t carry = 0; /* 上一块末尾保留的重叠字节数 */
-    for (;;) {
-        const size_t nRead = fread(buf.data() + carry, 1, kScanChunkSize, file);
-        const bool eof = feof(file) != 0;
-        const size_t total = carry + nRead;
-        if (ferror(file) != 0 || total == 0) {
-            return 0; /* 读取出错或空文件, 无法判定 */
-        }
-        if (RangeContainsV2Marker(buf.data(), buf.data() + total)) {
-            return sizeof(HccpSocketConnectInfoV2);
-        }
-        if (eof) {
-            return sizeof(HccpSocketConnectInfo);
-        }
-        carry = std::min(total, kV2MarkerLen - 1U);
-        std::memmove(buf.data(), buf.data() + total - carry, carry);
-    }
-}
-
-int DlHccpApi::DetectStrideFromImage(const char* imagePath)
-{
-    /*
-     * 在 libra.so 镜像中搜索 V2(232) 新增字段 "tagChkDis" 的日志格式串以判定布局
-     * (该串位于 .rodata, V1(224) 版本无此字段), 只读镜像、不解析指令, 与宿主指令集无关:
-     *   优先按 dev/ino 匹配 /proc/self/maps 定位本库可读映射段, 扫描运行时镜像;
-     *   定位失败(如容器 overlayfs 下 stat 与 maps 的 dev/ino 不一致)时回退为直接扫描库文件内容;
-     *   两者均无法判定 -> 返回 0, 由调用方降级为 V1。
-     */
-    if (imagePath == nullptr) {
-        return 0;
-    }
-    struct stat target = {};
-    if (stat(imagePath, &target) == 0) {
-        const int mapped = ScanMappedImageForV2Marker(target);
-        if (mapped >= 0) {
-            return mapped == 1 ? sizeof(HccpSocketConnectInfoV2) : sizeof(HccpSocketConnectInfo);
-        }
-    }
-    const int fromFile = ScanFileForV2Marker(imagePath);
-    if (fromFile >= 0) {
-        return fromFile == 1 ? sizeof(HccpSocketConnectInfoV2) : sizeof(HccpSocketConnectInfo);
-    }
-    return 0;
-}
-
-int DlHccpApi::DetectConnectInfoStride(void* funcAddr)
-{
-    if (funcAddr == nullptr) {
-        return 0;
-    }
-    Dl_info info = {};
-    if (dladdr(funcAddr, &info) == 0 || info.dli_fname == nullptr) {
-        return 0;
-    }
-    return DetectStrideFromImage(info.dli_fname);
 }
 
 int DlHccpApi::RaSocketBatchConnect(HccpSocketConnectInfo conn[], uint32_t num)

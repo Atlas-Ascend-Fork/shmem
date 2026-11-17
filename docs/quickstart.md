@@ -63,6 +63,9 @@ source ${install_path}/ascend-toolkit/set_env.sh
 | Ascend HDK 25.5.1 及以上<br>[HDK 资源](https://www.hiascend.com/hardware/firmware-drivers?ids=d803%2C89dda9ba9de741349efa03687a487678%2C25%2CAArch64%2Conline_Yum) | 9.0.0 及以上<br>[CANN 资源](https://www.hiascend.com/developer/download/community/result?module=cann&cann=9.0.0) | MTE<br>RDMA<br>SDMA（仅支持A2/A3） | MTE<br>SDMA（仅支持 A3） | MTE（仅支持 A3）<br>SDMA（仅支持 A3） | 使能 SDMA 需下载与 toolkit 版本和设备类型匹配的 [ops 包](https://www.hiascend.com/developer/download/community/result?module=cann) |
 | Ascend HDK 25.5.1 及以上<br>[HDK 资源](https://www.hiascend.com/hardware/firmware-drivers?ids=d803%2C89dda9ba9de741349efa03687a487678%2C25%2CAArch64%2Conline_Yum) | 8.5.0 及以上<br>[CANN 资源](https://www.hiascend.com/developer/download/community/result?module=cann) | MTE<br>RDMA | MTE（仅支持 A3） | MTE（仅支持 A3） | 使能 A3 D2rH/rH2D：LingQu Computing Network [1.5.0 版本](https://support.huawei.com/enterprise/zh/ascend-computing/lingqu-computing-network-pid-258003841/software)<br>升级指导：[安装指南](https://support.huawei.com/enterprise/zh/ascend-computing/lingqu-computing-network-pid-258003841) |
 | Ascend HDK 25.2.3 及以上<br>[HDK 资源](https://www.hiascend.com/hardware/firmware-drivers?ids=d803%2C89dda9ba9de741349efa03687a487678%2C25%2CAArch64%2Conline_Yum) | 8.3.RC1 及以上<br>[CANN 资源](https://www.hiascend.com/developer/download/community/result?module=cann) | MTE<br>RDMA |  |  | |
+
+SHMEM 在 Atlas A2、A3 产品上使用 RDMA 时会调用 HCCP 接口，因此此处单独说明其对 CANN T 版本的兼容性。当前已兼容的 CANN T 版本为：`8.2.T101`、`8.3.T101`、`8.5.T101`、`9.0.T101`、`9.1.T101`、`9.2.T101`。
+
 #### 4.3.2 CANN 包安装
 
 参考[快速安装 CANN](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900/softwareinst/instg/instg_0000.html?OS=openEuler&InstallType=local)
