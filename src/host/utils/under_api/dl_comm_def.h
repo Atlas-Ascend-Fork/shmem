@@ -94,6 +94,7 @@ struct ShareHandleAttr {
 HybmGvaVersion HybmGetGvaVersion();
 
 std::string GetCannVersion();
+std::string GetHcommVersion();
 bool CannVersionCheck(const std::string& requiredVer);
 
 int32_t GetValueFromVersion(const std::string& ver, std::string key);

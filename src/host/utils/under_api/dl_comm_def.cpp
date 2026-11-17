@@ -87,7 +87,9 @@ static void QueryCannVersion()
 
     std::string cannVersion;
     std::string searchPath = cannHomePath;
-    std::string infoFileName = "ascend_toolkit_install.info";
+    // CANN bundles use ascend_all_cann_install.info; legacy Toolkit packages retain the original filename.
+    const char* toolkitInfoFileName = "ascend_toolkit_install.info";
+    const char* allCannInfoFileName = "ascend_all_cann_install.info";
 
     std::function<void(const std::string&)> searchDir = [&](const std::string& path) {
         DIR* dir = opendir(path.c_str());
@@ -102,7 +104,8 @@ static void QueryCannVersion()
             std::string fullPath = path + "/" + entry->d_name;
             if (entry->d_type == DT_DIR) {
                 searchDir(fullPath);
-            } else if (strcmp(entry->d_name, infoFileName.c_str()) == 0) {
+            } else if (
+                strcmp(entry->d_name, toolkitInfoFileName) == 0 || strcmp(entry->d_name, allCannInfoFileName) == 0) {
                 std::ifstream infile(fullPath, std::ifstream::in);
                 if (infile.is_open()) {
                     std::string line;
@@ -125,7 +128,7 @@ static void QueryCannVersion()
 
     searchDir(searchPath);
     if (cannVersion.empty()) {
-        SHM_LOG_WARN("Cannot find ascend_toolkit_install.info or version field in ASCEND_HOME_PATH");
+        SHM_LOG_WARN("Cannot find CANN install info or version field in ASCEND_HOME_PATH");
     } else {
         SHM_LOG_INFO("CANN version: " << cannVersion);
     }
@@ -136,6 +139,32 @@ std::string GetCannVersion()
 {
     std::call_once(cannVersionOnce, QueryCannVersion);
     return cachedCannVersion;
+}
+
+std::string GetHcommVersion()
+{
+    static std::once_flag hcommVersionOnce;
+    static std::string cachedHcommVersion;
+    std::call_once(hcommVersionOnce, []() {
+        const char* cannHomePath = std::getenv("ASCEND_HOME_PATH");
+        if (cannHomePath == nullptr || cannHomePath[0] == '\0') {
+            return;
+        }
+        const std::string path = std::string(cannHomePath) + "/share/info/hcomm/version.info";
+        std::ifstream infile(path);
+        std::string line;
+        while (std::getline(infile, line)) {
+            if (line.compare(0, 8, "Version=") == 0) {
+                const auto begin = line.find_first_not_of(" \t", 8);
+                const auto end = line.find_last_not_of(" \t\r");
+                if (begin != std::string::npos && begin <= end) {
+                    cachedHcommVersion = line.substr(begin, end - begin + 1);
+                }
+                break;
+            }
+        }
+    });
+    return cachedHcommVersion;
 }
 
 bool CannVersionCheck(const std::string& requiredVer)
