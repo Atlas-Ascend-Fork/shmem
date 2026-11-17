@@ -16,6 +16,14 @@
 #include "device_simt/shmem_simt_common_types.h"
 
 namespace simt {
+/**
+ * @note Current warp RMA methods use block-wide barriers. All block
+ * threads must call them in the same order and count; each warp may use its own
+ * uniform arguments. Partial tail warps are supported. Independent warp branches
+ * and unequal per-warp call counts are unsupported. This also applies to NBI APIs.
+ * Each warp transfers its complete [0, count) range. A partial tail warp uses
+ * its actual number of participating threads as the stride for that range.
+ */
 
 /**
  * @brief Standard RMA Types and Names
@@ -425,5 +433,5 @@ __simt_callee__ inline void aclshmemx_getmem_nbi_warp(__gm__ void* dst, __gm__ v
 
 } // namespace simt
 
-#include "gm2gm/shmem_device_simt_rma.hpp"
+#include "gm2gm/shmemi_device_simt_rma.h"
 #endif // ACLSHMEM_DEVICE_SIMT_RMA_H

@@ -166,6 +166,6 @@ __simt_callee__ inline void aclshmemx_udma_qp_quiet_block(int pe, uint32_t qp_id
 
 } // namespace simt
 
-#include "gm2gm/engine/shmem_device_simt_udma.hpp"
+#include "gm2gm/engine/shmemi_device_simt_udma.h"
 
 #endif

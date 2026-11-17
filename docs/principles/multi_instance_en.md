@@ -103,6 +103,8 @@ You can also refer to the MTE-based example in [examples/multi_instance](../../e
 
 ### 5. UDMA Multi-instance
 
+This section applies to SIMD UDMA on Ascend950. Build with `SOC_TYPE=Ascend950` and include the corresponding Host UDMA backend and Device UDMA implementation. SIMT UDMA multi-instance operation is not supported; these platform requirements do not define the support scope of SIMT MTE.
+
 Set the UDMA engine when the Host creates an instance:
 
 ```cpp
@@ -110,7 +112,7 @@ attr.option_attr.data_op_engine_type = ACLSHMEM_DATA_OP_UDMA;
 aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr);
 ```
 
-Build the Device kernel with `MULTI_INSTANCE`; every participating AIV sets the instance at entry and issues put and quiet within the same instance:
+Build the Device kernel with `MULTI_INSTANCE`; every participating core sets the instance at entry and issues put and quiet within the same instance:
 
 ```cpp
 aclshmemx_instance_ctx_set(instance_id);
@@ -134,12 +136,12 @@ aclrtSynchronizeStream(stream);
 | Default instance| `instance_id = 0` |
 | Upper limit of PE| `ACLSHMEM_MAX_PES = 16384` |
 | Upper limit of local memory| `ACLSHMEM_MAX_LOCAL_SIZE = 40GB` |
-| Team behavior of non-0 instances| During initialization, only the world team slots are retained. `ACLSHMEM_NOT_SUPPORTED` is returned for `team split`, `translate`, and `get_config`.|
+| Team behavior of non-0 instances| Only the WORLD slot is initialized. Host team management APIs (`split`, `translate`, `get_config`) return `ACLSHMEM_NOT_SUPPORTED`; SIMT WORLD queries and PE mappings remain supported.|
 | Maximum length of `ip_port`| `ACLSHMEM_MAX_IP_PORT_LEN = 64` (including the ending `\0`)|
 | Default multi-instance port range| Depending on `SHMEM_INSTANCE_PORT_RANGE=start:end`|
 | Default port allocation rule| The input port must be `0`. The actual port is = `start_port + instance_id`.|
 | Default available instance ID range| `instance_id <= end_port - start_port` (including the boundary)|
-| Supported communication links| MTE and UDMA|
+| Communication engine support | SIMD calls support MTE and UDMA; SIMT calls support MTE only |
 | UDMA QP configuration| Set the process-wide QP count with `aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_UDMA, qp_num)` before the first initialization. It cannot change while an instance is active. Queue resources, metadata and completion state are isolated per instance|
 | Host UDMA quiet| `aclshmemx_quiet_on_stream(stream)` captures the current instance at enqueue; nonzero instances complete all QPs including shared Jetty queues; instance 0 retains QP0 completion and explicit nonzero QPs require `aclshmemx_udma_qp_quiet`|
 | UDMA instance ID range| HBM-only initialization supports 0–255; configurations creating a Host DRAM companion with `USE_ACLRT_MEM_FABRIC_HANDLE` support at most 254. Port ranges and resources impose additional limits. Initialization above the HBM limit returns `ACLSHMEM_INVALID_VALUE`. Quiet requires a successfully initialized live instance and rejects IDs above 255 before enqueue|
@@ -147,10 +149,11 @@ aclrtSynchronizeStream(stream);
 ## Environment Variables and Running Requirements
 
 ### Kernel-side Usage Requirements
-- Device APIs (including UDMA): build with `MULTI_INSTANCE` and select a successfully initialized live instance with `aclshmemx_instance_ctx_set(id)` in every participating AIV before communication. All builds check the ID range before calculating the context address and trap on out-of-range IDs; diagnostic printing is Debug-only. Callers must still ensure that an in-range instance is initialized and alive. Context consistency checks remain Debug diagnostics. Complete outstanding operations before switching instances; UDMA submission and matching completion must use the same instance.
+- SIMD calls (including UDMA): build with `MULTI_INSTANCE` and select a successfully initialized live instance with `aclshmemx_instance_ctx_set(id)` in every participating core before communication. All builds check the ID range before calculating the context address and trap on out-of-range IDs; diagnostic printing is Debug-only. Callers must still ensure that an in-range instance is initialized and alive. Context consistency checks remain Debug diagnostics. Complete outstanding operations before switching instances; UDMA submission and matching completion must use the same instance.
 - A UDMA producer kernel must finish local staging and submit pending batches through public submission APIs before returning. The library publishes internal queue state. Order the producer and quiet on the same stream or with an explicit cross-stream event dependency, and do not concurrently submit to or quiet the same queues from another stream.
 - Explicit nonzero QPs use `aclshmemx_udma_qp_quiet(peer, qp)` for completion.
 - Keep the instance, streams and memory alive until communication completes.
+- SIMT calls: define `MULTI_INSTANCE`; all threads in each VF collectively call `simt::aclshmemx_instance_ctx_set(id)` before the existing APIs. Selection is independent of Host/SIMD.
 
 ### Default Multi-instance Mode
 - `SHMEM_INSTANCE_PORT_RANGE` must be set in the format of `start:end`.
@@ -172,9 +175,9 @@ aclrtSynchronizeStream(stream);
 
 | Feature| Single-Instance Mode| Multi-instance Mode|
 |---|---|---|
-| Initialization identifier| `instance_id=0`| `instance_id>0` |
+| Initialization identifier| `instance_id=0`| Distinct instance IDs, including 0 |
 | Resource isolation| Global sharing| Isolation by instance|
-| Context switching| Default instance 0| Host/Device: `aclshmemx_instance_ctx_set`|
+| Context switching| Default instance 0; SIMT needs no set without `MULTI_INSTANCE`| Host/Device use their respective `aclshmemx_instance_ctx_set`; with `MULTI_INSTANCE`, all SIMT block threads must select the instance in every VF, including instance 0|
 | Lifecycle management| `aclshmem_finalize()` | `aclshmemx_finalize(instance_id)` |
 | Communication links| MTE, UDMA and RDMA/SDMA as supported by the platform configuration| MTE and UDMA with per-instance routing described here|
 | Advanced team operations| Supported| Supported only when `instance_id=0`|
@@ -187,6 +190,28 @@ aclrtSynchronizeStream(stream);
 - MTE example: [examples/multi_instance](../../examples/multi_instance/README.md)
 - UDMA multi-instance tests: [multi_instance_routing_host_test.cpp](../../tests/unittest/host/multi_instance/multi_instance_routing_host_test.cpp)
 
----
 
-Last updated: 2026-11-12
+## SIMT instance selection
+
+Enable `ACLSHMEM_SIMT_SUPPORT` and define `MULTI_INSTANCE`
+for multi-instance kernels. Inside every VF, all block threads collectively call
+`simt::aclshmemx_instance_ctx_set(instance_id)` with the same ID before using the
+existing SIMT MTE APIs. `simt::aclshmemx_instance_ctx_get()` returns the selected device
+state address, not the instance ID. No separate context class is provided.
+
+Selection is block-local compiler-allocated UB state, independent of Host/SIMD
+selection. No fixed UB address or extra VF state parameter is required. Initialize
+the selection in every VF, including instance 0; do not inherit previous VF state.
+Without `MULTI_INSTANCE`, legacy interfaces continue to use instance 0 without set.
+The setter synchronizes the whole block; divergent or warp-only calls are invalid.
+Currently only SIMT MTE multi-instance operation is supported; SIMT UDMA
+multi-instance operation is not yet supported. Complete pending communication
+before switching; set does not complete communication.
+Keep instances and allocations alive until communication completes.
+
+Warp RMA currently uses block barriers: all block threads must enter
+calls in the same order. Arguments are uniform within each warp; partial last
+warps are supported. Each warp transfers its complete `[0, count)` range; a partial
+tail warp uses its actual thread count as the stride for that range. Independent
+warp branches and unequal per-warp call counts are unsupported. Nonzero instances
+support WORLD team queries only.

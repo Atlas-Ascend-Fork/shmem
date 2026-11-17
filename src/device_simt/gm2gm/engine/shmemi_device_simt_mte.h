@@ -7,8 +7,8 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
-#ifndef SHMEM_DEVICE_SIMT_GM2GM_MTE_HPP
-#define SHMEM_DEVICE_SIMT_GM2GM_MTE_HPP
+#ifndef SHMEMI_DEVICE_SIMT_GM2GM_MTE_H
+#define SHMEMI_DEVICE_SIMT_GM2GM_MTE_H
 
 #include "device/shmem_def.h"
 #include "shmemi_device_simt_common.h"
@@ -46,7 +46,7 @@ __simt_callee__ inline void assert_remote_ptr_valid(__gm__ void* ptr, uint64_t r
     return;
 }
 
-__simt_callee__ inline __gm__ void* aclshmem_ptr(__gm__ void* ptr, int pe)
+__simt_callee__ inline __gm__ void* aclshmemi_ptr(__gm__ void* ptr, int pe)
 {
     // Get Global State
     __gm__ aclshmem_device_host_state_simt_t* device_state = simt::aclshmemi_get_state();
@@ -66,7 +66,7 @@ __simt_callee__ inline void aclshmemi_mte_get_nbi(__gm__ T* dst, __gm__ T* src, 
     size_t myIndex = aclshmemi_thread_id_in_threadgroup<scope>();
     size_t groupSize = aclshmemi_threadgroup_size<scope>();
 
-    __gm__ T* srcSym = (__gm__ T*)aclshmem_ptr(src, pe);
+    __gm__ T* srcSym = (__gm__ T*)aclshmemi_ptr(src, pe);
 
     for (size_t i = myIndex; i < elem_size; i += groupSize) {
         dst[i] = srcSym[i];
@@ -82,13 +82,16 @@ __simt_callee__ inline void aclshmemi_mte_put_nbi(__gm__ T* dst, __gm__ T* src, 
     size_t myIndex = aclshmemi_thread_id_in_threadgroup<scope>();
     size_t groupSize = aclshmemi_threadgroup_size<scope>();
 
-    __gm__ T* dstSym = (__gm__ T*)aclshmem_ptr(dst, pe);
+    __gm__ T* dstSym = (__gm__ T*)aclshmemi_ptr(dst, pe);
 
     for (size_t i = myIndex; i < elem_size; i += groupSize) {
         dstSym[i] = src[i];
     }
     aclshmemi_threadgroup_sync<scope>();
 }
+
+// Preserve the original public function type and selected-instance behavior.
+__simt_callee__ inline __gm__ void* aclshmem_ptr(__gm__ void* ptr, int pe) { return aclshmemi_ptr(ptr, pe); }
 
 template <typename T>
 __simt_callee__ inline void aclshmemx_mte_get_nbi(__gm__ T* dst, __gm__ T* src, size_t elem_size, int pe)

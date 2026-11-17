@@ -9,8 +9,8 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  * @endcond
  */
-#ifndef SHMEM_DEVICE_SIMT_UDMA_HPP
-#define SHMEM_DEVICE_SIMT_UDMA_HPP
+#ifndef SHMEMI_DEVICE_SIMT_UDMA_H
+#define SHMEMI_DEVICE_SIMT_UDMA_H
 
 /*
  * SIMT UDMA QP-specific data-plane implementation.
@@ -51,7 +51,7 @@
 #include "device/shmem_def.h"
 #include "gm2gm/engine/shmemi_device_udma.h" // UDMA internal POD types / opcode, shared with SIMD
 #include "../host_device/shmemi_host_device_constant.h"
-#include "shmemi_device_simt_common.hpp" // thread_group_t utilities and SIMT device state
+#include "shmemi_device_simt_common_impl.h" // thread_group_t utilities and SIMT device state
 #include "utils/shmemi_simt_kernel_debug.h"
 #include "simt_api/device_functions.h" // asc_stcg / asc_threadfence / asc_ldcg
 

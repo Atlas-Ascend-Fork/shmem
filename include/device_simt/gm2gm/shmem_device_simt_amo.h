@@ -27,15 +27,8 @@ namespace simt {
  * |uint32 | uint32_t |
  * |uint64 | uint64_t |
  */
-#define ACLSHMEM_TYPE_FUNC_ATOMIC_CAS_SIMT(FUNC) \
-    FUNC(int32, int32_t);                        \
-    FUNC(int64, int64_t);                        \
-    FUNC(uint32, uint32_t);                      \
-    FUNC(uint64, uint64_t)
-
 /**
- * @brief  Automatically generates aclshmem atomic compare swap functions for different data types.
- *         The macro parameters: NAME is the function name suffix, TYPE is the operation data type.
+ * @brief Atomic compare-and-swap operations for signed and unsigned 32/64-bit integers.
  *
  * \remark __simt_callee__ inline TYPE aclshmem_NAME_atomic_compare_swap(\_\_gm\_\_ TYPE *dest, TYPE cond,
  * TYPE value, int32_t pe)
@@ -58,16 +51,20 @@ namespace simt {
  * @note Atomicity across SIMT threads of one PE and across PEs on the same symmetric address is provided
  *       by the underlying asc_atomic_cas instruction on the translated address.
  */
-#define ACLSHMEM_ATOMIC_COMPARE_SWAP_TYPENAME_SIMT(NAME, TYPE)         \
-    __simt_callee__ inline TYPE aclshmem_##NAME##_atomic_compare_swap( \
-        __gm__ TYPE* dest, TYPE cond, TYPE value, int32_t pe)
+__simt_callee__ inline int32_t aclshmem_int32_atomic_compare_swap(
+    __gm__ int32_t* dest, int32_t cond, int32_t value, int32_t pe);
 
-ACLSHMEM_TYPE_FUNC_ATOMIC_CAS_SIMT(ACLSHMEM_ATOMIC_COMPARE_SWAP_TYPENAME_SIMT);
+__simt_callee__ inline int64_t aclshmem_int64_atomic_compare_swap(
+    __gm__ int64_t* dest, int64_t cond, int64_t value, int32_t pe);
 
-#undef ACLSHMEM_ATOMIC_COMPARE_SWAP_TYPENAME_SIMT
-#undef ACLSHMEM_TYPE_FUNC_ATOMIC_CAS_SIMT
+__simt_callee__ inline uint32_t aclshmem_uint32_atomic_compare_swap(
+    __gm__ uint32_t* dest, uint32_t cond, uint32_t value, int32_t pe);
+
+__simt_callee__ inline uint64_t aclshmem_uint64_atomic_compare_swap(
+    __gm__ uint64_t* dest, uint64_t cond, uint64_t value, int32_t pe);
 
 } // namespace simt
 
-#include "gm2gm/shmem_device_simt_amo.hpp"
+#include "gm2gm/shmemi_device_simt_amo.h"
+
 #endif // SHMEM_DEVICE_SIMT_GM2GM_AMO_H

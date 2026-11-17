@@ -13,7 +13,7 @@
 #define SHMEM_DEVICE_SIMT_TEAM_H
 
 #include "device_simt/shmem_simt_common_types.h"
-#include "team/shmem_device_simt_team.hpp"
+#include "team/shmemi_device_simt_team.h"
 
 namespace simt {
 

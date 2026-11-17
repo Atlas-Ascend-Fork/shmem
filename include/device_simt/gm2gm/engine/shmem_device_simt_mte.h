@@ -13,7 +13,7 @@
 #define SHMEM_DEVICE_SIMT_MTE_H
 
 #include "device_simt/shmem_simt_common_types.h"
-#include "gm2gm/engine/shmem_device_simt_mte.hpp"
+#include "gm2gm/engine/shmemi_device_simt_mte.h"
 
 namespace simt {
 
