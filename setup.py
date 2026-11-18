@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding=utf-8
 # -----------------------------------------------------------------------------------------------------------
-# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
 # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -100,7 +100,7 @@ class BuildCppLibs(build_py):
 
         try:
             subprocess.check_call(cmake_cmd, cwd=build_dir)
-            subprocess.check_call(["make", "install", "-j17"], cwd=build_dir)
+            subprocess.check_call(["cmake", "--build", ".", "--target", "install", "--parallel", "17"], cwd=build_dir)
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"C++ build failed: {e}")
 
