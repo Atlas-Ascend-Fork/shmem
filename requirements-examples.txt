@@ -7,9 +7,16 @@
 #                 examples/utils/perf_data_process.py
 #   matplotlib  : examples/utils/perf_data_process.py（性能数据可视化）
 #   seaborn     : examples/utils/perf_data_process.py（性能数据可视化）
-# 版本约束：numpy 固定在 <=1.26.4（见 requirements.txt），ml_dtypes>=0.6.0 要求
-# numpy>=2.0，会与之冲突，故锁定 0.5.4（其约束为 numpy>=1.21，兼容）。
+# 版本约束：numpy 上界与 requirements.txt 完全一致。
+# - numpy：显式携带与 requirements.txt 相同的约束，保证单独安装本文件时
+#   也不会把 numpy 连带升级到 2.x（依赖 numpy 1.x ABI 的代码在 numpy 2.x
+#   下行为不可预期）。
+# - pandas/matplotlib：封顶在已验证兼容 numpy 1.x 的版本，防止未来新版本
+#   引入 numpy>=2.0 要求后，在单独安装本文件时连带升级 numpy。
+# - ml_dtypes：0.6.0 起要求 numpy>=2.0，会与上述约束冲突，故锁定 0.5.4
+#   （其约束为 numpy>=1.21，兼容）。
+numpy>=1.24.4,<=1.26.4
 ml_dtypes<=0.5.4
-pandas
-matplotlib
+pandas<2.3
+matplotlib<3.10
 seaborn

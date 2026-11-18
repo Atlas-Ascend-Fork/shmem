@@ -165,7 +165,11 @@ pip3 install torch_npu-2.7.1.post4-cp311-cp311-manylinux_2_28_aarch64.whl
 # 基础依赖（构建期 + 运行期硬依赖）
 python3 -m pip install -r requirements.txt
 
-# 运行 Python 示例所需的额外依赖（按需安装）
+# 运行 Python 示例所需的额外依赖（按需安装，可独立执行）
+# requirements-examples.txt 自带与 requirements.txt 一致的 numpy 1.x 约束
+# （numpy>=1.24.4,<=1.26.4），且 pandas/matplotlib/ml_dtypes 已封顶在
+# 兼容 numpy 1.x 的版本；单独执行或按任意顺序执行，均不会把 numpy
+# 连带升级到 2.x（依赖 numpy 1.x ABI 的代码在 numpy 2.x 下行为不可预期）。
 python3 -m pip install -r requirements-examples.txt
 ```
 
