@@ -2,11 +2,12 @@ name: Task|任务
 description: 当需求已澄清并需拆解为具体开发/测试/运维任务时，请使用此模板。
 title: "[Task|任务]: "
 labels: ["task"]
+type: "任务"
 body:
   - type: markdown
     attributes:
       value: |
-        > ⚠️ **注意**  
+        > ⚠️ **注意**
         > 该 Issue 提交前，需要检查确认清单事项，**必须全部确认且勾选**，否则此 Issue 可能会被关闭。
 
   - type: checkboxes
@@ -50,7 +51,7 @@ body:
     attributes:
       label: 详细步骤（How）
       description: |
-        列出关键步骤或技术要点，支持 Markdown 子任务列表  
+        列出关键步骤或技术要点，支持 Markdown 子任务列表
     validations:
       required: false
 
