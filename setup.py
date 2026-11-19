@@ -13,6 +13,7 @@
 """python api for shmem."""
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -83,6 +84,7 @@ class BuildCppLibs(build_py):
 
         cmake_cmd = [
             "cmake",
+            "-UACLSHMEM_ENABLE_DEVICE_SYMBOL",
             f"-DBUILD_PYTHON={pyexpand_type}",
             f"-DCMAKE_BUILD_TYPE={build_type}",
             f"-DUSE_CXX11_ABI={use_cxx11_abi}",
@@ -123,6 +125,12 @@ class BuildCppLibs(build_py):
             raise RuntimeError("C++ build succeeded but 'install/shmem/lib' directory not found!")
         for so_file in lib_dir.glob("*.so"):
             shutil.copy(so_file, backend_dir)
+        config = Path("install/shmem/include/host_device/shmem_common_macros.h").read_text()
+        archive = backend_dir / "libshmem_device.a"
+        if re.search(r"^#define ACLSHMEM_DYNAMIC_META 1$", config, re.MULTILINE):
+            shutil.copy(lib_dir / archive.name, archive)
+        elif archive.exists():
+            archive.unlink()
         print(f"Copied {backend_name} backend libraries from install/shmem/lib/ to {backend_dir}")
 
         if not backend_dir.exists():
@@ -167,7 +175,26 @@ class BuildCppLibs(build_py):
             shutil.copytree(install_bin, dst_bin)
             print(f"Copied {install_bin} -> {dst_bin}")
 
-        src_include = Path("include")
+        # Stage the installed build's headers/configuration, never source-only
+        # headers that can disagree with the packaged ROOT/FIXED libraries.
+        install_prefix = Path("install/shmem")
+        required_meta_files = (
+            "include/host_device/shmem_common_macros.h",
+        )
+        for relative in required_meta_files:
+            if not (install_prefix / relative).is_file():
+                raise RuntimeError(f"Missing installed SHMEM integration artifact: {relative}; rebuild/install the package")
+        config = (install_prefix / "include/host_device/shmem_common_macros.h").read_text()
+        dynamic_meta = re.search(r"^#define ACLSHMEM_DYNAMIC_META 1$", config, re.MULTILINE)
+        for backend in dst_backends.iterdir():
+            if not backend.is_dir():
+                continue
+            archive = backend / "libshmem_device.a"
+            if dynamic_meta and not archive.is_file():
+                raise RuntimeError(f"Missing installed SHMEM integration artifact: {archive}; rebuild/install the backend")
+            if not dynamic_meta and archive.exists():
+                archive.unlink()
+        src_include = install_prefix / "include"
         dst_include = package_src_dir / "include"
         if dst_include.exists():
             shutil.rmtree(dst_include)
@@ -178,13 +205,9 @@ class BuildCppLibs(build_py):
         if dst_src.exists():
             shutil.rmtree(dst_src)
         dst_src.mkdir(parents=True, exist_ok=True)
-        # Only src/device is required (public headers cross-reference shmemi_device_cc.h
-        # and its transitive closure). src/device_simt and src/host_device are not
-        # referenced by any public header and are excluded from the wheel.
-        src_device = Path("src") / "device"
-        if src_device.exists() and src_device.is_dir():
-            shutil.copytree(src_device, dst_src / "device")
-        print(f"Copied src/device -> {dst_src}")
+        for directory in ("device", "device_simt", "host_device"):
+            shutil.copytree(install_prefix / "src" / directory, dst_src / directory)
+        print(f"Copied installed Device/meta integration files -> {dst_src}")
 
         # version.info 由 build.sh 写入 install/ 目录
         version_file = Path("install") / "version.info"
@@ -212,6 +235,7 @@ setup(
             "src/**/*.h",
             "src/**/*.hpp",
             "backends/**/*.so",
+            "backends/**/*.a",
             "bin/root_info_generate",
             "scripts/*.sh",
         ]

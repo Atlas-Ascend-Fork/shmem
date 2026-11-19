@@ -25,6 +25,7 @@ else()
 endif()
 
 file(GLOB_RECURSE ACLSHMEM_KERNEL_FILES ${CMAKE_CURRENT_SOURCE_DIR}/device/*.cpp)
+list(FILTER ACLSHMEM_KERNEL_FILES EXCLUDE REGEX "/shmem_meta_(module|registration).cpp$")
 file(GLOB_RECURSE _TEMP_KERNEL_FILES ${CMAKE_CURRENT_SOURCE_DIR}/device_simt/*.cpp)
 list(APPEND ACLSHMEM_KERNEL_FILES ${_TEMP_KERNEL_FILES})
 # Compile the existing RMA source separately for the instance-aware quiet entry.
@@ -125,6 +126,7 @@ target_include_directories(shmem_utils
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/src/host
     ${PROJECT_SOURCE_DIR}/src/host/utils
+    PRIVATE ${PROJECT_SOURCE_DIR}/src
 )
 if(SOC_TYPE STREQUAL "Ascend950")
     target_include_directories(shmem_utils PUBLIC ${PROJECT_SOURCE_DIR}/3rdparty/json/single_include)
@@ -227,10 +229,14 @@ install(TARGETS shmem
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/
     DESTINATION include
     FILES_MATCHING PATTERN "*.h"
+    # Install the package-mode copy separately, not the source default.
+    PATTERN "shmem_common_macros.h" EXCLUDE
 )
 
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/src/device
     DESTINATION src
+    PATTERN "shmem_meta_module.cpp" EXCLUDE
+    PATTERN "shmem_meta_registration.cpp" EXCLUDE
 )
 
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/src/device_simt
@@ -239,4 +245,5 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/src/device_simt
 
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/src/host_device
     DESTINATION src
+    PATTERN "shmemi_host_meta.h" EXCLUDE
 )

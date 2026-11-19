@@ -47,6 +47,7 @@ SHMEM的基本编译命令是`bash build.sh`，默认构建模式下生成版本
 - `-mssanitizer`：example启用mssanitizer内存检测工具，脚本执行需用mssanitizer拉起任务才能实际生效，allgather样例运行脚本提供了tool选项使用工具。工具使用方法参见[异常检测工具（msSanitizer，MindStudio Sanitizer）](https://www.hiascend.com/document/detail/zh/canncommercial/850/devaids/optool/atlasopdev_16_0039.html) 注：如果开启该选项请确保使用mssanitizer工具拉起算子，如使用其他方式拉起算子可能导致未知错误！
 - `-soc_type`：如果SOC是Ascend950类别，需要增加`-soc_type Ascend950`参数，可以通过`npu-smi info`命令查看，其他SOC可不加该参数。
 - `-enable_simt`：使能simt编程模式接口。
+- `-enable_device_symbol`：显式启用动态设备地址（ROOT），默认关闭。外部算子的构建维护者须完成[动态设备地址接入](dynamic_meta.md)并重编全部消费者；普通 kernel 参数不变。
 - `-enable_relay`：构建并启用 UDMA relay（绕路/detour）能力。relay 构建在 UDMA 之上，仅 Ascend950 提供 UDMA，因此该选项**必须配合 `-soc_type Ascend950`** 使用；在多 SOC 的 wheel/包构建（`-python_extension` / `-package` / `-full`）中也可使用，此时 relay 仅应用于 950 后端。详见下文[Relay参数使用说明](#relay参数使用说明)。
 - `-full`：编译 package + python_extension + uttests + examples。SHMEM自动编译脚本，会自动完成依赖库的下载，工程编译，UT用例编译，库打包。
 

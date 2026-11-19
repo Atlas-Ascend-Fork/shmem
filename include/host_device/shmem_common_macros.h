@@ -13,11 +13,25 @@
 #ifndef SHMEM_MACROS_H
 #define SHMEM_MACROS_H
 
-#define ACLSHMEM_SIZE_FUNC(FUNC)  \
-    FUNC(8);                      \
-    FUNC(16);                     \
-    FUNC(32);                     \
-    FUNC(64);                     \
+/** @cond */
+// Source builds choose the mode with a compiler definition. The installed
+// header presets the default to match its accompanying libshmem.
+#ifndef ACLSHMEM_DYNAMIC_META
+#define ACLSHMEM_DYNAMIC_META 0
+#endif
+#if ACLSHMEM_DYNAMIC_META != 0 && ACLSHMEM_DYNAMIC_META != 1
+#error "ACLSHMEM_DYNAMIC_META must be 0 or 1"
+#endif
+#if ACLSHMEM_DYNAMIC_META && defined(__NPU_HOST__)
+#include "host_device/shmem_device_symbol.h"
+#endif
+/** @endcond */
+
+#define ACLSHMEM_SIZE_FUNC(FUNC) \
+    FUNC(8);                     \
+    FUNC(16);                    \
+    FUNC(32);                    \
+    FUNC(64);                    \
     FUNC(128)
 
 #endif

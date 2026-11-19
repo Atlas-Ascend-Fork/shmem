@@ -74,7 +74,7 @@ function(aclshmem_add_fusion_example NAME)
             target_compile_definitions(${NAME}_kernel PRIVATE ENABLE_ASCENDC_DUMP ASCENDC_DUMP=1 ASCENDC_DEBUG)
         endif()
 
-        target_compile_options(${NAME}_kernel PRIVATE ${CMAKE_CCE_COMPILE_OPTIONS} --cce-aicore-arch=dav-c220 ${SANITIZER_FLAGS})
+        target_compile_options(${NAME}_kernel PRIVATE ${CMAKE_CCE_COMPILE_OPTIONS} ${CCE_AICORE_ARCH} ${SANITIZER_FLAGS})
         target_include_directories(${NAME}_kernel PRIVATE
             ${PROJECT_SOURCE_DIR}/include
             ${CATLASS_ROOT}/include
@@ -87,7 +87,7 @@ function(aclshmem_add_fusion_example NAME)
             ${PROJECT_SOURCE_DIR}/src/
             ${MPI_INCLUDE_PATH}
         )
-        target_link_options(${NAME}_kernel PRIVATE --cce-fatobj-link --cce-aicore-arch=dav-c220 ${SANITIZER_FLAGS})
+        target_link_options(${NAME}_kernel PRIVATE --cce-fatobj-link ${CCE_AICORE_ARCH} ${SANITIZER_FLAGS})
 
         if(DEFINED ENABLE_ASCENDC_DUMP AND ENABLE_ASCENDC_DUMP)
             target_link_libraries(${NAME}_kernel PRIVATE ascend_dump)

@@ -26,6 +26,7 @@ The basic SHMEM build command is `bash build.sh`. The default build mode generat
 - `-cann`: CANN open APIs can be used for build if the CANN version is 8.5 or later.
 - `-uttests`: builds all UT cases in the `tests/unittest` directory.
 - `-examples`: displays all cases in the `examples` directory.
+- `-enable_device_symbol`: opts into dynamic device addressing (ROOT); disabled by default. Operator build maintainers must follow the [integration guide](dynamic_meta_en.md) and rebuild all consumers. Kernel parameters are unchanged.
 - `-python_example`: provides the PyTorch access capability for some cases in the `examples` directory.
 - `-enable_rdma`: builds and enables RDMA capabilities. By default, the RDMA backend type is configured for Ascend 910B/C. For Ascend 950, you need to use `-rdma_backend` to specify the backend type.
 - `-rdma_backend`: specifies the RDMA backend type (not supported by Ascend 910B/C). The value can be `XSCALE` (Yunsilicon NICs are used). This option must be used together with `-enable_rdma`. Otherwise, an error is returned. The parameter sequence is not limited.

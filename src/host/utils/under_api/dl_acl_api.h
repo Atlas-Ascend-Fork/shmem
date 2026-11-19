@@ -15,6 +15,7 @@
 #include <mutex>
 #include "shmemi_functions.h"
 #include "host/shmem_host_def.h"
+#include "host_device/shmem_common_macros.h"
 
 namespace shm {
 
@@ -48,9 +49,19 @@ using rtEnableP2PFunc = int32_t (*)(uint32_t, uint32_t, uint32_t);
 using aclrtReserveMemAddressFunc = int (*)(void**, size_t, size_t, void*, uint64_t);
 using aclrtReleaseMemAddressFunc = int (*)(void*);
 using aclrtMemGetAllocationPropertiesFromHandleFunc = int (*)(aclrtDrvMemHandle, aclrtPhysicalMemProp*);
+#if ACLSHMEM_DYNAMIC_META
+// Private ACL C ABI declaration for build SDKs without the symbol API.
+using aclrtGetSymbolAddressFunc = aclError (*)(const void*, void**);
+#endif
 
 class DlAclApi {
 public:
+#if ACLSHMEM_DYNAMIC_META
+    static aclError AclrtGetSymbolAddress(const void* symbol, void** address)
+    {
+        return pAclrtGetSymbolAddress ? pAclrtGetSymbolAddress(symbol, address) : ACLSHMEM_UNDER_API_UNLOAD;
+    }
+#endif
     static Result LoadLibrary(const std::string& libDirPath);
     static void CleanupLibrary();
 
@@ -319,6 +330,9 @@ public:
 private:
 #ifdef ACLSHMEM_UNIT_TEST
     friend class HybmVmmReservationTest;
+#endif
+#if ACLSHMEM_DYNAMIC_META
+    static aclrtGetSymbolAddressFunc pAclrtGetSymbolAddress;
 #endif
     static std::mutex gMutex;
     static bool gLoaded;

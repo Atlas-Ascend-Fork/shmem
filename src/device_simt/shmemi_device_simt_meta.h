@@ -10,16 +10,24 @@
 #ifndef __MEMFABRIC_SHMEM_SIMT_AI_CORE_BASE_META_H__
 #define __MEMFABRIC_SHMEM_SIMT_AI_CORE_BASE_META_H__
 
-namespace simt
+namespace simt {
+
+__simt_callee__ inline uint64_t aclshmemi_get_meta_base()
 {
+#if ACLSHMEM_DYNAMIC_META
+    return asc_ldcg(&g_meta_root);
+#else
+    return SMEM_SHM_DEVICE_META_ADDR;
+#endif
+}
 
 __simt_callee__ inline uint32_t aclshmemi_get_global_rank(uint32_t shmemId)
 {
     if (shmemId >= SMEM_OBJECT_NUM_MAX) {
         return UINT32_MAX;
     }
-    uint64_t metaAddr = SMEM_SHM_DEVICE_META_ADDR + SMEM_SHM_DEVICE_GLOBAL_META_SIZE +
-        shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
+    uint64_t metaAddr =
+        simt::aclshmemi_get_meta_base() + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
     return (*(__gm__ uint32_t*)(metaAddr + SMEM_SHM_DEVICE_META_RANK_OFFSET));
 }
 
@@ -28,8 +36,8 @@ __simt_callee__ inline uint32_t aclshmemi_get_global_rank_size(uint32_t shmemId)
     if (shmemId >= SMEM_OBJECT_NUM_MAX) {
         return UINT32_MAX;
     }
-    uint64_t metaAddr = SMEM_SHM_DEVICE_META_ADDR + SMEM_SHM_DEVICE_GLOBAL_META_SIZE +
-        shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
+    uint64_t metaAddr =
+        simt::aclshmemi_get_meta_base() + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
     return (*(__gm__ uint32_t*)(metaAddr + SMEM_SHM_DEVICE_META_RANK_SIZE_OFFSET));
 }
 
@@ -38,8 +46,8 @@ __simt_callee__ inline uint64_t aclshmemi_get_symmetric_size(uint32_t shmemId)
     if (shmemId >= SMEM_OBJECT_NUM_MAX) {
         return 0;
     }
-    uint64_t metaAddr = SMEM_SHM_DEVICE_META_ADDR + SMEM_SHM_DEVICE_GLOBAL_META_SIZE +
-        shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
+    uint64_t metaAddr =
+        simt::aclshmemi_get_meta_base() + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
     return (*(__gm__ uint64_t*)(metaAddr + SMEM_SHM_DEVICE_META_SYMM_OFFSET));
 }
 
@@ -49,9 +57,9 @@ __simt_callee__ inline __gm__ void* aclshmemi_get_qp_info_address(uint32_t shmem
         return NULL;
     }
 
-    uint64_t metaAddr = SMEM_SHM_DEVICE_META_ADDR + SMEM_SHM_DEVICE_GLOBAL_META_SIZE +
-        shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
-    return *(__gm__ void **)(metaAddr + SMEM_SHM_DEVICE_META_QP_INFO_OFFSET);
+    uint64_t metaAddr =
+        simt::aclshmemi_get_meta_base() + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
+    return *(__gm__ void**)(metaAddr + SMEM_SHM_DEVICE_META_QP_INFO_OFFSET);
 }
 
 __simt_callee__ inline __gm__ void* aclshmemi_get_extra_context_addr(uint32_t shmemId)
@@ -59,7 +67,8 @@ __simt_callee__ inline __gm__ void* aclshmemi_get_extra_context_addr(uint32_t sh
     if (shmemId >= SMEM_OBJECT_NUM_MAX) {
         return NULL;
     }
-    uint64_t ctxAddr = SMEM_SHM_DEVICE_USER_CONTEXT_ADDR + shmemId * SMEM_SHM_DEVICE_USER_CONTEXT_PRE_SIZE;
+    uint64_t ctxAddr =
+        simt::aclshmemi_get_meta_base() + SMEM_SHM_DEVICE_META_SIZE + shmemId * SMEM_SHM_DEVICE_USER_CONTEXT_PRE_SIZE;
     return ((__gm__ void*)(ctxAddr));
 }
 
@@ -68,8 +77,8 @@ __simt_callee__ inline uint32_t aclshmemi_get_extra_context_size(uint32_t shmemI
     if (shmemId >= SMEM_OBJECT_NUM_MAX) {
         return 0;
     }
-    uint64_t metaAddr = SMEM_SHM_DEVICE_META_ADDR + SMEM_SHM_DEVICE_GLOBAL_META_SIZE +
-        shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
+    uint64_t metaAddr =
+        simt::aclshmemi_get_meta_base() + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
     return (*(__gm__ uint32_t*)(metaAddr + SMEM_SHM_DEVICE_META_CONTEXT_OFFSET));
 }
 

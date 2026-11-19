@@ -34,6 +34,7 @@
 #include "utils/exception/shmem_exception_report.h"
 #include "utils/under_api/dl_api.h"
 #include "utils/under_api/dl_acl_api.h"
+#include "mem_entity_entry.h"
 
 #define DEFAULT_MY_PE (-1)
 #define DEFAULT_N_PES (-1)
@@ -1195,6 +1196,7 @@ static int32_t aclshmemi_init_attr_impl(
 {
     std::lock_guard<std::mutex> lock(g_aclshmem_ctx_mutex);
     SHM_ASSERT_RETURN(attributes != nullptr, ACLSHMEM_INVALID_PARAM);
+    ACLSHMEM_CHECK_RET(hybm_retry_pending_meta());
     const bool use_user_buffer_heap = heap_mode == InitHeapMode::USER_BUFFER_HEAP;
     int32_t ret;
     uint64_t id = attributes->instance_id;
@@ -1372,6 +1374,9 @@ int32_t aclshmemx_init_attr_with_buffers(
 
 static int32_t aclshmemi_finalize_impl(uint64_t instance_id)
 {
+    // A previous partial init/finalize can have retired its backend while the
+    // entity layer still owns an arena. Retry before the null-manager fast path.
+    ACLSHMEM_CHECK_RET(hybm_retry_pending_meta());
     // Only switch context when finalizing a non-active instance; finalizing the
     // currently active instance needs no switch (globals already hold its state).
     // set_impl also validates that instance_id exists, preventing accidental

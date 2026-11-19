@@ -29,6 +29,16 @@ int32_t hybm_init(int32_t deviceId, uint64_t flags);
  */
 void hybm_uninit(void);
 
+// Internal cleanup result; keep the existing hybm_uninit signature unchanged.
+int32_t hybm_uninit_with_status(void);
+
+// Retry an orphaned ROOT arena after failed init/finalize, before creating a
+// new backend or reporting a repeated finalize successful.
+int32_t hybm_retry_pending_meta(void);
+
+// Actual base for this build: Runtime allocation for ROOT, fixed VA for FIXED.
+uint64_t hybm_get_meta_base(void);
+
 /**
  * @brief Create Hybrid Big Memory(HyBM) entity at local side
  *

@@ -28,7 +28,7 @@
 |------------------|----------------|----------|--------------|
 | `shmem.h` | Host 部分对应 `libshmem.so`（及 utils/bootstrap）；Device/SIMT 部分无 | 对外总头文件：按编译宏聚合 Host / Device / SIMT 公开 API | Device/SIMT 分支依赖编译宏（如 `__CCE_AICORE__`、`USE_SIMT`）；无独立外部版本号 |
 | `host_device/shmem_common_types.h` | 无 | Host/Device 共用类型、枚举、`ACLSHMEM_DEVICE` 等宏 | 依赖 CANN 头文件 `acl/acl_rt.h` |
-| `host_device/shmem_common_macros.h` | 无 | Host/Device 共用宏 | 无 |
+| `host_device/shmem_common_macros.h` | 无 | Host/Device 共用宏；安装副本记录动态地址模式默认值 | 外部算子须与同包库的模式一致 |
 | `host/shmem_host_def.h` | `libshmem.so` | Host 侧常量、版本宏、`ACLSHMEM_HOST_API`、公共结构/枚举 | 无外部版本约束（仅定义本库 API 宏） |
 | `device/shmem_def.h` | 无 | Device 侧公共定义与非连续拷贝等结构 | 依赖 CANN；`USE_SIMT` 时有条件分支 |
 

@@ -19,6 +19,9 @@ void* DlAclApi::rtHandle;
 void* DlAclApi::runtimeHandle;
 const char* DlAclApi::gAscendAclLibName = "libascendcl.so";
 const char* DlAclApi::gAscendRuntimeLibName = "libruntime.so";
+#if ACLSHMEM_DYNAMIC_META
+aclrtGetSymbolAddressFunc DlAclApi::pAclrtGetSymbolAddress = nullptr;
+#endif
 
 aclrtGetDeviceFunc DlAclApi::pAclrtGetDevice = nullptr;
 aclrtSetDeviceFunc DlAclApi::pAclrtSetDevice = nullptr;
@@ -75,6 +78,18 @@ Result DlAclApi::LoadLibrary(const std::string& libDirPath)
     }
 
     /* load sym */
+#if ACLSHMEM_DYNAMIC_META
+    // Resolve against the same ACL library as the allocator. Check before
+    // allocating the arena; never silently mix ROOT and FIXED at run time.
+    pAclrtGetSymbolAddress =
+        reinterpret_cast<decltype(pAclrtGetSymbolAddress)>(dlsym(rtHandle, "aclrtGetSymbolAddress"));
+    if (pAclrtGetSymbolAddress == nullptr) {
+        dlclose(rtHandle);
+        rtHandle = nullptr;
+        SHM_LOG_ERROR("ROOT meta requires GetSymbolAddress in the loaded ACL library");
+        return ACLSHMEM_DL_FUNC_FAILED;
+    }
+#endif
     DL_LOAD_SYM(pAclrtGetDevice, aclrtGetDeviceFunc, rtHandle, "aclrtGetDevice");
     DL_LOAD_SYM(pAclrtSetDevice, aclrtSetDeviceFunc, rtHandle, "aclrtSetDevice");
     DL_LOAD_SYM(pAclrtDeviceEnablePeerAccess, aclrtDeviceEnablePeerAccessFunc, rtHandle, "aclrtDeviceEnablePeerAccess");
@@ -235,6 +250,10 @@ void DlAclApi::CleanupLibrary()
     if (!gLoaded) {
         return;
     }
+
+#if ACLSHMEM_DYNAMIC_META
+    pAclrtGetSymbolAddress = nullptr;
+#endif
 
     pAclrtGetDevice = nullptr;
     pAclrtSetDevice = nullptr;

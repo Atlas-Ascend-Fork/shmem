@@ -44,8 +44,7 @@ __simt_callee__ inline void aclshmemx_instance_ctx_set(uint64_t instance_id)
     }
     asc_syncthreads();
     if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
-        g_simt_instance_addr =
-            SMEM_SHM_DEVICE_USER_CONTEXT_ADDR + (instance_id << 1) * SMEM_SHM_DEVICE_USER_CONTEXT_PRE_SIZE;
+        g_simt_instance_addr = reinterpret_cast<uint64_t>(simt::aclshmemi_get_extra_context_addr(instance_id << 1));
     }
     asc_syncthreads();
 }

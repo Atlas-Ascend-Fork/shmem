@@ -204,8 +204,7 @@ int aclshmemi_init_backend::init_device_state()
             return ACLSHMEM_SMEM_ERROR;
         }
 
-        mstx_reg_ptr_->add_mem_regions(
-            (void*)shm::HYBM_DEVICE_META_ADDR, shm::HYBM_DEVICE_INFO_SIZE, MSTX_GROUP_FOR_STATE);
+        mstx_reg_ptr_->add_mem_regions((void*)hybm_get_meta_base(), shm::HYBM_DEVICE_INFO_SIZE, MSTX_GROUP_FOR_STATE);
         mstx_reg_ptr_->mstx_mem_regions_register(MSTX_GROUP_FOR_STATE);
     }
     hybm_init_count++;
@@ -399,7 +398,9 @@ int aclshmemi_init_backend::finalize_device_state()
 
     hybm_init_count--;
     if (hybm_init_count == 0) {
-        hybm_uninit();
+        // A failed retirement remains owned by the entity layer's pending
+        // arena, independently of this backend and its instance count.
+        return hybm_uninit_with_status();
     }
 
     SHM_LOG_INFO("shmemi uninit finished");

@@ -41,3 +41,27 @@ else()
 endif()
 
 target_link_libraries(aclshmem_unittest PRIVATE ${UT_LIBRARIES} aclshmem_unittest_device gtest gmock gcov aclshmem_unittest_include shmem_utils)
+
+if(ACLSHMEM_DYNAMIC_META)
+    # Include tests contribute mixed-code objects directly to this executable.
+    # Resolve their module reference with the device linker as for any consumer.
+    # Only this directory's final executable link needs the device linker.
+    # Keep the existing g++ compiler for Host objects.
+    find_program(ACLSHMEM_UT_DEVICE_LINKER bisheng HINTS "${ASCEND_HOME_PATH}/bin" REQUIRED)
+    string(REPLACE "<CMAKE_CXX_COMPILER>" "${ACLSHMEM_UT_DEVICE_LINKER}"
+        CMAKE_CXX_LINK_EXECUTABLE "${CMAKE_CXX_LINK_EXECUTABLE}")
+    set_target_properties(aclshmem_unittest PROPERTIES ACLSHMEM_META_HOST_PROVIDED TRUE)
+    aclshmem_target_meta(aclshmem_unittest)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    target_compile_definitions(aclshmem_unittest_host PRIVATE
+        ACLSHMEM_DYNAMIC_TEST_MODULE_DIR="$<TARGET_FILE_DIR:aclshmem_dynamic_reader1>"
+        ACLSHMEM_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        ACLSHMEM_TEST_PYTHON="${Python3_EXECUTABLE}")
+    if(SOC_TYPE STREQUAL "Ascend950")
+        target_compile_definitions(aclshmem_unittest_host PRIVATE TEST_SIMT)
+    endif()
+    add_dependencies(aclshmem_unittest
+        aclshmem_dynamic_reader1 aclshmem_dynamic_reader2 aclshmem_dynamic_reader3
+        aclshmem_bootstrap_config_store)
+    target_link_libraries(aclshmem_unittest PRIVATE dl)
+endif()

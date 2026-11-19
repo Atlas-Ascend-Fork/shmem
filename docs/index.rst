@@ -15,6 +15,7 @@ Welcome to Shmem's Documentation!
     :name: Using SHMEM
 
     example/api_demo.md
+    dynamic_meta.md
     debug/log_debug.md
     debug/tools_debug.md
     debug/profiling.md

@@ -93,6 +93,7 @@ function print_usage()
     echo "  -examples                  Build with examples"
     echo "  -enable_rdma               Enable RDMA support. For Ascend950, must be used with -rdma_backend"
     echo "  -enable_simt               Enable SIMT support"
+    echo "  -enable_device_symbol      Publish dynamic internal addresses through device symbols; requires rebuilt operators"
     echo "  -enable_relay              Enable UDMA relay (detour) support. Requires -soc_type Ascend950 (UDMA)"
     echo "  -multi_link                Enable per-QP UDMA multi-link routing. Requires direct UDMA on Ascend950"
     echo "  -python_extension          Build Python extension"
@@ -126,7 +127,7 @@ function fn_build()
 
     # Remove script-managed feature values from a reused cache; options requested by this
     # invocation are added back through build_compile_options, otherwise CMake uses OFF defaults.
-    local cache_reset_options="-UUSE_UNIT_TEST -UENABLE_CANN_BUILD -UUSE_EXAMPLES -UACLSHMEM_RDMA_SUPPORT -UACLSHMEM_SIMT_SUPPORT -UACLSHMEM_RELAY_SUPPORT -UACLSHMEM_MULTI_LINK_SUPPORT -UENABLE_ASCENDC_DUMP -UACLSHMEM_RDMA_BACKEND"
+    local cache_reset_options="-UUSE_UNIT_TEST -UENABLE_CANN_BUILD -UUSE_EXAMPLES -UACLSHMEM_RDMA_SUPPORT -UACLSHMEM_SIMT_SUPPORT -UACLSHMEM_RELAY_SUPPORT -UACLSHMEM_MULTI_LINK_SUPPORT -UENABLE_ASCENDC_DUMP -UACLSHMEM_RDMA_BACKEND -UACLSHMEM_ENABLE_DEVICE_SYMBOL"
     cmake $cache_reset_options $build_compile_options -DCMAKE_INSTALL_PREFIX=../install -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DUSE_CXX11_ABI=$USE_CXX11_ABI -DUSE_MSSANITIZER=$USE_MSSANITIZER -DSOC_TYPE=${SOC_TYPE} -DPYEXPAND_EXAMPLE=$PYEXPAND_EXAMPLE ..
     cmake --build . --target install
     cd -
@@ -203,6 +204,19 @@ function _write_version_info() {
     } > "$output_path"
 }
 
+# The archive contains SoC-specific device code, so preserve it per backend.
+function fn_copy_meta_archive()
+{
+    local destination="$1/libshmem_device.a"
+    if grep -q '^#define ACLSHMEM_DYNAMIC_META 1$' ../install/shmem/include/host_device/shmem_common_macros.h; then
+        cp ../install/shmem/lib/libshmem_device.a "$destination" || {
+            echo "[ERROR] Failed to copy ROOT device archive to $destination"; exit 1;
+        }
+    else
+        rm -f "$destination"
+    fi
+}
+
 function fn_whl_build()
 {
     echo "Python extension enabled. Building multi-SOC wheel (910 + 950)..."
@@ -266,6 +280,7 @@ function fn_whl_build()
     # Copy shared libraries from install/shmem/lib/ to wheel backend directory
     mkdir -p ../install/shmem/backends/910
     cp ../install/shmem/lib/*.so ../install/shmem/backends/910/ || { echo "[ERROR] Failed to copy 910 backend libraries"; exit 1; }
+    fn_copy_meta_archive "../install/shmem/backends/910"
     cd -
     echo "===== Backend 910 built ====="
 
@@ -313,9 +328,11 @@ function fn_whl_build()
     # Copy shared libraries from install/shmem/lib/ to wheel backend directory
     mkdir -p ../install/shmem/backends/950
     cp ../install/shmem/lib/*.so ../install/shmem/backends/950/ || { echo "[ERROR] Failed to copy 950 (XSCALE) backend libraries (default)"; exit 1; }
+    fn_copy_meta_archive "../install/shmem/backends/950"
     if [ "$rdma_enabled" = "true" ]; then
         mkdir -p ../install/shmem/backends/950_xscale
         cp ../install/shmem/lib/*.so ../install/shmem/backends/950_xscale/ || { echo "[ERROR] Failed to copy 950 (XSCALE) backend libraries (symmetry)"; exit 1; }
+        fn_copy_meta_archive "../install/shmem/backends/950_xscale"
     fi
     cd -
     echo "===== Backend 950 (XSCALE) built ====="
@@ -343,6 +360,7 @@ function fn_whl_build()
         cmake --build . --target install || { echo "[ERROR] cmake build failed for backend 950 (HNS_1825)"; exit 1; }
         mkdir -p ../install/shmem/backends/950_hns1825
         cp ../install/shmem/lib/*.so ../install/shmem/backends/950_hns1825/ || { echo "[ERROR] Failed to copy 950 (HNS_1825) backend libraries"; exit 1; }
+        fn_copy_meta_archive "../install/shmem/backends/950_hns1825"
         cd -
         echo "===== Backend 950 (HNS_1825) built ====="
     fi
@@ -582,6 +600,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         -enable_simt)
             COMPILE_OPTIONS="${COMPILE_OPTIONS} -DACLSHMEM_SIMT_SUPPORT=ON"
+            shift
+            ;;
+        -enable_device_symbol)
+            COMPILE_OPTIONS="${COMPILE_OPTIONS} -DACLSHMEM_ENABLE_DEVICE_SYMBOL=ON"
+            echo "[WARNING] Enabling device-symbol address publication: rebuild all SHMEM operators and link the matching device library."
+            echo "[WARNING] The target Runtime must provide GetSymbolAddress; the compiler must support GM globals and device linking."
             shift
             ;;
         -enable_relay)

@@ -43,7 +43,7 @@ ACLSHMEM_DEVICE void aclshmemx_instance_ctx_set(uint64_t instance_id)
         trap();
     }
     // Set aclshmem_instance Ctx, one instance have dram and hbm entity, so need << 1.
-    g_instance_addr = SMEM_SHM_DEVICE_USER_CONTEXT_ADDR + (instance_id << 1) * SMEM_SHM_DEVICE_USER_CONTEXT_PRE_SIZE;
+    g_instance_addr = aclshmemi_get_user_context_base() + (instance_id << 1) * SMEM_SHM_DEVICE_USER_CONTEXT_PRE_SIZE;
     return;
 }
 
@@ -62,7 +62,7 @@ aclshmemx_instance_ctx_set(uint64_t instance_id);
 #if defined(MULTI_INSTANCE)
 ACLSHMEM_DEVICE void aclshmemi_debug_check_instance_context()
 {
-    const uint64_t base = SMEM_SHM_DEVICE_USER_CONTEXT_ADDR;
+    const uint64_t base = aclshmemi_get_user_context_base();
     const uint64_t stride = 2 * SMEM_SHM_DEVICE_USER_CONTEXT_PRE_SIZE;
     if (g_instance_addr < base || (g_instance_addr - base) % stride != 0 ||
         !aclshmemi_is_valid_hbm_instance_id((g_instance_addr - base) / stride)) {
@@ -76,7 +76,7 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_get_current_entity_id()
 #if defined(MULTI_INSTANCE)
     ACLSHMEM_DEBUG_FUNC(aclshmemi_debug_check_instance_context);
     return static_cast<uint32_t>(
-        (g_instance_addr - SMEM_SHM_DEVICE_USER_CONTEXT_ADDR) / SMEM_SHM_DEVICE_USER_CONTEXT_PRE_SIZE);
+        (g_instance_addr - aclshmemi_get_user_context_base()) / SMEM_SHM_DEVICE_USER_CONTEXT_PRE_SIZE);
 #else
     return 0;
 #endif

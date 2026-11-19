@@ -28,6 +28,7 @@
 #include "runtime/dev.h"
 #include "runtime/rt_ffts.h"
 
+#include "host_device/shmemi_host_meta.h"
 #include "mem_entity_entry.h"
 
 using namespace shm;
@@ -41,9 +42,60 @@ drv_mem_handle_t* alloc_handle = nullptr;
 AscendSocType soc_type = ASCEND_UNKNOWN;
 
 std::mutex initMutex;
+#if ACLSHMEM_DYNAMIC_META
+// Keep failed cleanup reachable even after its instance/backend is destroyed.
+bool metaCleanupPending = false;
+
+int32_t CleanupMetaLocked()
+{
+    // Callers hold initMutex and have either an active or pending arena.
+    int32_t current = -1;
+    int ret = aclrtGetDevice(&current);
+    if (ret != ACL_SUCCESS)
+        return ret;
+    if (current != inited_device_id) {
+        SHM_LOG_ERROR("cannot retire dynamic meta on device " << current << "; expected " << inited_device_id);
+        return ACL_ERROR_INVALID_PARAM;
+    }
+    // As with other SHMEM resources, callers must finish all users before finalize.
+    ret = aclrtSynchronizeDevice();
+    if (ret == ACL_SUCCESS)
+        ret = aclshmemi_meta_publish(0);
+    if (ret == ACL_SUCCESS)
+        ret = aclrtFree(reinterpret_cast<void*>(g_baseAddr));
+    if (ret != ACL_SUCCESS) {
+        SHM_LOG_ERROR(
+            "cannot retire dynamic meta memory; retry init/finalize on device " << inited_device_id << ", ret=" << ret);
+        return ret;
+    }
+    g_baseAddr = 0;
+    initialized = false;
+    metaCleanupPending = false;
+    return ACLSHMEM_SUCCESS;
+}
+#endif
 } // namespace
 
+int32_t hybm_retry_pending_meta(void)
+{
+#if ACLSHMEM_DYNAMIC_META
+    std::unique_lock<std::mutex> lockGuard{initMutex};
+    return metaCleanupPending ? CleanupMetaLocked() : ACLSHMEM_SUCCESS;
+#else
+    return ACLSHMEM_SUCCESS;
+#endif
+}
+
 int32_t HybmGetInitDeviceId() { return inited_device_id; }
+
+uint64_t hybm_get_meta_base(void)
+{
+#if ACLSHMEM_DYNAMIC_META
+    return g_baseAddr;
+#else
+    return HYBM_DEVICE_META_ADDR;
+#endif
+}
 
 static inline int hybm_load_library()
 {
@@ -89,7 +141,13 @@ static inline int32_t init_meta_memory_for_modern(void** globalMemoryBase, size_
 
 static inline int32_t init_meta_memory_for_legacy(void** globalMemoryBase, size_t allocSize, uint64_t flags)
 {
-    drv::DevmmInitialize(initedLogicDeviceId, shm::DlHalApi::GetFd());
+    int32_t fd = shm::DlHalApi::GetFd();
+    if (fd < 0) {
+        SHM_LOG_ERROR("legacy HAL device fd is unavailable");
+        shm::DlApi::CleanupLibrary();
+        return ACLSHMEM_INNER_ERROR;
+    }
+    drv::DevmmInitialize(initedLogicDeviceId, fd);
     auto ret = drv::HalGvaReserveMemory((uint64_t*)globalMemoryBase, allocSize, initedLogicDeviceId, flags);
     if (ret != ACLSHMEM_SUCCESS) {
         shm::DlApi::CleanupLibrary();
@@ -109,6 +167,17 @@ static inline int32_t init_meta_memory_for_legacy(void** globalMemoryBase, size_
 HYBM_API int32_t hybm_init(int32_t deviceId, uint64_t flags)
 {
     std::unique_lock<std::mutex> lockGuard{initMutex};
+#if ACLSHMEM_DYNAMIC_META
+    if (metaCleanupPending) {
+        int ret = CleanupMetaLocked();
+        if (ret != ACLSHMEM_SUCCESS)
+            return ret;
+    }
+    if (initialized) {
+        SHM_LOG_ERROR("meta allocation is still active; retire it before initializing again");
+        return ACLSHMEM_INNER_ERROR;
+    }
+#endif
     SHM_LOG_ERROR_RETURN_IT_IF_NOT_OK(HalGvaPrecheck(), "the current version of ascend driver does not support!");
     SHM_LOG_ERROR_RETURN_IT_IF_NOT_OK(hybm_load_library(), "load library failed");
     auto ret = shm::DlAclApi::RtGetLogicDevIdByUserDevId(deviceId, &initedLogicDeviceId);
@@ -128,29 +197,68 @@ HYBM_API int32_t hybm_init(int32_t deviceId, uint64_t flags)
     void* globalMemoryBase = nullptr;
     size_t allocSize = HYBM_DEVICE_INFO_SIZE; // 申请meta空间
     soc_type = shm::DlApi::GetAscendSocType();
+#if ACLSHMEM_DYNAMIC_META
+    // Legacy data-heap mappers still need the device/fd setup even though
+    // metadata itself no longer uses the legacy GVA allocation path.
+    if (soc_type != AscendSocType::ASCEND_950 && HybmGetGvaVersion() != HYBM_GVA_V4) {
+        int32_t fd = shm::DlHalApi::GetFd();
+        if (fd < 0) {
+            SHM_LOG_ERROR("legacy HAL device fd is unavailable");
+            shm::DlApi::CleanupLibrary();
+            return ACLSHMEM_INNER_ERROR;
+        }
+        drv::DevmmInitialize(initedLogicDeviceId, fd);
+    }
+    ret = aclrtMalloc(&globalMemoryBase, allocSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    if (ret != ACL_SUCCESS) {
+        SHM_LOG_ERROR("cannot allocate dynamic meta memory, size=" << allocSize << ", ret=" << ret);
+        shm::DlApi::CleanupLibrary();
+        return ACLSHMEM_MALLOC_FAILED;
+    }
+    // Record ownership immediately, including memset/publication failures.
+    // The instance/backend may be destroyed by its init rollback guard.
+    g_baseAddr = reinterpret_cast<uint64_t>(globalMemoryBase);
+    initialized = true;
+    metaCleanupPending = true;
+    inited_device_id = deviceId;
+    ret = aclrtMemset(globalMemoryBase, allocSize, 0, allocSize);
+    if (ret == ACL_SUCCESS)
+        ret = aclshmemi_meta_publish(g_baseAddr);
+    if (ret != ACL_SUCCESS) {
+        if (CleanupMetaLocked() == ACLSHMEM_SUCCESS) {
+            shm::DlApi::CleanupLibrary();
+        }
+        return ret;
+    }
+    metaCleanupPending = false;
+#else
     if ((soc_type == AscendSocType::ASCEND_950) || (HybmGetGvaVersion() == HYBM_GVA_V4)) {
         ret = init_meta_memory_for_modern(&globalMemoryBase, allocSize);
     } else {
         ret = init_meta_memory_for_legacy(&globalMemoryBase, allocSize, flags);
     }
-    if (ret != ACLSHMEM_SUCCESS) {
+    if (ret != ACLSHMEM_SUCCESS)
         return ret;
-    }
     inited_device_id = deviceId;
-    SHM_LOG_INFO("hybm_init end device id " << deviceId << ", logic device id " << initedLogicDeviceId);
     initialized = true;
-    g_baseAddr = (uint64_t)globalMemoryBase;
+    g_baseAddr = reinterpret_cast<uint64_t>(globalMemoryBase);
+#endif
+    SHM_LOG_INFO("hybm_init end device id " << deviceId << ", logic device id " << initedLogicDeviceId);
     SHM_LOG_INFO("hybm init successfully.");
     return 0;
 }
 
-HYBM_API void hybm_uninit(void)
+int32_t hybm_uninit_with_status(void)
 {
     std::unique_lock<std::mutex> lockGuard{initMutex};
     if (!initialized) {
         SHM_LOG_WARN("hybm not initialized.");
-        return;
+        return ACLSHMEM_SUCCESS;
     }
+#if ACLSHMEM_DYNAMIC_META
+    metaCleanupPending = true;
+    return CleanupMetaLocked();
+#else
     int ret = 0;
     if ((soc_type == AscendSocType::ASCEND_950) || (HybmGetGvaVersion() == HYBM_GVA_V4)) {
         if (g_baseAddr != 0ULL) {
@@ -172,7 +280,11 @@ HYBM_API void hybm_uninit(void)
     alloc_handle = nullptr;
     SHM_LOG_INFO("uninitialize GVA memory return: " << ret);
     initialized = false;
+    return ret;
+#endif
 }
+
+HYBM_API void hybm_uninit(void) { (void)hybm_uninit_with_status(); }
 
 HYBM_API hybm_entity_t hybm_create_entity(uint16_t id, const hybm_options* options, uint32_t flags)
 {

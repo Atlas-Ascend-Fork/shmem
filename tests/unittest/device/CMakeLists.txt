@@ -26,6 +26,9 @@ set(CMAKE_C_COMPILER bisheng)
 set(CMAKE_CXX_COMPILER bisheng)
 
 add_library(aclshmem_unittest_device SHARED ${TEST_KERNEL_FILES} $<TARGET_OBJECTS:aclshmem_device> $<TARGET_OBJECTS:aclshmem_instance_quiet>)
+# The UT executable already owns the production Host objects for coverage.
+# Linking libshmem.so as well would duplicate/interpose their global state.
+set_target_properties(aclshmem_unittest_device PROPERTIES ACLSHMEM_META_HOST_PROVIDED TRUE)
 
 if(ACLSHMEM_SIMT_SUPPORT)
     target_compile_definitions(aclshmem_unittest_device PRIVATE USE_SIMT)
@@ -47,4 +50,29 @@ if (ACLSHMEM_SIMT_SUPPORT)
     target_include_directories(aclshmem_unittest_device PRIVATE
         ${PROJECT_SOURCE_DIR}/src/device_simt/
     )
+endif()
+
+# Independent binaries are needed to exercise early/late module registration.
+# They are built only for the opt-in device-symbol mode.
+if(ACLSHMEM_DYNAMIC_META)
+    foreach(id 1 2 3)
+        add_library(aclshmem_dynamic_reader${id} SHARED mem/dynamic_address_reader.cpp)
+        set_target_properties(aclshmem_dynamic_reader${id} PROPERTIES ACLSHMEM_META_HOST_PROVIDED TRUE)
+        target_compile_definitions(aclshmem_dynamic_reader${id} PRIVATE MODULE_ID=${id})
+        if(id EQUAL 3)
+            target_compile_definitions(aclshmem_dynamic_reader${id} PRIVATE MULTI_INSTANCE)
+        endif()
+        if(SOC_TYPE STREQUAL "Ascend950")
+            target_compile_definitions(aclshmem_dynamic_reader${id} PRIVATE USE_SIMT)
+        endif()
+        target_compile_options(aclshmem_dynamic_reader${id} PRIVATE
+            ${CMAKE_CCE_COMPILE_OPTIONS} ${CCE_AICORE_ARCH})
+        target_include_directories(aclshmem_dynamic_reader${id} PRIVATE
+            ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/src/device ${PROJECT_SOURCE_DIR}/src/device_simt)
+        target_link_libraries(aclshmem_dynamic_reader${id} PRIVATE ascendcl)
+        # These fixtures close/reopen modules across SHMEM initialization cycles.
+        # Keep this workaround local to the unload/reload tests.
+        target_link_options(aclshmem_dynamic_reader${id} PRIVATE -Wl,-z,nodelete)
+    endforeach()
 endif()

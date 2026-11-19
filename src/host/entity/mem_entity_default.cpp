@@ -20,6 +20,7 @@
 #include "init/shmemi_user_buffer_heap.h"
 #include "mem_entity_default.h"
 #include "mem_entity_inter.h"
+#include "mem_entity_entry.h"
 #include "utils/exception/shmem_exception_report.h"
 
 namespace shm {
@@ -476,7 +477,7 @@ int32_t MemEntityDefault::SetExtraContext(const void* context, uint32_t size) no
         return ACLSHMEM_INVALID_PARAM;
     }
 
-    uint64_t addr = HYBM_DEVICE_USER_CONTEXT_ADDR + id_ * HYBM_DEVICE_USER_CONTEXT_PRE_SIZE;
+    uint64_t addr = hybm_get_meta_base() + HYBM_DEVICE_META_SIZE + id_ * HYBM_DEVICE_USER_CONTEXT_PRE_SIZE;
     SHM_LOG_DEBUG("set extra context to addr: 0x" << std::hex << addr << " size: " << size);
     auto ret =
         DlAclApi::AclrtMemcpy((void*)addr, HYBM_DEVICE_USER_CONTEXT_PRE_SIZE, context, size, ACL_MEMCPY_HOST_TO_DEVICE);
@@ -620,7 +621,7 @@ int MemEntityDefault::LoadExtendLibrary() noexcept
 int MemEntityDefault::UpdateHybmDeviceInfo(uint32_t extCtxSize) noexcept
 {
     HybmDeviceMeta info{};
-    auto addr = HYBM_DEVICE_META_ADDR + HYBM_DEVICE_GLOBAL_META_SIZE + id_ * HYBM_DEVICE_PRE_META_SIZE;
+    auto addr = hybm_get_meta_base() + HYBM_DEVICE_GLOBAL_META_SIZE + id_ * HYBM_DEVICE_PRE_META_SIZE;
 
     SetHybmDeviceInfo(info);
     info.extraContextSize = extCtxSize;

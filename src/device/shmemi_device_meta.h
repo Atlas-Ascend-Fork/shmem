@@ -11,6 +11,11 @@
 #define __MEMFABRIC_SMEM_AI_CORE_BASE_META_H__
 
 #include "utils/shmemi_kernel_debug.h"
+#include "host_device/shmem_common_macros.h"
+
+#if ACLSHMEM_DYNAMIC_META
+extern "C" __attribute__((visibility("hidden"))) __gm__ uint64_t g_meta_root;
+#endif
 
 constexpr uint64_t SMEM_SHM_DEVICE_END_ADDR = 0x180000000000ULL - (1UL << 30UL);
 constexpr uint64_t SMEM_SHM_DEVICE_PRE_META_SIZE = 128UL;                            // 128B
@@ -24,6 +29,20 @@ constexpr uint64_t SMEM_SHM_DEVICE_INFO_SIZE = SMEM_SHM_DEVICE_USER_CONTEXT_PRE_
                                                SMEM_SHM_DEVICE_META_SIZE; // 元数据+用户context,总大小32M, 对齐2M
 constexpr uint64_t SMEM_SHM_DEVICE_META_ADDR = SMEM_SHM_DEVICE_END_ADDR - SMEM_SHM_DEVICE_INFO_SIZE;
 constexpr uint64_t SMEM_SHM_DEVICE_USER_CONTEXT_ADDR = SMEM_SHM_DEVICE_META_ADDR + SMEM_SHM_DEVICE_META_SIZE;
+
+ACLSHMEM_DEVICE uint64_t aclshmemi_get_meta_base()
+{
+#if ACLSHMEM_DYNAMIC_META
+    return g_meta_root;
+#else
+    return SMEM_SHM_DEVICE_META_ADDR;
+#endif
+}
+
+ACLSHMEM_DEVICE uint64_t aclshmemi_get_user_context_base()
+{
+    return aclshmemi_get_meta_base() + SMEM_SHM_DEVICE_META_SIZE;
+}
 
 constexpr uint64_t SMEM_SHM_DEVICE_META_OBJ_ID_OFFSET = 0;
 constexpr uint64_t SMEM_SHM_DEVICE_META_RANK_OFFSET = SMEM_SHM_DEVICE_META_OBJ_ID_OFFSET + sizeof(uint32_t);
@@ -46,7 +65,7 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_get_global_rank(uint32_t shmemId)
         return UINT32_MAX;
     }
     uint64_t metaAddr =
-        SMEM_SHM_DEVICE_META_ADDR + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
+        aclshmemi_get_meta_base() + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
     return (*(__gm__ uint32_t*)(metaAddr + SMEM_SHM_DEVICE_META_RANK_OFFSET));
 }
 
@@ -56,7 +75,7 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_get_global_rank_size(uint32_t shmemId)
         return UINT32_MAX;
     }
     uint64_t metaAddr =
-        SMEM_SHM_DEVICE_META_ADDR + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
+        aclshmemi_get_meta_base() + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
     return (*(__gm__ uint32_t*)(metaAddr + SMEM_SHM_DEVICE_META_RANK_SIZE_OFFSET));
 }
 
@@ -66,7 +85,7 @@ ACLSHMEM_DEVICE uint64_t aclshmemi_get_symmetric_size(uint32_t shmemId)
         return 0;
     }
     uint64_t metaAddr =
-        SMEM_SHM_DEVICE_META_ADDR + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
+        aclshmemi_get_meta_base() + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
     return (*(__gm__ uint64_t*)(metaAddr + SMEM_SHM_DEVICE_META_SYMM_OFFSET));
 }
 
@@ -77,7 +96,7 @@ ACLSHMEM_DEVICE __gm__ void* aclshmemi_get_qp_info_address(uint32_t shmemId)
     }
 
     uint64_t metaAddr =
-        SMEM_SHM_DEVICE_META_ADDR + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
+        aclshmemi_get_meta_base() + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
     return *(__gm__ void**)(metaAddr + SMEM_SHM_DEVICE_META_QP_INFO_OFFSET);
 }
 
@@ -86,7 +105,7 @@ ACLSHMEM_DEVICE __gm__ void* aclshmemi_get_udma_info_address(uint32_t shmemId)
     ACLSHMEM_DEBUG_FUNC(aclshmemi_check_shmem_id_valid, shmemId);
 
     uint64_t metaAddr =
-        SMEM_SHM_DEVICE_META_ADDR + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
+        aclshmemi_get_meta_base() + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
     return *(__gm__ void**)(metaAddr + SMEM_SHM_DEVICE_META_UDMA_INFO_OFFSET);
 }
 
@@ -95,7 +114,7 @@ ACLSHMEM_DEVICE __gm__ void* aclshmemi_get_extra_context_addr(uint32_t shmemId)
     if (shmemId >= SMEM_OBJECT_NUM_MAX) {
         return NULL;
     }
-    uint64_t ctxAddr = SMEM_SHM_DEVICE_USER_CONTEXT_ADDR + shmemId * SMEM_SHM_DEVICE_USER_CONTEXT_PRE_SIZE;
+    uint64_t ctxAddr = aclshmemi_get_user_context_base() + shmemId * SMEM_SHM_DEVICE_USER_CONTEXT_PRE_SIZE;
     return ((__gm__ void*)(ctxAddr));
 }
 
@@ -105,7 +124,7 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_get_extra_context_size(uint32_t shmemId)
         return 0;
     }
     uint64_t metaAddr =
-        SMEM_SHM_DEVICE_META_ADDR + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
+        aclshmemi_get_meta_base() + SMEM_SHM_DEVICE_GLOBAL_META_SIZE + shmemId * SMEM_SHM_DEVICE_PRE_META_SIZE;
     return (*(__gm__ uint32_t*)(metaAddr + SMEM_SHM_DEVICE_META_CONTEXT_OFFSET));
 }
 

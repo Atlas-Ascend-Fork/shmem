@@ -78,6 +78,8 @@ After installing the Python wheel, you can use the [shmem-config command referen
 
 For abbreviations and terms used in the documentation and APIs, see the [Glossary](docs/glossary.md).
 
+Dynamic device addressing is opt-in and disabled by default. Operator build maintainers can follow the [integration guide](docs/dynamic_meta_en.md).
+
 ## 1. Project Introduction
 SHMEM is a multi-server, multi-device memory communication library designed for the Ascend platform. By abstracting host-side and device-side APIs, SHMEM enables fast cross-device memory access and data synchronization. Its core benefits include:
 - Support for AI Core direct-driven MTE and xDMA, enabling D2D, D2H, H2D, D2rH, and rH2D communication paths

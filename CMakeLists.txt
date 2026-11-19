@@ -533,6 +533,91 @@ else()
     message(STATUS "aclrtMemMapSelectedLink symbol not found, disabling ACLSHMEM_HCCS_SIO_LINK support")
 endif()
 
+# Existing consumers link libshmem.so directly and do not register their
+# device binaries. A newer toolkit alone must not change their meta ABI.
+option(ACLSHMEM_ENABLE_DEVICE_SYMBOL
+    "Publish dynamic internal addresses through device symbols (requires device library linking)" OFF)
+set(ACLSHMEM_DYNAMIC_META ${ACLSHMEM_ENABLE_DEVICE_SYMBOL})
+if(ACLSHMEM_DYNAMIC_META)
+    message(WARNING "Dynamic meta enabled: rebuild all consumer device binaries with libshmem_device.a. Target Runtime must provide GetSymbolAddress; there is no runtime fallback to fixed addresses.")
+else()
+    message(STATUS "SHMEM meta: fixed-address mode")
+endif()
+# Compile against the tracked header; select the mode with a build macro.
+add_compile_definitions(ACLSHMEM_DYNAMIC_META=$<BOOL:${ACLSHMEM_DYNAMIC_META}>)
+set(shmem_meta_config_source "${PROJECT_SOURCE_DIR}/include/host_device/shmem_common_macros.h")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${shmem_meta_config_source}")
+file(READ "${shmem_meta_config_source}" shmem_meta_config)
+# Only the installed copy needs a preset default, so external consumers
+# inherit the library's mode without repeating the build definition.
+string(REPLACE "#define ACLSHMEM_DYNAMIC_META 0"
+    "#define ACLSHMEM_DYNAMIC_META $<BOOL:${ACLSHMEM_DYNAMIC_META}>"
+    shmem_meta_config "${shmem_meta_config}")
+file(GENERATE OUTPUT "${PROJECT_BINARY_DIR}/generated/host_device/shmem_common_macros.h"
+    CONTENT "${shmem_meta_config}")
+install(FILES "${PROJECT_BINARY_DIR}/generated/host_device/shmem_common_macros.h"
+    DESTINATION include/host_device)
+
+if(ACLSHMEM_DYNAMIC_META)
+    # Keep archive members in this order: compiler variable registration must
+    # precede the Host registrar when a module is loaded after SHMEM init.
+    add_library(shmem_meta_device_object OBJECT src/device/shmem_meta_module.cpp)
+    target_compile_options(shmem_meta_device_object PRIVATE ${CMAKE_CCE_COMPILE_OPTIONS} ${CCE_AICORE_ARCH} -dc)
+    add_library(shmem_meta_host_object OBJECT src/device/shmem_meta_registration.cpp)
+    target_compile_options(shmem_meta_host_object PRIVATE -xc++)
+    foreach(meta_object shmem_meta_device_object shmem_meta_host_object)
+        target_include_directories(${meta_object} PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src)
+        set_target_properties(${meta_object} PROPERTIES ACLSHMEM_META_CONFIGURED TRUE)
+    endforeach()
+    add_library(shmem_device STATIC
+        $<TARGET_OBJECTS:shmem_meta_device_object>
+        $<TARGET_OBJECTS:shmem_meta_host_object>)
+    install(TARGETS shmem_device ARCHIVE DESTINATION lib)
+endif()
+# Internal target integration stays in the existing build entry point.
+function(aclshmem_target_meta target)
+    get_target_property(done ${target} ACLSHMEM_META_CONFIGURED)
+    if(done)
+        return()
+    endif()
+    set_property(TARGET ${target} PROPERTY ACLSHMEM_META_CONFIGURED TRUE)
+    get_target_property(kind ${target} TYPE)
+    target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src)
+    target_compile_options(${target} PRIVATE -dc)
+    if(kind STREQUAL "OBJECT_LIBRARY" OR kind STREQUAL "STATIC_LIBRARY")
+        # The final operator binary owns exactly one entry definition.
+        return()
+    endif()
+    # The internal mixed-code header retains the module object and its Host registrar.
+    target_link_libraries(${target} PRIVATE shmem_device)
+    target_link_options(${target} PRIVATE --cce-fatobj-link)
+    if(NPU_ARCH)
+        target_link_options(${target} PRIVATE --npu-arch=${NPU_ARCH})
+    else()
+        target_link_options(${target} PRIVATE ${CCE_AICORE_ARCH})
+    endif()
+    get_target_property(host_provided ${target} ACLSHMEM_META_HOST_PROVIDED)
+    if(NOT target STREQUAL "shmem" AND NOT host_provided)
+        target_link_libraries(${target} PRIVATE shmem)
+    endif()
+endfunction()
+
+# Apply to all in-tree mixed-code targets, including examples created in their
+# own CMakeLists. Host-only targets must not receive -dc or a device source.
+function(aclshmem_configure_meta_directory directory)
+    get_property(targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(target IN LISTS targets)
+        get_target_property(options ${target} COMPILE_OPTIONS)
+        if("-xasc" IN_LIST options OR "-xcce" IN_LIST options)
+            aclshmem_target_meta(${target})
+        endif()
+    endforeach()
+    get_property(children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+    foreach(child IN LISTS children)
+        aclshmem_configure_meta_directory("${child}")
+    endforeach()
+endfunction()
+
 # 添加子目录
 add_subdirectory(src)
 add_subdirectory(tools)
@@ -543,4 +628,10 @@ endif()
 
 if(USE_EXAMPLES OR PYEXPAND_EXAMPLE)
     add_subdirectory(examples)
+endif()
+
+if(ACLSHMEM_DYNAMIC_META)
+    aclshmem_configure_meta_directory("${PROJECT_SOURCE_DIR}")
+    # shmem consists of object libraries and therefore has no -xasc target option.
+    aclshmem_target_meta(shmem)
 endif()
