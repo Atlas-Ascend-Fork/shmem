@@ -75,6 +75,7 @@ Result HybmVmmBasedSegment::ReserveEachPeMemorySpace(
             currentAddr += reserveAlignedSize;
         }
         singleReservation_ = true;
+        totalVirtualSize_ = totalReservedSize;
         return ACLSHMEM_SUCCESS;
     }
 
