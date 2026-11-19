@@ -87,6 +87,7 @@ function print_usage()
 {
     echo "Usage: $0 [options]"
     echo "Options:"
+    echo "  -h, --help                 Show this help message and exit"
     echo "  -uttests                   Build with unit tests"
     echo "  -cann                      Enable CANN build"
     echo "  -debug                     Build in debug mode"
@@ -554,6 +555,10 @@ fi
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help)
+            print_usage
+            exit 0
+            ;;
         -uttests)
             BUILD_GOOGLETEST=ON
             BUILD_CATLASS=ON
