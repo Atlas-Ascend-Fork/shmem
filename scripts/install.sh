@@ -25,31 +25,31 @@ function print()
 
 function chmod_authority()
 {
-    chmod_file ${default_install_dir}
-    chmod_file ${install_dir}
+    chmod_file "${default_install_dir}"
+    chmod_file "${install_dir}"
     local file_rights=$([ "${install_for_all_flag}" == "y" ] && echo 555 || echo 550)
-    chmod ${file_rights} ${install_dir}/scripts/uninstall.sh
-    chmod ${file_rights} ${install_dir}/install.sh
-    chmod_dir ${default_install_dir} "550"
-    chmod_dir ${install_dir} "550"
+    chmod ${file_rights} "${install_dir}/scripts/uninstall.sh"
+    chmod ${file_rights} "${install_dir}/install.sh"
+    chmod_dir "${default_install_dir}" "550"
+    chmod_dir "${install_dir}" "550"
     local path_rights=$([ "${install_for_all_flag}" == "y" ] && echo 755 || echo 750)
-    chmod ${path_rights} ${default_install_dir}
-    chmod ${path_rights} ${install_dir}
+    chmod ${path_rights} "${default_install_dir}"
+    chmod ${path_rights} "${install_dir}"
 }
 
 function chmod_file()
 {
-    chmod_recursion ${1} "550" "file" "*.sh"
-    chmod_recursion ${1} "440" "file" "*.bin"
-    chmod_recursion ${1} "440" "file" "*.h"
-    chmod_recursion ${1} "440" "file" "*.info"
-    chmod_recursion ${1} "440" "file" "*.so"
-    chmod_recursion ${1} "440" "file" "*.a"
+    chmod_recursion "${1}" "550" "file" "*.sh"
+    chmod_recursion "${1}" "440" "file" "*.bin"
+    chmod_recursion "${1}" "440" "file" "*.h"
+    chmod_recursion "${1}" "440" "file" "*.info"
+    chmod_recursion "${1}" "440" "file" "*.so"
+    chmod_recursion "${1}" "440" "file" "*.a"
 }
 
 function chmod_dir()
 {
-    chmod_recursion ${1} ${2} "dir"
+    chmod_recursion "${1}" "${2}" "dir"
 }
 
 function chmod_recursion()
@@ -58,9 +58,9 @@ function chmod_recursion()
     local rights="$(echo ${parameter2:0:2})""$(echo ${parameter2:1:1})"
     rights=$([ "${install_for_all_flag}" == "y" ] && echo ${rights} || echo $2)
     if [ "$3" = "dir" ]; then
-        find $1 -type d -exec chmod ${rights} {} \; 2>/dev/null
+        find "$1" -type d -exec chmod ${rights} {} \; 2>/dev/null
     elif [ "$3" = "file" ]; then
-        find $1 -type f -name "$4" -exec chmod ${rights} {} \; 2>/dev/null
+        find "$1" -type f -name "$4" -exec chmod ${rights} {} \; 2>/dev/null
     fi
 }
 
@@ -75,7 +75,7 @@ function parse_script_args()
         ;;
         --install-path=*)
             install_path_flag=y
-            target_dir=$(echo $1 | cut -d"=" -f2-)
+            target_dir=$(echo "$1" | cut -d"=" -f2-)
             target_dir=${target_dir}/shmem
             shift
         ;;
@@ -141,86 +141,86 @@ function check_owner()
 
 function delete_latest()
 {
-    cd $default_install_dir
+    cd "${default_install_dir}"
     print "INFO" "SHMEM delete latest!"
     if [ -d "latest" ]; then
-        rm -rf latest
+        rm -rf "latest"
     fi
     if [ -f "set_env.sh" ]; then
-        rm -rf set_env.sh
+        rm -rf "set_env.sh"
     fi
 }
 
 function delete_install_files()
 {
-    install_dir=$1
-    print "INFO" "SHMEM $(basename $1) delete install files!"
-    [ -n "$1" ] && rm -rf $1
+    install_dir="$1"
+    print "INFO" "SHMEM $(basename "$1") delete install files!"
+    [ -n "$1" ] && rm -rf "$1"
 }
 
 function delete_file_with_authority()
 {
-    file_path=$1
-    dir_path=$(dirname ${file_path})
-    if [ ${dir_path} != "." ]; then
-        dir_authority=$(stat -c %a ${dir_path})
-        chmod 700 ${dir_path}
-        if [ -d ${file_path} ]; then
-            rm -rf ${file_path}
+    file_path="$1"
+    dir_path=$(dirname "${file_path}")
+    if [ "${dir_path}" != "." ]; then
+        dir_authority=$(stat -c %a "${dir_path}")
+        chmod 700 "${dir_path}"
+        if [ -d "${file_path}" ]; then
+            rm -rf "${file_path}"
         else
-            rm -f ${file_path}
+            rm -f "${file_path}"
         fi
-        chmod ${dir_authority} ${dir_path}
+        chmod "${dir_authority}" "${dir_path}"
     else
-        chmod 700 ${file_path}
-        if [ -d ${file_path} ]; then
-            rm -rf ${file_path}
+        chmod 700 "${file_path}"
+        if [ -d "${file_path}" ]; then
+            rm -rf "${file_path}"
         else
-            rm -f ${file_path}
+            rm -f "${file_path}"
         fi
     fi
 }
 
 function delete_empty_recursion()
 {
-    if [ ! -d $1 ]; then
+    if [ ! -d "$1" ]; then
         return 0
     fi
-    print "INFO" "SHMEM $(basename $1) delete empty recursion!"
-    for file in $1/*
+    print "INFO" "SHMEM $(basename "$1") delete empty recursion!"
+    for file in "$1"/*
     do
-        if [ -d $file ]; then
-            delete_empty_recursion $file
+        if [ -d "$file" ]; then
+            delete_empty_recursion "$file"
         fi
     done
-    if [ -z "$(ls -A $1)" ]; then
-        delete_file_with_authority $1
+    if [ -z "$(ls -A "$1")" ]; then
+        delete_file_with_authority "$1"
     fi
 }
 
 function uninstall_process()
 {
-    if [ ! -d $1 ]; then
+    if [ ! -d "$1" ]; then
         return 0
     fi
     print "INFO" "UninstallPath: $1"
-    print "INFO" "SHMEM $(basename $1) uninstall start!"
-    shmem_dir=$(cd $1/..;pwd)
-    delete_latest $1
-    delete_install_files $1
-    if [ -d $1 ]; then
-        delete_empty_recursion $1
+    print "INFO" "SHMEM $(basename "$1") uninstall start!"
+    shmem_dir=$(cd "${1}/..";pwd)
+    delete_latest "$1"
+    delete_install_files "$1"
+    if [ -d "$1" ]; then
+        delete_empty_recursion "$1"
     fi
-    if [ "$2" == "y" -a -z "$(ls $shmem_dir)" ]; then
-        rm -rf $shmem_dir
+    if [ "$2" == "y" -a -z "$(ls "${shmem_dir}")" ]; then
+        rm -rf "${shmem_dir}"
     fi
-    print "INFO" "SHMEM $(basename $1) uninstall success!"
+    print "INFO" "SHMEM $(basename "$1") uninstall success!"
 }
 
 function uninstall()
 {
     install_dir=${default_install_dir}/${VERSION}
-    uninstall_process ${install_dir} y
+    uninstall_process "${install_dir}" y
 }
 
 function check_target_dir_owner()
@@ -229,11 +229,11 @@ function check_target_dir_owner()
     if [ "$cur_owner" != "root" ]; then
         return
     fi
-    local seg_num=$(expr $(echo ${1} | grep -o "/" | wc -l) + "1")
+    local seg_num=$(expr $(echo "$1" | grep -o "/" | wc -l) + "1")
     local path=""
     for((i=1;i<=$seg_num;i++))
     do
-        local split=$(echo ${1} | cut -d "/" -f$i)
+        local split=$(echo "$1" | cut -d "/" -f$i)
         if [ "$split" == "" ]; then
             continue
         fi
@@ -250,9 +250,9 @@ function check_target_dir_owner()
 
 function check_path()
 {
-    if [ ! -d ${install_dir} ]; then
-        mkdir -p ${install_dir}
-        if [ ! -d ${install_dir} ]; then
+    if [ ! -d "${install_dir}" ]; then
+        mkdir -p "${install_dir}"
+        if [ ! -d "${install_dir}" ]; then
             print "ERROR" "Install failed, create ${install_dir} failed"
             exit 1
         fi
@@ -263,23 +263,23 @@ function install_to_path()
 {
     install_dir=${default_install_dir}/${VERSION}
     print "INFO" "InstallPath: ${install_dir}"
-    if [ -d ${install_dir} ]; then
+    if [ -d "${install_dir}" ]; then
         print "INFO" "The installation directory exists, uninstall first"
     fi
-    uninstall_process ${install_dir}
+    uninstall_process "${install_dir}"
     check_target_dir_owner
     check_path
-    cd ${install_dir}
+    cd "${install_dir}"
     copy_files
 
-    cd ${default_install_dir}
-    ln -snf $VERSION latest
+    cd "${default_install_dir}"
+    ln -snf "$VERSION" latest
 
 }
 function copy_files()
 {
-    mkdir -p $install_dir
-    cp -r ${sourcedir}/* $install_dir
+    mkdir -p "${install_dir}"
+    cp -r "${sourcedir}"/* "${install_dir}"
 }
 function install_process()
 {
@@ -327,7 +327,7 @@ function run_preinstall_check()
 
 function main()
 {
-    parse_script_args $*
+    parse_script_args "$@"
 
     # --check：执行环境检测，与 --install 组合则安装前检测
     if [ "$check_flag" == "y" ]; then
@@ -348,4 +348,4 @@ function main()
     fi
 }
 
-main $*
+main "$@"
