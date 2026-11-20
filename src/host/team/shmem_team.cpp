@@ -26,11 +26,26 @@ std::recursive_mutex g_team_mutex;
 
 #ifdef ACLSHMEM_UNIT_TEST
 bool g_fail_next_device_team_update = false;
+std::bitset<ACLSHMEM_MAX_TEAMS> g_saved_team_mask;
 
 void aclshmemi_team_fail_next_device_update_for_test()
 {
     std::lock_guard<std::recursive_mutex> lock(g_team_mutex);
     g_fail_next_device_team_update = true;
+}
+
+void aclshmemi_team_fill_mask_for_test(int32_t free_team)
+{
+    std::lock_guard<std::recursive_mutex> lock(g_team_mutex);
+    g_saved_team_mask = g_team_mask;
+    g_team_mask.set();
+    g_team_mask.reset(free_team);
+}
+
+void aclshmemi_team_restore_mask_for_test()
+{
+    std::lock_guard<std::recursive_mutex> lock(g_team_mutex);
+    g_team_mask = g_saved_team_mask;
 }
 #endif
 
@@ -467,14 +482,19 @@ int aclshmemi_team_split_2d_x(
     aclshmem_team_t& parent_team, int32_t& x_team_counts, int32_t& src_size, int& x_range, aclshmem_team_t*& x_team)
 {
     int start = 0;
+    int32_t first_error = ACLSHMEM_SUCCESS;
     aclshmemx_team_t* src_team = &g_aclshmem_team_pool[parent_team];
 
     for (int i = 0; i < x_team_counts; ++i) {
-        aclshmem_team_t my_xteam;
+        aclshmem_team_t my_xteam = ACLSHMEM_TEAM_INVALID;
         int x_stride = 1;
         int x_size = ((i == x_team_counts - 1) && (src_size % x_range != 0)) ? src_size % x_range : x_range;
-        if (aclshmem_team_split_strided(parent_team, start, x_stride, x_size, &my_xteam) != ACLSHMEM_SUCCESS) {
+        int ret = aclshmem_team_split_strided(parent_team, start, x_stride, x_size, &my_xteam);
+        if (ret != ACLSHMEM_SUCCESS) {
             SHM_LOG_WARN("create x-axis team " << (i + 1) << " of " << x_team_counts << " failed");
+            if (first_error == ACLSHMEM_SUCCESS) {
+                first_error = ret;
+            }
         }
         start += x_range;
 
@@ -487,25 +507,29 @@ int aclshmemi_team_split_2d_x(
             }
         }
     }
-    return ACLSHMEM_SUCCESS;
+    return first_error;
 }
 
 int aclshmemi_team_split_2d_y(
     aclshmem_team_t& parent_team, int32_t& y_team_counts, int32_t& src_size, int& x_range, aclshmem_team_t*& y_team)
 {
     int start = 0;
-    int errorCode = 0;
+    int32_t first_error = ACLSHMEM_SUCCESS;
     aclshmemx_team_t* src_team = &g_aclshmem_team_pool[parent_team];
 
     for (int i = 0; i < y_team_counts; ++i) {
-        aclshmem_team_t my_yteam;
+        aclshmem_team_t my_yteam = ACLSHMEM_TEAM_INVALID;
         int y_stride = x_range;
         int remainder = src_size % x_range;
         int y_range = src_size / x_range;
         int y_size = (remainder && i < remainder) ? y_range + 1 : y_range;
 
-        if (aclshmem_team_split_strided(parent_team, start, y_stride, y_size, &my_yteam) != ACLSHMEM_SUCCESS) {
+        int ret = aclshmem_team_split_strided(parent_team, start, y_stride, y_size, &my_yteam);
+        if (ret != ACLSHMEM_SUCCESS) {
             SHM_LOG_WARN("create y-axis team " << (i + 1) << " of " << y_team_counts << " failed");
+            if (first_error == ACLSHMEM_SUCCESS) {
+                first_error = ret;
+            }
         }
 
         start += 1;
@@ -518,8 +542,137 @@ int aclshmemi_team_split_2d_y(
             }
         }
     }
-    return ACLSHMEM_SUCCESS;
+    return first_error;
 }
+
+namespace {
+
+// signal_addr[0] is reserved by the signal APIs. One word per world PE and a
+// final summary word are available for the parent-team failure agreement.
+constexpr int32_t TEAM_SPLIT_STATUS_BASE = 1;
+int32_t* team_split_status_slot(int32_t global_pe)
+{
+    if (global_pe < 0 || global_pe >= g_state.npes) {
+        return nullptr;
+    }
+    return reinterpret_cast<int32_t*>(g_state.signal_addr) + TEAM_SPLIT_STATUS_BASE + global_pe;
+}
+
+int32_t* team_split_status_summary_slot()
+{
+    return reinterpret_cast<int32_t*>(g_state.signal_addr) + TEAM_SPLIT_STATUS_BASE + g_state.npes;
+}
+
+bool team_split_is_member(const aclshmemx_team_t& team) { return team.mype >= 0 && team.mype < team.size; }
+
+int32_t aclshmemi_team_split_status_prepare(aclshmem_team_t parent_team)
+{
+    const aclshmemx_team_t& team = g_aclshmem_team_pool[parent_team];
+    if (!team_split_is_member(team) || g_state.signal_addr == 0) {
+        return team_split_is_member(team) ? ACLSHMEM_INNER_ERROR : ACLSHMEM_SUCCESS;
+    }
+
+    int32_t ret = ACLSHMEM_SUCCESS;
+    if (team.mype == 0) {
+        // The root reads every member's slot from its own symmetric array.
+        // Clear those root-local slots here; clearing each PE's local copy
+        // leaves stale failures behind in the root's array.
+        for (int32_t i = 0; i < team.size; ++i) {
+            if (aclrtMemset(team_split_status_slot(team.pe_mapping[i]), sizeof(int32_t), 0, sizeof(int32_t)) !=
+                ACL_SUCCESS) {
+                SHM_LOG_ERROR("reset team split status failed for PE " << team.pe_mapping[i]);
+                ret = ACLSHMEM_INNER_ERROR;
+            }
+        }
+        if (aclrtMemset(team_split_status_summary_slot(), sizeof(int32_t), 0, sizeof(int32_t)) != ACL_SUCCESS) {
+            SHM_LOG_ERROR("reset team split status summary failed");
+            ret = ACLSHMEM_INNER_ERROR;
+        }
+    }
+
+    // The parent-team barrier makes the root's status resets visible before
+    // any member starts allocating X/Y teams.
+    aclshmem_barrier(parent_team);
+    return ret;
+}
+
+int32_t aclshmemi_team_split_status_gate(aclshmem_team_t parent_team, int32_t local_status)
+{
+    const aclshmemx_team_t& team = g_aclshmem_team_pool[parent_team];
+    if (!team_split_is_member(team) || g_state.signal_addr == 0) {
+        return team_split_is_member(team) ? ACLSHMEM_INNER_ERROR : local_status;
+    }
+
+    const int32_t root_pe = team.pe_mapping[0];
+    int32_t* local_status_slot = team_split_status_slot(g_state.mype);
+    if (local_status_slot == nullptr) {
+        return ACLSHMEM_INNER_ERROR;
+    }
+
+    // Report only failures. Each PE owns one slot in the root's symmetric
+    // status array, so SET is sufficient and works for all transports.
+    if (local_status != ACLSHMEM_SUCCESS) {
+        if (g_state.mype == root_pe) {
+            if (aclrtMemset(local_status_slot, sizeof(int32_t), 1, sizeof(int32_t)) != ACL_SUCCESS) {
+                SHM_LOG_ERROR("record local team split failure failed");
+            }
+        } else {
+            aclshmemx_signal_op_on_stream(
+                local_status_slot, 1, ACLSHMEM_SIGNAL_SET, root_pe, g_state_host.default_stream);
+        }
+    }
+    aclshmem_barrier(parent_team);
+
+    int32_t global_failure = local_status != ACLSHMEM_SUCCESS ? 1 : 0;
+    if (team.mype == 0) {
+        for (int32_t i = 0; i < team.size; ++i) {
+            const int32_t global_pe = team.pe_mapping[i];
+            if (team_split_status_slot(global_pe) == nullptr) {
+                SHM_LOG_ERROR("invalid team split PE " << global_pe);
+                global_failure = 1;
+                continue;
+            }
+            int32_t status = 0;
+            if (aclrtMemcpy(
+                    &status, sizeof(status), team_split_status_slot(global_pe), sizeof(status),
+                    ACL_MEMCPY_DEVICE_TO_HOST) != ACL_SUCCESS) {
+                SHM_LOG_ERROR("read team split status failed for PE " << global_pe);
+                global_failure = 1;
+                continue;
+            }
+            global_failure = global_failure || status != 0;
+        }
+
+        int32_t summary = global_failure ? 1 : 0;
+        if (aclrtMemset(team_split_status_summary_slot(), sizeof(summary), summary, sizeof(summary)) != ACL_SUCCESS) {
+            SHM_LOG_ERROR("write team split status summary failed");
+            global_failure = 1;
+            summary = 1;
+        }
+        for (int32_t i = 1; i < team.size; ++i) {
+            aclshmemx_signal_op_on_stream(
+                team_split_status_summary_slot(), summary, ACLSHMEM_SIGNAL_SET, team.pe_mapping[i],
+                g_state_host.default_stream);
+        }
+    }
+
+    // Ensure every member observes the root's summary before deciding whether
+    // to destroy locally-created child teams.
+    aclshmem_barrier(parent_team);
+    int32_t summary = 0;
+    if (aclrtMemcpy(
+            &summary, sizeof(summary), team_split_status_summary_slot(), sizeof(summary), ACL_MEMCPY_DEVICE_TO_HOST) !=
+        ACL_SUCCESS) {
+        SHM_LOG_ERROR("read team split status summary failed");
+        summary = 1;
+    }
+    if (summary != 0) {
+        return local_status == ACLSHMEM_SUCCESS ? ACLSHMEM_INNER_ERROR : local_status;
+    }
+    return local_status;
+}
+
+} // namespace
 
 int aclshmem_team_split_2d(aclshmem_team_t parent_team, int x_range, aclshmem_team_t* x_team, aclshmem_team_t* y_team)
 {
@@ -532,6 +685,8 @@ int aclshmem_team_split_2d(aclshmem_team_t parent_team, int x_range, aclshmem_te
         return ret;
     }
 
+    int32_t local_ret = aclshmemi_team_split_status_prepare(parent_team);
+
     aclshmemx_team_t* src_team = &g_aclshmem_team_pool[parent_team];
     int32_t src_start = src_team->start;
     int32_t src_stride = src_team->stride;
@@ -542,12 +697,26 @@ int aclshmem_team_split_2d(aclshmem_team_t parent_team, int x_range, aclshmem_te
     int32_t x_team_counts = static_cast<int32_t>(std::ceil(src_size / static_cast<double>(x_range)));
     int32_t y_team_counts = x_range;
 
-    ret = aclshmemi_team_split_2d_x(parent_team, x_team_counts, src_size, x_range, x_team);
-    if (ret != ACLSHMEM_SUCCESS) {
-        return ret;
+    if (local_ret == ACLSHMEM_SUCCESS) {
+        local_ret = aclshmemi_team_split_2d_x(parent_team, x_team_counts, src_size, x_range, x_team);
+    }
+    if (local_ret == ACLSHMEM_SUCCESS) {
+        local_ret = aclshmemi_team_split_2d_y(parent_team, y_team_counts, src_size, x_range, y_team);
     }
 
-    return aclshmemi_team_split_2d_y(parent_team, y_team_counts, src_size, x_range, y_team);
+    ret = aclshmemi_team_split_status_gate(parent_team, local_ret);
+    if (ret != ACLSHMEM_SUCCESS) {
+        if (*x_team != ACLSHMEM_TEAM_INVALID) {
+            aclshmem_team_destroy(*x_team);
+            *x_team = ACLSHMEM_TEAM_INVALID;
+        }
+        if (*y_team != ACLSHMEM_TEAM_INVALID) {
+            aclshmem_team_destroy(*y_team);
+            *y_team = ACLSHMEM_TEAM_INVALID;
+        }
+        return ret;
+    }
+    return ACLSHMEM_SUCCESS;
 }
 
 int32_t aclshmem_team_translate_pe(aclshmem_team_t src_team, int32_t src_pe, aclshmem_team_t dest_team)

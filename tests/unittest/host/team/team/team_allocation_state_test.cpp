@@ -18,6 +18,8 @@
 #include "unittest_main_test.h"
 
 void aclshmemi_team_fail_next_device_update_for_test();
+void aclshmemi_team_fill_mask_for_test(int32_t free_team);
+void aclshmemi_team_restore_mask_for_test();
 
 namespace {
 void test_aclshmem_team_allocation_state(int rank_id, int n_ranks, uint64_t local_mem_size)
@@ -84,6 +86,70 @@ void test_aclshmem_team_allocation_state(int rank_id, int n_ranks, uint64_t loca
     ASSERT_EQ(aclshmem_team_split_strided(ACLSHMEM_TEAM_WORLD, 0, 1, n_ranks, &recovered_team), ACLSHMEM_SUCCESS);
     EXPECT_EQ(recovered_team, first_dynamic_team);
     aclshmem_team_destroy(recovered_team);
+
+    aclshmemi_team_fail_next_device_update_for_test();
+    aclshmem_team_t x_team = ACLSHMEM_TEAM_INVALID;
+    aclshmem_team_t y_team = ACLSHMEM_TEAM_INVALID;
+    EXPECT_EQ(aclshmem_team_split_2d(ACLSHMEM_TEAM_WORLD, 1, &x_team, &y_team), ACLSHMEM_INNER_ERROR);
+    EXPECT_EQ(x_team, ACLSHMEM_TEAM_INVALID);
+    EXPECT_EQ(y_team, ACLSHMEM_TEAM_INVALID);
+    EXPECT_EQ(g_state.team_pools[first_dynamic_team], nullptr);
+    if (x_team != ACLSHMEM_TEAM_INVALID) {
+        aclshmem_team_destroy(x_team);
+    }
+    if (y_team != ACLSHMEM_TEAM_INVALID) {
+        aclshmem_team_destroy(y_team);
+    }
+
+    aclshmemi_team_fill_mask_for_test(first_dynamic_team);
+    x_team = ACLSHMEM_TEAM_INVALID;
+    y_team = ACLSHMEM_TEAM_INVALID;
+    EXPECT_EQ(aclshmem_team_split_2d(ACLSHMEM_TEAM_WORLD, 1, &x_team, &y_team), ACLSHMEM_INNER_ERROR);
+    EXPECT_EQ(x_team, ACLSHMEM_TEAM_INVALID);
+    EXPECT_EQ(y_team, ACLSHMEM_TEAM_INVALID);
+    EXPECT_EQ(g_state.team_pools[first_dynamic_team], nullptr);
+    if (x_team != ACLSHMEM_TEAM_INVALID) {
+        aclshmem_team_destroy(x_team);
+    }
+    if (y_team != ACLSHMEM_TEAM_INVALID) {
+        aclshmem_team_destroy(y_team);
+    }
+    aclshmemi_team_restore_mask_for_test();
+
+    // A single PE failing during Y creation must make every parent-team member
+    // roll back its locally created X/Y teams before returning.
+    if (n_ranks == 2) {
+        if (rank_id == 0) {
+            aclshmemi_team_fill_mask_for_test(first_dynamic_team);
+        }
+        x_team = ACLSHMEM_TEAM_INVALID;
+        y_team = ACLSHMEM_TEAM_INVALID;
+        EXPECT_EQ(aclshmem_team_split_2d(ACLSHMEM_TEAM_WORLD, 2, &x_team, &y_team), ACLSHMEM_INNER_ERROR);
+        if (rank_id == 0) {
+            aclshmemi_team_restore_mask_for_test();
+        }
+        EXPECT_EQ(x_team, ACLSHMEM_TEAM_INVALID);
+        EXPECT_EQ(y_team, ACLSHMEM_TEAM_INVALID);
+        EXPECT_EQ(g_state.team_pools[first_dynamic_team], nullptr);
+
+        x_team = ACLSHMEM_TEAM_INVALID;
+        y_team = ACLSHMEM_TEAM_INVALID;
+        EXPECT_EQ(aclshmem_team_split_2d(ACLSHMEM_TEAM_WORLD, 2, &x_team, &y_team), ACLSHMEM_SUCCESS);
+        EXPECT_NE(x_team, ACLSHMEM_TEAM_INVALID);
+        EXPECT_NE(y_team, ACLSHMEM_TEAM_INVALID);
+        aclshmem_team_destroy(x_team);
+        aclshmem_team_destroy(y_team);
+    }
+
+    // A failed split must not leave a stale parent-team failure bit that
+    // poisons the next collective split.
+    x_team = ACLSHMEM_TEAM_INVALID;
+    y_team = ACLSHMEM_TEAM_INVALID;
+    EXPECT_EQ(aclshmem_team_split_2d(ACLSHMEM_TEAM_WORLD, 1, &x_team, &y_team), ACLSHMEM_SUCCESS);
+    EXPECT_NE(x_team, ACLSHMEM_TEAM_INVALID);
+    EXPECT_NE(y_team, ACLSHMEM_TEAM_INVALID);
+    aclshmem_team_destroy(x_team);
+    aclshmem_team_destroy(y_team);
 
     test_finalize(stream, device_id);
 }

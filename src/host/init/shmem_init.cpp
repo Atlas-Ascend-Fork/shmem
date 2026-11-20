@@ -952,12 +952,19 @@ int32_t aclshmemi_signal_finalize()
 int32_t aclshmemi_signal_init()
 {
     constexpr size_t align_size = 512;
-    g_state.signal_addr = (uint64_t)aclshmem_malloc(align_size);
+    // Keep the first signal word for the regular signal APIs. The remaining
+    // symmetric words are used by team-local host collectives to exchange a
+    // failure bit without involving non-members in a world bootstrap call.
+    // Reserve one status slot per participating PE, rather than the global
+    // maximum, so small multi-instance jobs do not waste symmetric heap.
+    const size_t status_words = static_cast<size_t>(g_state.npes) + 2;
+    const size_t signal_size = ALIGN_TO(status_words * sizeof(int32_t), align_size);
+    g_state.signal_addr = (uint64_t)aclshmem_malloc(signal_size);
     if (g_state.signal_addr == 0) {
         SHM_LOG_ERROR("malloc signal failed.");
         return ACLSHMEM_INNER_ERROR;
     }
-    auto ret = aclrtMemset((void*)g_state.signal_addr, ACLSHMEM_SIGNAL_SIZE, 0, ACLSHMEM_SIGNAL_SIZE);
+    auto ret = aclrtMemset((void*)g_state.signal_addr, signal_size, 0, signal_size);
     if (ret != 0) {
         aclshmemi_signal_finalize();
         SHM_LOG_ERROR("memset signal failed. ret=" << ret);
