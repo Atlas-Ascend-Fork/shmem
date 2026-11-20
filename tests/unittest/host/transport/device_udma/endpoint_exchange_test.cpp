@@ -13,12 +13,13 @@
 #include <cstring>
 #include <limits>
 
-// Test-only access override scoped strictly to dl_hcomm_api.h so this fixture can replace
-// dynamically loaded HCOMM entry points with local recorders. Keep the undef immediately
+// Test-only access override scoped to the dynamic API headers so this fixture can replace
+// dynamically loaded HCOMM and ACL entry points with local recorders. Keep the undef immediately
 // after this include; do not place other headers inside this scope or copy this pattern to
 // other tests. Prefer an explicit injection interface if production code adds one later.
 #define private public
 #include "dl_hcomm_api.h"
+#include "dl_acl_api.h"
 #undef private
 
 #include "device_udma_transport_manager.h"
@@ -32,6 +33,7 @@ class UdmaEndpointExchangeTest : public testing::Test {
 protected:
     using Descriptor = UdmaTransportManager::ExchangedEndpointDesc;
     using Exchange = UdmaTransportManager::EndpointExchange;
+    using JettyStateMaps = UdmaTransportManager::JettyStateMaps;
 
     void SetUp() override
     {
@@ -42,6 +44,12 @@ protected:
         saved_channel_create_ = DlHcommApi::gHcommChannelCreate;
         saved_channel_destroy_ = DlHcommApi::gHcommChannelDestroy;
         saved_config_create_ = DlHcommApi::gHcommChannelConfigCreate;
+        saved_acl_free_ = DlAclApi::pAclrtFree;
+        saved_acl_memset_ = DlAclApi::pAclrtMemset;
+        saved_acl_malloc_ = DlAclApi::pAclrtMalloc;
+        saved_channel_create_with_config_ = DlHcommApi::gHcommChannelCreateWithConfig;
+        saved_config_set_int_ = DlHcommApi::gHcommChannelConfigSetInt;
+        saved_config_destroy_ = DlHcommApi::gHcommChannelConfigDestroy;
         g_boot_handle.npes = 3;
         g_boot_handle.allgather = AllGather;
         lengths_.clear();
@@ -52,13 +60,18 @@ protected:
         config_mismatch_ = 0;
         mask_matrix_.clear();
         next_handle_ = 1000;
+        config_create_calls_ = 0;
+        config_set_int_calls_.clear();
+        channel_create_with_config_endpoints_.clear();
+        legacy_channel_create_calls_ = 0;
         DlHcommApi::gHcommMemReg = RecordMemReg;
         DlHcommApi::gHcommMemUnreg = SucceedMemUnreg;
         DlHcommApi::gHcommEndpointDestroy = SucceedEndpointDestroy;
         DlHcommApi::gHcommChannelCreate = RecordChannelCreate;
         DlHcommApi::gHcommChannelDestroy = SucceedChannelDestroy;
-        // Force the recorded fallback even if an earlier test loaded libhcomm.
-        DlHcommApi::gHcommChannelConfigCreate = nullptr;
+        // Install config recorders for existing shared-mode tests, including sparse QP tests.
+        InstallChannelConfigApis();
+        // Test cases may clear these to model older runtimes.
     }
 
     void TearDown() override
@@ -69,6 +82,12 @@ protected:
         DlHcommApi::gHcommChannelCreate = saved_channel_create_;
         DlHcommApi::gHcommChannelDestroy = saved_channel_destroy_;
         DlHcommApi::gHcommChannelConfigCreate = saved_config_create_;
+        DlAclApi::pAclrtFree = saved_acl_free_;
+        DlAclApi::pAclrtMemset = saved_acl_memset_;
+        DlAclApi::pAclrtMalloc = saved_acl_malloc_;
+        DlHcommApi::gHcommChannelCreateWithConfig = saved_channel_create_with_config_;
+        DlHcommApi::gHcommChannelConfigSetInt = saved_config_set_int_;
+        DlHcommApi::gHcommChannelConfigDestroy = saved_config_destroy_;
         g_boot_handle = saved_handle_;
     }
 
@@ -159,6 +178,7 @@ protected:
     static HcommResult RecordChannelCreate(
         EndpointHandle endpoint, CommEngine, HcommChannelDesc* descs, uint32_t count, ChannelHandle* channels)
     {
+        ++legacy_channel_create_calls_;
         for (uint32_t idx = 0; idx < count; ++idx) {
             channel_endpoints_.push_back(endpoint);
             channel_names_.emplace_back(descs[idx].channelName == nullptr ? "" : descs[idx].channelName);
@@ -284,6 +304,115 @@ protected:
         return a == b ? 0 : (uint64_t{1} | (uint64_t{1} << (1 + (a + b) % 31)));
     }
 
+    static HcommResult RecordConfigCreate(HcommChannelConfig* config)
+    {
+        ++config_create_calls_;
+        *config = reinterpret_cast<HcommChannelConfig>(next_handle_++);
+        return 0;
+    }
+
+    static HcommResult RecordConfigDestroy(HcommChannelConfig) { return 0; }
+
+    static HcommResult RecordConfigSetInt(HcommChannelConfig, HcommChannelConfigType type, uint32_t value)
+    {
+        config_set_int_calls_.push_back({static_cast<uint32_t>(type), value});
+        return 0;
+    }
+
+    void InstallChannelConfigApis()
+    {
+        DlHcommApi::gHcommChannelConfigCreate = RecordConfigCreate;
+        DlHcommApi::gHcommChannelConfigDestroy = RecordConfigDestroy;
+        DlHcommApi::gHcommChannelConfigSetInt = RecordConfigSetInt;
+        DlHcommApi::gHcommChannelCreateWithConfig = RecordChannelCreateWithConfig;
+    }
+
+    static int32_t RecordAclMalloc(void** ptr, size_t size, uint32_t)
+    {
+        *ptr = new (std::nothrow) uint8_t[size]{};
+        return *ptr == nullptr ? 1 : 0;
+    }
+
+    static int32_t RecordAclMemset(void* dst, size_t destMax, int32_t value, size_t count)
+    {
+        std::memset(dst, static_cast<int>(value), count);
+        (void)destMax;
+        return 0;
+    }
+
+    static int RecordAclFree(void* ptr)
+    {
+        delete[] static_cast<uint8_t*>(ptr);
+        return 0;
+    }
+
+    void InstallAclAllocApis()
+    {
+        DlAclApi::pAclrtMalloc = RecordAclMalloc;
+        DlAclApi::pAclrtMemset = RecordAclMemset;
+        DlAclApi::pAclrtFree = RecordAclFree;
+    }
+
+    static SqContext MakeSqContext(uint32_t jfs_id, uint64_t sq_va, uint64_t db_va)
+    {
+        SqContext context{};
+        context.type = SQ_CONTEXT_TYPE_UB_JFS;
+        context.contextInfo.ubJfs.jfsID = jfs_id;
+        context.contextInfo.ubJfs.sqVa = sq_va;
+        context.contextInfo.ubJfs.dbVa = db_va;
+        return context;
+    }
+
+    static Result ResolveQueueStateBindingForTest(
+        UdmaTransportManager& manager, const SqContext& sq_context, uint32_t dst_pe, uint32_t qp_idx, uint64_t slot,
+        size_t& state_idx, UdmaTransportManager::JettyStateMaps& jetty_maps)
+    {
+        return manager.ResolveQueueStateBinding(sq_context, dst_pe, qp_idx, slot, state_idx, jetty_maps);
+    }
+
+    static Result BindQueueStateAddrForTest(
+        UdmaTransportManager& manager, size_t state_idx, uint64_t slot, uint32_t qp_idx, aclshmemi_udma_wq_ctx_t& wq,
+        aclshmemi_udma_cq_ctx_t& cq)
+    {
+        return manager.BindQueueStateAddr(state_idx, slot, qp_idx, wq, cq);
+    }
+
+    static void ConfigureSharedJetty(
+        UdmaTransportManager& manager, uint32_t rank, uint32_t ranks, uint32_t qp_num, bool shared_jetty)
+    {
+        manager.rank_id_ = rank;
+        manager.rank_count_ = ranks;
+        manager.qp_num_ = qp_num;
+        manager.shared_jetty_enabled_ = shared_jetty;
+    }
+
+    static size_t QueueStateCount(const UdmaTransportManager& manager) { return manager.queue_state_dev_list_.size(); }
+
+    static size_t AppendNullQueueState(UdmaTransportManager& manager)
+    {
+        manager.queue_state_dev_list_.push_back(nullptr);
+        return manager.queue_state_dev_list_.size() - 1;
+    }
+
+    static HcommResult RecordChannelCreateWithConfig(
+        EndpointHandle endpoint, CommEngine engine, HcommChannelDesc* descs, uint32_t count, HcommChannelConfig,
+        ChannelHandle* channels)
+    {
+        channel_create_with_config_endpoints_.push_back(endpoint);
+        auto ret = RecordChannelCreate(endpoint, engine, descs, count, channels);
+        --legacy_channel_create_calls_;
+        return ret;
+    }
+    static void AddEndpointWithSlot(UdmaTransportManager& manager, uint32_t eid, uint32_t qp, uintptr_t handle)
+    {
+        AddEndpoint(manager, eid, 0xFFFFFFFFU, handle, qp);
+    }
+    static void AddRemoteDescriptorWithSlot(
+        Exchange& exchange, uint32_t peer, uint32_t index, uint32_t eid, uint32_t qp)
+    {
+        AddRemoteDescriptor(exchange, peer, index, 0xFFFFFFFFU, eid, qp);
+    }
+
     aclshmemi_bootstrap_handle_t saved_handle_{};
     HcommMemRegFunc saved_mem_reg_{nullptr};
     HcommMemUnregFunc saved_mem_unreg_{nullptr};
@@ -291,6 +420,12 @@ protected:
     HcommChannelCreateFunc saved_channel_create_{nullptr};
     HcommChannelDestroyFunc saved_channel_destroy_{nullptr};
     HcommChannelConfigCreateFunc saved_config_create_{nullptr};
+    aclrtFreeFunc saved_acl_free_{nullptr};
+    aclrtMemsetFunc saved_acl_memset_{nullptr};
+    aclrtMallocFunc saved_acl_malloc_{nullptr};
+    HcommChannelCreateWithConfigFunc saved_channel_create_with_config_{nullptr};
+    HcommChannelConfigSetIntFunc saved_config_set_int_{nullptr};
+    HcommChannelConfigDestroyFunc saved_config_destroy_{nullptr};
     inline static std::vector<int> lengths_;
     inline static size_t fail_call_{0};
     inline static std::vector<EndpointHandle> mem_reg_endpoints_;
@@ -300,7 +435,209 @@ protected:
     inline static std::vector<uint8_t> peer_endpoint_blob_;
     inline static uint32_t config_mismatch_{0};
     inline static uintptr_t next_handle_{1000};
+    inline static size_t config_create_calls_{0};
+    inline static std::vector<std::pair<uint32_t, uint32_t>> config_set_int_calls_;
+    inline static std::vector<EndpointHandle> channel_create_with_config_endpoints_;
+    inline static size_t legacy_channel_create_calls_{0};
 };
+
+TEST_F(UdmaEndpointExchangeTest, BuildsChannelsThroughConfigApisWhenSharedJettyEnabled)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED)
+        GTEST_SKIP() << "Shared jetty is direct-only";
+    UdmaTransportManager manager;
+    ConfigureSharedJetty(manager, 0, 3, 3, true);
+    InstallChannelConfigApis();
+
+    // Shared jetty + qp_num > 1 splits one endpoint per (eid, qp_slot), so qp1 reuses eid 10
+    // through a distinct key while qp0/qp2 egress on other EIDs.
+    AddEndpointWithSlot(manager, 10, 0, 10);
+    AddEndpointWithSlot(manager, 10, 1, 11);
+    AddEndpointWithSlot(manager, 11, 2, 12);
+    AddRoute(manager, 1, 10, 20, 0);
+    AddRoute(manager, 1, 10, 20, 1);
+    AddRoute(manager, 1, 11, 21, 2);
+    AddRoute(manager, 2, 12, 22, 0);
+    AddRoute(manager, 2, 13, 23, 1);
+    AddRoute(manager, 2, 12, 22, 2);
+    AddEndpointWithSlot(manager, 12, 0, 12);
+    AddEndpointWithSlot(manager, 13, 1, 13);
+    AddEndpointWithSlot(manager, 12, 2, 14);
+
+    TransportMemoryRegion region{};
+    region.addr = 0x200000;
+    region.size = 0x4000;
+    region.flags = REG_MR_FLAG_HBM;
+    ASSERT_EQ(manager.RegisterMemoryRegion(region), ACLSHMEM_SUCCESS);
+
+    Exchange exchange;
+    exchange.max_count = 3;
+    exchange.counts = {0, 3, 3};
+    exchange.descs.resize(9);
+    AddRemoteDescriptorWithSlot(exchange, 1, 0, 20, 0);
+    AddRemoteDescriptorWithSlot(exchange, 1, 1, 20, 1);
+    AddRemoteDescriptorWithSlot(exchange, 1, 2, 21, 2);
+    AddRemoteDescriptorWithSlot(exchange, 2, 0, 22, 0);
+    AddRemoteDescriptorWithSlot(exchange, 2, 1, 23, 1);
+    AddRemoteDescriptorWithSlot(exchange, 2, 2, 22, 2);
+
+    std::vector<uint32_t> slots;
+    std::vector<uint32_t> dst_pes;
+    std::vector<uint32_t> qp_indices;
+    ASSERT_EQ(BuildDirect(manager, exchange, slots, dst_pes, qp_indices), ACLSHMEM_SUCCESS);
+
+    // Every batch went through the config path with IS_SHARED_QUEUE = 1; none fell back to the
+    // legacy create (which would silently drop the sharing request).
+    EXPECT_GT(config_create_calls_, 0U);
+    EXPECT_EQ(
+        channel_create_with_config_endpoints_,
+        (std::vector<EndpointHandle>{Handle(10), Handle(11), Handle(12), Handle(12), Handle(13), Handle(14)}));
+    EXPECT_EQ(legacy_channel_create_calls_, 0U);
+    for (const auto& call : config_set_int_calls_) {
+        EXPECT_EQ(call.first, static_cast<uint32_t>(HCOMM_CHANNEL_CONFIG_TYPE_IS_SHARED_QUEUE));
+        EXPECT_EQ(call.second, 1U);
+    }
+    EXPECT_EQ(slots, (std::vector<uint32_t>{1, 1, 1, 2, 2, 2}));
+    EXPECT_EQ(qp_indices, (std::vector<uint32_t>{0, 1, 2, 0, 1, 2}));
+}
+
+TEST_F(UdmaEndpointExchangeTest, KeepsLegacyChannelCreateWhenSharedJettyDisabled)
+{
+    UdmaTransportManager manager;
+    ConfigureSharedJetty(manager, 0, 3, 1, false);
+    InstallChannelConfigApis();
+
+    AddRoute(manager, 1, 10, 20, 0);
+    AddRoute(manager, 2, 11, 21, 0);
+    AddEndpoint(manager, 10, 1, 10);
+    AddEndpoint(manager, 11, 2, 11);
+
+    TransportMemoryRegion region{};
+    region.addr = 0x200000;
+    region.size = 0x4000;
+    region.flags = REG_MR_FLAG_HBM;
+    ASSERT_EQ(manager.RegisterMemoryRegion(region), ACLSHMEM_SUCCESS);
+
+    Exchange exchange;
+    exchange.max_count = 2;
+    exchange.counts = {0, 1, 1};
+    exchange.descs.resize(6);
+    AddRemoteDescriptor(exchange, 1, 0, 0, 20, 0);
+    AddRemoteDescriptor(exchange, 2, 0, 0, 21, 0);
+
+    std::vector<uint32_t> slots;
+    std::vector<uint32_t> dst_pes;
+    std::vector<uint32_t> qp_indices;
+    ASSERT_EQ(BuildDirect(manager, exchange, slots, dst_pes, qp_indices), ACLSHMEM_SUCCESS);
+
+    EXPECT_EQ(legacy_channel_create_calls_, 2U);
+    EXPECT_EQ(config_create_calls_, 0U);
+    EXPECT_EQ(channel_create_with_config_endpoints_.size(), 0U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, ResolvesOneQueueStatePerDistinctJetty)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED)
+        GTEST_SKIP() << "Shared jetty is direct-only";
+    UdmaTransportManager manager;
+    ConfigureSharedJetty(manager, 0, 3, 2, true);
+    InstallAclAllocApis();
+
+    JettyStateMaps jetty_maps;
+    size_t state_a = SIZE_MAX;
+    size_t state_b = SIZE_MAX;
+    // Same jetty key from two slots of one QP (pe 1 and pe 2 both resolve to jetty (5, 0x1000,
+    // 0x2000)): legal sharing, both must land on the same state buffer.
+    const SqContext shared_jetty = MakeSqContext(5, 0x1000, 0x2000);
+    ASSERT_EQ(ResolveQueueStateBindingForTest(manager, shared_jetty, 1, 0, 1, state_a, jetty_maps), ACLSHMEM_SUCCESS);
+    ASSERT_EQ(ResolveQueueStateBindingForTest(manager, shared_jetty, 2, 0, 2, state_b, jetty_maps), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(state_a, state_b);
+    EXPECT_EQ(QueueStateCount(manager), 1U);
+
+    // A distinct jetty key allocates a second state buffer and gets a different index.
+    size_t state_c = SIZE_MAX;
+    const SqContext other_jetty = MakeSqContext(6, 0x1800, 0x2800);
+    ASSERT_EQ(ResolveQueueStateBindingForTest(manager, other_jetty, 1, 1, 1, state_c, jetty_maps), ACLSHMEM_SUCCESS);
+    EXPECT_NE(state_c, state_a);
+    EXPECT_EQ(QueueStateCount(manager), 2U);
+
+    // Duplicate (dst_pe, qp_idx) is a fill-twice defect, not sharing: the binding fails and the
+    // already-allocated state buffers are released.
+    size_t state_dup = SIZE_MAX;
+    EXPECT_EQ(
+        ResolveQueueStateBindingForTest(manager, shared_jetty, 1, 0, 1, state_dup, jetty_maps), ACLSHMEM_INNER_ERROR);
+    EXPECT_EQ(QueueStateCount(manager), 0U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, RejectsJettyMergedAcrossQps)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED)
+        GTEST_SKIP() << "Shared jetty is direct-only";
+    // The per-QP endpoint split relies on hcomm keeping same-peer QPs on separate jetties. If it
+    // merges them anyway, two different QPs would race on one state buffer: the bind must fail.
+    UdmaTransportManager manager;
+    ConfigureSharedJetty(manager, 0, 3, 2, true);
+    InstallAclAllocApis();
+
+    JettyStateMaps jetty_maps;
+    const SqContext merged_jetty = MakeSqContext(9, 0x3000, 0x4000);
+    size_t state_a = SIZE_MAX;
+    size_t state_b = SIZE_MAX;
+    ASSERT_EQ(ResolveQueueStateBindingForTest(manager, merged_jetty, 1, 0, 1, state_a, jetty_maps), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(
+        ResolveQueueStateBindingForTest(manager, merged_jetty, 1, 1, 1, state_b, jetty_maps), ACLSHMEM_INNER_ERROR);
+    EXPECT_EQ(QueueStateCount(manager), 0U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, BindsWqAndCqToTheSameQueueState)
+{
+    UdmaTransportManager manager;
+    InstallAclAllocApis();
+
+    JettyStateMaps jetty_maps;
+    const SqContext sq_context = MakeSqContext(3, 0x5000, 0x6000);
+    size_t state_idx = SIZE_MAX;
+    ASSERT_EQ(ResolveQueueStateBindingForTest(manager, sq_context, 1, 0, 1, state_idx, jetty_maps), ACLSHMEM_SUCCESS);
+
+    aclshmemi_udma_wq_ctx_t wq{};
+    aclshmemi_udma_cq_ctx_t cq{};
+    ASSERT_EQ(BindQueueStateAddrForTest(manager, state_idx, 1, 0, wq, cq), ACLSHMEM_SUCCESS);
+    EXPECT_NE(wq.state_addr, 0U);
+    EXPECT_EQ(wq.state_addr, cq.state_addr);
+
+    // A state slot that never got a buffer (null entry) must fail instead of binding 0.
+    const size_t null_state_idx = AppendNullQueueState(manager);
+    aclshmemi_udma_wq_ctx_t bad_wq{};
+    aclshmemi_udma_cq_ctx_t bad_cq{};
+    EXPECT_EQ(BindQueueStateAddrForTest(manager, null_state_idx, 1, 0, bad_wq, bad_cq), ACLSHMEM_INNER_ERROR);
+    EXPECT_EQ(QueueStateCount(manager), 0U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, ChannelConfigWrappersReportSymbolUnavailable)
+{
+    // Soft-loaded symbols stay null on an old libhcomm.so; the wrappers must report that instead
+    // of crashing, and HasChannelConfigApis must be false until all four resolve.
+    DlHcommApi::gHcommChannelConfigCreate = RecordConfigCreate;
+    DlHcommApi::gHcommChannelConfigDestroy = nullptr;
+    DlHcommApi::gHcommChannelConfigSetInt = nullptr;
+    DlHcommApi::gHcommChannelCreateWithConfig = nullptr;
+    EXPECT_FALSE(DlHcommApi::HasChannelConfigApis());
+
+    HcommChannelConfig config = nullptr;
+    EXPECT_EQ(DlHcommApi::HcommChannelConfigDestroy(config), HCOMM_RESULT_SYMBOL_UNAVAILABLE);
+    EXPECT_EQ(
+        DlHcommApi::HcommChannelConfigSetInt(config, HCOMM_CHANNEL_CONFIG_TYPE_IS_SHARED_QUEUE, 1U),
+        HCOMM_RESULT_SYMBOL_UNAVAILABLE);
+    EXPECT_EQ(
+        DlHcommApi::HcommChannelCreateWithConfig(nullptr, COMM_ENGINE_AIV, nullptr, 0, nullptr, nullptr),
+        HCOMM_RESULT_SYMBOL_UNAVAILABLE);
+
+    InstallChannelConfigApis();
+    EXPECT_TRUE(DlHcommApi::HasChannelConfigApis());
+    EXPECT_EQ(DlHcommApi::HcommChannelConfigCreate(&config), 0);
+    EXPECT_NE(config, nullptr);
+    EXPECT_EQ(DlHcommApi::HcommChannelConfigSetInt(config, HCOMM_CHANNEL_CONFIG_TYPE_IS_SHARED_QUEUE, 1U), 0);
+}
 
 TEST_F(UdmaEndpointExchangeTest, AcceptsBoundaryAndRejectsNextEndpoint)
 {

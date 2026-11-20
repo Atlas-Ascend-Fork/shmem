@@ -43,7 +43,7 @@ void LoadOptionalSym(FuncType& target, void* handle, const char* symbolName)
 {
     target = reinterpret_cast<FuncType>(dlsym(handle, symbolName));
     if (target == nullptr) {
-        SHM_LOG_WARN(
+        SHM_LOG_DEBUG(
             "Optional symbol [" << symbolName << "] not found in libhcomm.so, shared jetty channel config "
                                 << "is unavailable and channel creation falls back to HcommChannelCreate");
     }
@@ -82,7 +82,12 @@ Result DlHcommApi::LoadLibrary()
     LoadOptionalSym(gHcommChannelConfigDestroy, gHcommHandle, "HcommChannelConfigDestroy");
     LoadOptionalSym(gHcommChannelConfigSetInt, gHcommHandle, "HcommChannelConfigSetInt");
     LoadOptionalSym(gHcommChannelCreateWithConfig, gHcommHandle, "HcommChannelCreateWithConfig");
-    SHM_LOG_INFO("Hcomm channel config apis available: " << (HasChannelConfigApis() ? "yes" : "no"));
+    if (HasChannelConfigApis()) {
+        SHM_LOG_INFO("Hcomm channel config apis available: yes");
+    } else {
+        SHM_LOG_WARN("Hcomm channel config apis unavailable in this libhcomm.so, shared jetty is disabled "
+                     "and channel creation falls back to HcommChannelCreate");
+    }
 
     Dl_info hcomm_lib_info{};
     if (dladdr(reinterpret_cast<void*>(gHcommChannelCreate), &hcomm_lib_info) != 0 &&

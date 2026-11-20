@@ -70,7 +70,8 @@ public:
     int bind_aclshmem_entity(
         aclshmemx_init_attr_t* attr, aclshmem_device_host_state_t* state, aclshmemi_bootstrap_handle_t* handle,
         std::unique_ptr<shm::UserBufferHeapInput> user_buffer_heap_input,
-        const shm::transport::UdmaQpConfig& udma_qp_config, uint32_t rdma_qp_num, uint32_t sdma_qp_num);
+        const shm::transport::UdmaQpConfig& udma_qp_config, uint32_t rdma_qp_num, uint32_t sdma_qp_num,
+        uint32_t sync_timeout_us);
     void* get_buffer_ptr(const void* local_ptr);
     int release_aclshmem_entity(uint64_t instance_id);
     int get_qp_net_layer(

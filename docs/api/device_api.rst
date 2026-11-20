@@ -13,6 +13,86 @@ shmem_device_cc.h
 .. doxygenfile:: shmem_device_cc.h
     :project: ACLSHMEM_CPP_API
 
+Collective synchronization timeout reporting
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The synchronization interfaces ``aclshmem_sync``, ``aclshmem_sync_all``,
+``aclshmemx_sync_vec`` and ``aclshmemx_sync_vec_all`` detect timeouts in
+software signal polling, including software local barriers.
+
+The default timeout is **60 seconds**. Set the initialization attribute
+``runtime_config.sync_timeout_us`` to configure the threshold in microseconds::
+
+    aclshmemx_init_attr_t attr{};
+    // Fill the remaining initialization attributes.
+    attr.runtime_config.sync_timeout_us = 5000000; // 5 seconds
+    int ret = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr);
+
+Zero means unspecified: use the default before the first successful initialization,
+or inherit the effective process value for later instances. Explicit thresholds
+must fit in uint32_t: [1, ``ACLSHMEM_SYNC_TIMEOUT_MAX_US``] (UINT32_MAX, approximately
+71 minutes 35 seconds). While any instance is
+alive, a conflicting explicit threshold returns ``ACLSHMEM_NOT_SUPPORTED``.
+Failed initialization does not publish a new value. Finalizing the last instance
+restores the default. Set the attribute on every PE and check initialization errors.
+The threshold covers the synchronization interfaces listed above and software local
+barriers. Rebuild the library and device kernels together.
+Each core records its own start time on sync entry and shares it across phases. Time is checked every
+1024 unsuccessful polls; the internal batch size is not printed. Signal
+polling accepts expected or expected + 1 using uint32 arithmetic, before
+checking for timeout. The threshold is not a guaranteed upper bound on
+detection or host notification latency.
+
+On timeout, the device prints ``SHMEM_SYNC_TIMEOUT`` and executes ``trap()``.
+The sync does not return success. The host must check stream/device
+synchronization errors and terminate or recreate the affected communication
+context rather than resume using the failed state. Runtime error codes and
+delivery times depend on the environment. Reporting is independent of the
+SHMEM debug logging macro.
+
+.. list-table:: Timeout diagnostic fields
+    :header-rows: 1
+    :widths: 25 75
+
+    * - Field
+      - Meaning
+    * - ``instance, team, pe``
+      - Instance ID, team handle and reporting world PE within that instance. Non-MULTI_INSTANCE builds report instance 0.
+    * - ``core_type, core``
+      - 1 = AIV, 2 = AIC, 0 = unknown; core is the logical GetBlockIdx() value, not a physical core ID.
+    * - ``algorithm``
+      - Internal synchronization diagnostic identifier. A standalone software local barrier reports 0; local barriers within a collective retain its parent identifier.
+    * - ``phase``
+      - 0 = entry local barrier, 1 = synchronization generation publication barrier, 2 = end-of-phase local barrier, 3 = send, 4 = signal wait.
+    * - ``generation, round, slot``
+      - Team synchronization generation, internal round (starting at 0) and signal-pool slot.
+    * - ``peer``
+      - World PE being waited for or sent to.
+    * - ``expected, observed``
+      - Expected and observed signal values.
+    * - ``elapsed_us, timeout_us``
+      - Time since this core entered the sync and the configured threshold, in microseconds.
+    * - ``wait_core, local_round``
+      - Logical AIV being waited for and local dissemination round in a software local barrier. The local barrier reports its own world PE in peer. Generation may be unknown before it is published. Round identifies an internal synchronization step.
+
+Unavailable or inapplicable fields are -1.
+The following log is illustrative, not an actual fault-test record.
+PE0/AIV1 is waiting for PE1, whose signal is still 0 instead of 1.
+
+.. code-block:: text
+
+    SHMEM_SYNC_TIMEOUT instance=0 team=0 pe=0 core_type=1 core=1 algorithm=3 phase=4 generation=1 round=0 slot=0 peer=1 wait_core=-1 local_round=-1 expected=1 observed=0 elapsed_us=60000508 timeout_us=60000000
+
+.. important::
+
+    Time checks require software polling to continue. They cannot interrupt
+    blocked memory accesses, hardware event waits or hardware
+    ``AscendC::SyncAll`` barriers. Software local barrier tests do not
+    establish timeout coverage for hardware local barriers. RoCE interfaces,
+    standalone quiet and ordinary point-to-point waits retain their existing
+    behavior. Timeout detection applies only to the software polling paths
+    covered by this mechanism.
+
 shmem_device_mo.h
 ---------------------------------
 

@@ -23,9 +23,29 @@ f_pe=0
 local_pes=
 # First NPU card number used on THIS machine
 f_npu=0
+# UDMA shared jetty switch, set through the optional -shared_jetty flag (all PEs must match)
+shared_jetty=0
 
-# Positional arguments:
-#   run.sh <test_type> <n_pes> <g_npus> <ipport> <f_pe> <local_pes> <f_npu>
+# Optional named flag, may appear anywhere on the command line:
+#   -shared_jetty 0|1   1 enables shared jetty, 0 (default) disables it
+# All remaining arguments are positional:
+#   run.sh [-shared_jetty 0|1] <test_type> <n_pes> <g_npus> <ipport> <f_pe> <local_pes> <f_npu>
+positional=()
+while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "-shared_jetty" ]]; then
+        if [[ $# -lt 2 || ! "$2" =~ ^[01]$ ]]; then
+            echo "[ERROR] -shared_jetty requires a value of 0 or 1" >&2
+            exit 2
+        fi
+        shared_jetty="$2"
+        shift 2
+    else
+        positional+=("$1")
+        shift
+    fi
+done
+set -- ${positional[@]+"${positional[@]}"}
+
 test_type=${1:-${test_type}}
 n_pes=${2:-${n_pes}}
 g_npus=${3:-${g_npus}}
@@ -64,7 +84,7 @@ trap cleanup SIGINT SIGTERM
 
 for i in $(seq 0 $((local_pes - 1))); do
     pe_id=$((f_pe + i))
-    ./build/bin/udma_demo ${n_pes} ${pe_id} tcp://${ipport} ${g_npus} ${f_pe} ${f_npu} $test_type & # pe ${pe_id}
+    ./build/bin/udma_demo ${n_pes} ${pe_id} tcp://${ipport} ${g_npus} ${f_pe} ${f_npu} $test_type ${shared_jetty} & # pe ${pe_id}
     pid=$!
     pids+=("$pid")
 done

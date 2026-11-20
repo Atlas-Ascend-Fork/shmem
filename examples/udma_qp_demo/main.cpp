@@ -52,13 +52,13 @@ struct Options {
     std::map<uint32_t, uint32_t> qp_net_layers;
     std::vector<int> device_ids;
     uint32_t peer_stride{1};
-    int pe{0};                      // 当前进程在 SHMEM 通信域中的 PE 编号。
-    int pes{2};                     // SHMEM 通信域的 PE 总数，至少为 2，避免向本 PE 发送。
-    uint32_t qp_count{2};           // 每个远端 PE 创建的 QP 数，同时也是 kernel block 数。
-    bool shared_jetty{false};       // 是否启用 shared jetty（初始化前通过 aclshmemx_set_shared_jetty 设置）。
-    uint64_t elements{1024 * 1024}; // 本次传输的 uint8_t 元素数，即传输字节数。
-    uint64_t heap_mb{1024};         // 每个 PE 的 SHMEM 对称堆大小，单位为 MiB。
-    int first_npu{0};               // PE0 使用的逻辑 NPU 编号；PE i 使用 first_npu + i。
+    int pe{0};            // 当前进程在 SHMEM 通信域中的 PE 编号。
+    int pes{2};           // SHMEM 通信域的 PE 总数，至少为 2，避免向本 PE 发送。
+    uint32_t qp_count{2}; // 每个远端 PE 创建的 QP 数，同时也是 kernel block 数。
+    bool shared_jetty{false}; // 是否启用 shared jetty（通过初始化参数 attr.runtime_config.udma_shared_jetty 设置）。
+    uint64_t elements{1024 * 1024};             // 本次传输的 uint8_t 元素数，即传输字节数。
+    uint64_t heap_mb{1024};                     // 每个 PE 的 SHMEM 对称堆大小，单位为 MiB。
+    int first_npu{0};                           // PE0 使用的逻辑 NPU 编号；PE i 使用 first_npu + i。
     std::string ipport{"tcp://127.0.0.1:8899"}; // 初始化的控制面地址。
     std::string op{"put"};                      // 测试 Put、Get 或 PutSignal，默认只运行 Put。
 };
@@ -452,11 +452,7 @@ int main(int argc, char** argv)
     }
     if (options.shared_jetty) {
         // 所有 PE 必须由启动器保证相同的 shared jetty 配置。
-        status = aclshmemx_set_shared_jetty(ACLSHMEM_DATA_OP_UDMA, true);
-        if (status != 0) {
-            std::cerr << "aclshmemx_set_shared_jetty failed, status=" << status << std::endl;
-            return CleanupResources(resources, status);
-        }
+        attr.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED;
     }
     if (!options.qp_net_layers.empty()) {
         if (options.qp_net_layers.rbegin()->first >= options.qp_count) {

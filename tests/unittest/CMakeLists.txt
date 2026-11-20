@@ -40,7 +40,7 @@ else()
     set(UT_LIBRARIES "")
 endif()
 
-target_link_libraries(aclshmem_unittest PRIVATE ${UT_LIBRARIES} aclshmem_unittest_device gtest gmock gcov aclshmem_unittest_include shmem_utils)
+target_link_libraries(aclshmem_unittest PRIVATE ${UT_LIBRARIES} aclshmem_unittest_device aclshmem_sync_timeout_test_device gtest gmock gcov aclshmem_unittest_include shmem_utils)
 
 if(ACLSHMEM_DYNAMIC_META)
     # Include tests contribute mixed-code objects directly to this executable.

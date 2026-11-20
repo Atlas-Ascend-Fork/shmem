@@ -27,6 +27,14 @@
 #include "mem_entity_def.h"
 
 namespace {
+static_assert(
+    sizeof(aclshmem_device_host_state_t) % alignof(aclshmemi_device_runtime_config_t) == 0,
+    "The private device configuration must follow an aligned public state");
+static_assert(
+    sizeof(aclshmem_device_host_state_t) + sizeof(aclshmemi_device_runtime_config_t) <=
+        shm::HYBM_DEVICE_USER_CONTEXT_PRE_SIZE,
+    "The instance extra context must fit in its metadata slot");
+
 int setup_trusted_pids(entity_member* entity, int32_t npes, aclshmemi_bootstrap_handle_t* handle)
 {
     if (entity == nullptr || npes <= 0 || handle == nullptr || handle->allgather == nullptr) {
@@ -79,7 +87,8 @@ aclshmemi_init_backend::~aclshmemi_init_backend()
 int aclshmemi_init_backend::bind_aclshmem_entity(
     aclshmemx_init_attr_t* attr, aclshmem_device_host_state_t* state, aclshmemi_bootstrap_handle_t* handle,
     std::unique_ptr<shm::UserBufferHeapInput> user_buffer_heap_input,
-    const shm::transport::UdmaQpConfig& udma_qp_config, uint32_t rdma_qp_num, uint32_t sdma_qp_num)
+    const shm::transport::UdmaQpConfig& udma_qp_config, uint32_t rdma_qp_num, uint32_t sdma_qp_num,
+    uint32_t sync_timeout_us)
 {
     std::lock_guard<std::mutex> lock(entity_map_mutex_);
     // fetch entity resources
@@ -88,12 +97,15 @@ int aclshmemi_init_backend::bind_aclshmem_entity(
     elem->entity_attr = attr;
     elem->entity_host_state = state;
     elem->entity_device_state = static_cast<aclshmem_device_host_state_t*>(
-        std::calloc(1, sizeof(aclshmem_device_host_state_t) + sizeof(aclshmemi_device_quiet_state_t)));
+        std::calloc(1, sizeof(aclshmem_device_host_state_t) + sizeof(aclshmemi_device_runtime_config_t)));
     if (elem->entity_device_state == nullptr) {
         SHM_LOG_ERROR("Failed to allocate memory for entity_device_state.");
         delete elem;
         return ACLSHMEM_INNER_ERROR;
     }
+    auto config = reinterpret_cast<aclshmemi_device_runtime_config_t*>(
+        reinterpret_cast<uint8_t*>(elem->entity_device_state) + sizeof(aclshmem_device_host_state_t));
+    config->sync_timeout_us = sync_timeout_us;
     elem->entity_boot_handle = handle;
     elem->user_buffer_heap_input = std::move(user_buffer_heap_input);
     elem->udma_qp_config = udma_qp_config;
@@ -369,7 +381,7 @@ int aclshmemi_init_backend::update_device_state(void* host_ptr, size_t size)
     device_state->rdma_host_heap_base = backup_host_rdma;
     device_state->sdma_host_heap_base = backup_host_sdma;
 
-    auto ret = hybm_set_extra_context(hbm_entity, device_state, size + sizeof(aclshmemi_device_quiet_state_t));
+    auto ret = hybm_set_extra_context(hbm_entity, device_state, size + sizeof(aclshmemi_device_runtime_config_t));
     if (ret != ACLSHMEM_SUCCESS) {
         SHM_LOG_ERROR("hybm_set_extra_context failed, ret: " << ret);
         return ret;

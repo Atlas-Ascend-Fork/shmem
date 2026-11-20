@@ -11,7 +11,8 @@
 #ifndef SHMEMI_COMMON_TYPES
 #define SHMEMI_COMMON_TYPES
 
-#include <stdint.h>
+#include <cstdint>
+#include <cstddef>
 
 // This state is appended to the device extra context, after the public
 // aclshmem_device_host_state_t payload. It must not change that public ABI.
@@ -19,7 +20,17 @@
 // may require quiet completion. MTE is handled by PipeBarrier<PIPE_ALL>().
 // Typical values: MTE only = 0x00; MTE + UDMA = 0x08; MTE + SDMA + RoCE = 0x06.
 typedef struct {
-    uint8_t quiet_transport_mask;
+    std::uint8_t quiet_transport_mask;
 } aclshmemi_device_quiet_state_t;
+
+// Private per-instance configuration, appended to the public state in extra context.
+// Keep quiet at offset zero so existing completion-mask readers keep the same address.
+typedef struct {
+    aclshmemi_device_quiet_state_t quiet;
+    std::uint32_t sync_timeout_us;
+} aclshmemi_device_runtime_config_t;
+
+static_assert(offsetof(aclshmemi_device_runtime_config_t, quiet) == 0, "Preserve the quiet trailer prefix");
+static_assert(offsetof(aclshmemi_device_runtime_config_t, sync_timeout_us) == 4, "Align the private timeout field");
 
 #endif

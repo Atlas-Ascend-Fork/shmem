@@ -932,8 +932,21 @@ Result UdmaTransportManager::ResolveQueueStateBinding(
     }
     state_idx = key_it->second;
 
-    // A repeated (dst_pe, qp_idx) binding should never happen.
     if (shared_jetty_enabled_ && !ACLSHMEM_UDMA_RELAY_ENABLED && qp_num_ > 1U) {
+        // Bind-time split check: one state serves one qp_idx; same qp across PEs is legal sharing,
+        // a different qp_idx means hcomm merged two endpoints.
+        auto [qp_it, qp_inserted] = jetty_maps.state_idx_to_qp.emplace(state_idx, qp_idx);
+        if (!qp_inserted && qp_it->second != qp_idx) {
+            SHM_LOG_ERROR(
+                "Per-QP endpoint split violated: dst_pe "
+                << dst_pe << " qp " << qp_idx << " landed on queue state " << state_idx << " first bound to qp "
+                << qp_it->second
+                << "; hcomm merged the jetties of two distinct endpoints. Concurrent submits on "
+                   "these QPs would race on one state buffer.");
+            FreeQueueStateBuffers();
+            return ACLSHMEM_INNER_ERROR;
+        }
+        // A repeated (dst_pe, qp_idx) binding should never happen.
         auto pq_inserted = jetty_maps.peer_qp_to_state_idx.emplace(std::make_pair(dst_pe, qp_idx), state_idx).second;
         if (!pq_inserted) {
             SHM_LOG_ERROR(
@@ -1489,7 +1502,7 @@ const UdmaTransportManager::ExchangedEndpointDesc* UdmaTransportManager::FindRem
 {
     const uint32_t count = exchange.counts[dst_pe];
     for (uint32_t idx = 0; idx < count; ++idx) {
-        const ExchangedEndpointDesc& candidate = exchange.descs[dst_pe * exchange.max_count + idx];
+        const ExchangedEndpointDesc& candidate = exchange.descs[static_cast<size_t>(dst_pe) * exchange.max_count + idx];
         // The remote side packs one descriptor per local endpoint key; match the whole key.
         if (candidate.valid != 0 &&
             EndpointMapKey{candidate.eid_index, candidate.peer_rank, candidate.qp_slot} == remote_key) {
@@ -1651,16 +1664,17 @@ Result UdmaTransportManager::CreateHcommChannelBatch(
     std::vector<ChannelHandle>& channel_handles, HcommResult& hcomm_ret)
 {
     const uint32_t channel_num = static_cast<uint32_t>(channel_descs.size());
-    const uint32_t is_shared_queue = shared_jetty_enabled_ ? 1U : 0U;
-    if (!DlHcommApi::HasChannelConfigApis()) {
-        if (shared_jetty_enabled_) {
-            SHM_LOG_WARN(
-                "libhcomm.so lacks channel config APIs; batch HcommChannelCreate for dst_pe "
-                << dst_pe << " ignores IS_SHARED_QUEUE=1 and creates independent queues");
-        }
+    // Enabling is validated at init time (apply_runtime_config rejects it when the config APIs are
+    // absent), so shared jetty on implies the APIs exist; off always takes the legacy path.
+    if (!shared_jetty_enabled_) {
         hcomm_ret = DlHcommApi::HcommChannelCreate(
             endpoint, COMM_ENGINE_AIV, channel_descs.data(), channel_num, channel_handles.data());
     } else {
+        if (!DlHcommApi::HasChannelConfigApis()) {
+            SHM_LOG_ERROR("Shared jetty requires HCOMM channel config APIs.");
+            return ACLSHMEM_NOT_SUPPORTED;
+        }
+        constexpr uint32_t is_shared_queue = 1U;
         HcommChannelConfig config = nullptr;
         auto config_ret = DlHcommApi::HcommChannelConfigCreate(&config);
         if (config_ret != 0 || config == nullptr) {

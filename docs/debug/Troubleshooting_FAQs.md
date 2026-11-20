@@ -260,6 +260,51 @@ Ascend950 RDMA V2 建链监听端口由系统自动分配，用户无需配置 R
 
 #### A: 确保当前调用上述接口的算子只在AIV上执行
 
+### 同步超时上报 SHMEM_SYNC_TIMEOUT
+
+#### Q: 同步报出 `SHMEM_SYNC_TIMEOUT`，如何解读和处理？
+
+#### A: 同步接口的跨 PE 信号等待及卡内软件汇合支持超时检测，默认阈值为 60 秒
+
+在初始化属性中设置 `attr.runtime_config.sync_timeout_us`，单位为微秒。例如 `attr.runtime_config.sync_timeout_us = 5000000` 设置为 5 秒，随后调用初始化接口并检查返回值。0 表示未指定：首个实例使用默认 60 秒，后续实例继承进程中已冻结的生效值。显式值的有效范围为 `[1, ACLSHMEM_SYNC_TIMEOUT_MAX_US]`，字段类型为 `uint32_t`，上限为 `UINT32_MAX` 微秒（约 71 分 35 秒），赋值前应确保原始值不超过该范围。实例存活期间，新实例请求冲突的显式阈值返回 `ACLSHMEM_NOT_SUPPORTED`。初始化失败不提交新配置；最后一个实例释放后恢复默认值。每个 PE 分别填写该属性。不配置 RoCE 或中断硬件 `SyncAll`，库与设备内核须一起重新编译。每核从进入同步起独立计时，后续阶段共用起始时刻；分批检查失败轮询，因此阈值不是严格的退出时间上界，内部检查间隔不打印。
+
+| 字段 | 含义 |
+| --- | --- |
+| instance、team、pe | 实例编号、该实例内的 team handle、上报者在该实例内的 world PE；非多实例构建的 instance 为 0。 |
+| core_type、core | 1=AIV、2=AIC、0=未知；core 是 GetBlockIdx() 的逻辑编号，不是物理核编号。 |
+| generation、round、slot、peer | team 同步轮次、从 0 开始的内部 round、信号槽位、等待或发送的 world PE。 |
+| expected、observed | 期望与实际信号。 |
+| elapsed_us、timeout_us | 从该核进入同步起已等待时间和阈值，单位均为微秒。 |
+| algorithm、phase | algorithm 是内部同步诊断标识；独立软件卡内汇合为 0；phase=0/1/2/3/4 分别表示进入时汇合、同步轮次发布汇合、阶段结束汇合、发送、等待信号。 |
+| wait_core、local_round | 软件汇合等待的逻辑 AIV 编号和本地 round，此时 peer 为本 PE。集合同步内部汇合保留上层算法编号。 |
+
+**phase 速查：日志只打印数字，不打印枚举名称。** 这些枚举是诊断标记，不参与同步信号判定。
+
+| 日志值 | 代码枚举 | 执行位置 |
+| --- | --- | --- |
+| `phase=0` | `LOCAL_ENTER` | 进入同步时的卡内汇合。 |
+| `phase=1` | `LOCAL_PUBLISH` | AIV0 更新共享同步轮次 counter 后的卡内汇合；汇合后各 AIV 读取该轮次，不是向其他 PE 发送信号。 |
+| `phase=2` | `LOCAL_EXIT` | 同步退出前或内部 round 结束时的卡内汇合。 |
+| `phase=3` | `SEND` | 发送同步信号前设置的标记；不能据此保证阻塞的硬件发送会被超时检查中断。 |
+| `phase=4` | `WAIT` | 等待其他 PE 的同步信号。 |
+
+建议按以下顺序读日志：
+
+1. 用 `instance/team/pe/core_type/core` 确认哪个参与者上报；例如 `core_type=1 core=0` 表示逻辑 AIV0。
+2. 用 `algorithm/phase` 确认算法和位置；例如 `algorithm=4 phase=1 wait_core=3` 表示内部算法标识为 4，在轮次发布后的**软件卡内汇合**中等待逻辑 AIV3 超时。`peer` 此时是本 PE，不是 PE3。
+3. 跨 PE 等待时看 `peer`，软件汇合时看 `wait_core/local_round`；再结合 `generation/round/slot` 定位轮次和槽位。
+4. 对照 `expected/observed` 和 `elapsed_us/timeout_us`，确认信号差异及已等待时间。`generation` 是 team 同步轮次，`round` 是该次同步内部的算法步骤，两者不同。
+
+不适用或未知字段为 -1。下面是默认 60 秒阈值下的格式示例，不是实际故障测试记录：
+
+```text
+SHMEM_SYNC_TIMEOUT instance=0 team=0 pe=0 core_type=1 core=1 algorithm=3 phase=4 generation=1 round=0 slot=0 peer=1 wait_core=-1 local_round=-1 expected=1 observed=0 elapsed_us=60000508 timeout_us=60000000
+```
+
+示例表示 PE0 的 AIV1 等待 PE1 的信号 1，但实际仍为 0，等待约 60.000508 秒后超时。round 标识内部同步步骤；同步轮次发布前 generation 可能未知。打印后设备执行 `trap()`，不会作为同步成功返回。主机应检查 stream/device 同步错误，退出或重建通信上下文，不要继续使用已失配的状态；具体错误编号和上报耗时取决于运行时。
+
+先核对所有参与者是否使用一致的 team、轮次及调用顺序，排查提前返回或异常退出。根据 peer、wait_core 定位缺席参与者。软件轮询检查不能中断已阻塞的硬件 SyncAll、事件等待或内存访问。RoCE 接口、独立 quiet、普通点对点等待保留原行为；软件汇合通过不代表硬件汇合具备缺核超时能力。完整字段说明见 [DEVICE API 文档](../api/device_api.rst)。
+
 ## 调试相关
 
 ### 编译问题

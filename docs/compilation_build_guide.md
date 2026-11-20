@@ -191,6 +191,16 @@ bash scripts/run.sh -ranks 8 -ipport 127.0.0.1:8666 -test_filter Init
 
 ```
 
+同步超时 UT 使用相同的构建和执行入口：
+
+```sh
+bash scripts/run.sh -ranks 2 -frank 0 -fnpu 0 -gnpus 2 -test_filter 'TEST_SYNC_TIMEOUT.*'
+```
+
+用例覆盖集合同步接口、`aclshmemx_sync_vec` 和软件卡内汇合的正常执行，以及当前信号、下一轮信号和 uint32 回绕匹配；正常用例逐核检查 2/4/8/16/32 AIV 的完成标记。缺 PE 和软件汇合缺核用例检查超时日志字段、等待时间及运行时错误，需要恰好两个本机 PE，其他配置会跳过这些故障用例。
+
+故障在独立子进程中触发，失败上下文不再复用，子进程有退出时间保护。故障 UT 通过初始化属性 `runtime_config.sync_timeout_us` 设置 100 ms 或 250 ms 阈值，验证日志与实际等待符合配置；不再通过编译宏缩短超时。另覆盖参数边界、多实例配置继承及冲突拒绝、配置传递到各 AIV，以及最后一个实例释放后重新初始化恢复默认值。软件汇合的缺核测试不代表硬件 `SyncAll` 支持超时中断。这些是功能 UT，不进行性能基线比较；RoCE 测试不在此组范围内。
+
 ### install.sh
 
 打包生成的run包的安装/卸载脚本，提供安装和卸载的功能。

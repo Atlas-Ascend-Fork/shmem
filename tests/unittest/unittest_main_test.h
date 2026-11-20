@@ -21,6 +21,7 @@ extern int test_first_npu;
 int32_t test_set_attr(
     int32_t my_pe, int32_t n_pes, uint64_t local_mem_size, const char* ip_port, aclshmemx_init_attr_t* attributes);
 void test_init(int rank_id, int n_ranks, uint64_t local_mem_size, aclrtStream* st);
+void test_init(int rank_id, int n_ranks, uint64_t local_mem_size, aclrtStream* st, uint32_t sync_timeout_us);
 int32_t test_rdma_init(int rank_id, int n_ranks, uint64_t local_mem_size, aclrtStream* st);
 int32_t test_sdma_init(int rank_id, int n_ranks, uint64_t local_mem_size, aclrtStream* st);
 int32_t test_udma_init(int rank_id, int n_ranks, uint64_t local_mem_size, aclrtStream* st);

@@ -1,5 +1,7 @@
 # udma_perftest
 
+[English](README_en.md)
+
 ## 示例概述
 
 `udma_perftest` 是用于**测试 shmem UDMA 低阶接口性能**的参数化测试示例，平行于同目录下的 `mte_perftest`（针对 MTE 引擎）。该示例通过 [SHMEMI_PROF_START/END](../../../src/device/utils/prof/shmemi_prof.h) 宏采集性能数据，覆盖 `aclshmemx_udma_put_nbi` / `aclshmemx_udma_get_nbi` / `aclshmemx_udma_put_signal_nbi` 三个低阶接口，并支持不同数据量、batch 提交和 QP 配置。**该脚本测试结果仅做参考，性能以实际场景为准**。
@@ -58,6 +60,7 @@ cd examples/shmem_perftest/udma_perftest/
 | `--ub-size <size>` | - | UB size (KB)；本 perftest 传给低阶 UDMA 接口并写入 CSV。高阶 UDMA RMA 默认 MTE staging 的 UB 配置要求至少 128 B | 16 |
 | `--metric <bw\|lat>` | - | 性能口径：`bw` 测带宽，`lat` 测单次 put_nbi 下发延时（仅 `-t put` 支持） | bw |
 | `--batch <N>` | - | BW 测试批大小：`0` 或 `1` 使用普通 NBI；`N > 1` 时每批前 `N-1` 个操作使用 `defer`，最后一个使用 `submit`，随后调用 `quiet`。每个 WQE 在 UB 中占用 64 B，要求有效 batch 小于 4096 且 `N * 64 <= --ub-size * 1024`；`lat` 模式忽略此参数。 | 0 |
+| `-shared_jetty <0\|1>` | - | 是否启用 shared jetty：`0` 关闭（默认），`1` 开启。开启时通过初始化参数 `attr.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED` 设置，必须在初始化前设置且所有 PE 必须一致。shared jetty 会使解析到同一 (本地 EID, qp slot) 的对端 PE 共享底层 jetty（一条 SQ/CQ 环和一个队列状态）；`quiet` 的等待范围扩大到该共享组（普通 `quiet` 只排空 QP0 所属组，逐 QP 排空用 `qp_quiet`）。开启时要求运行环境中的 libhcomm.so 提供 channel config 接口，否则初始化会失败并返回 `ACLSHMEM_NOT_SUPPORTED`；同时在共享组内修改队列状态的操作（put/get/atomic 提交、quiet、容量轮询）均需由调用方串行下发，多 QP 并发提交场景（`-b > 1`）与共享组内串行约束可能冲突，需结合实际拓扑确认 | 0 |
 | `-pes <size>` | - | PE 数量 | 2 |
 | `-ipport <ip:port>` | - | 通信地址 | tcp://127.0.0.1:8768 |
 | `-gnpus <num>` | - | NPU 数量 | 2 |
@@ -133,6 +136,9 @@ CSV 文件名加 metric 前缀；多 QP 场景追加 QP 数后缀：`output/udma
 
 # 4 QP + 聚合提交（每个 QP 的 batch=8）
 ./run.sh -t bi_get -d float -e 16 -b 4 --batch 8
+
+# 启用 shared jetty
+./run.sh -t put -d float -e 16 -shared_jetty 1
 ```
 
 ## put_signal 行为说明

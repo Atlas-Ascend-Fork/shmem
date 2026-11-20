@@ -165,6 +165,7 @@ private:
         std::map<std::tuple<uint32_t, uint64_t, uint64_t>, size_t> jetty_key_to_state_idx;
         std::map<size_t, std::vector<uint32_t>> state_idx_to_dst_pes;
         std::map<std::pair<uint32_t, uint32_t>, size_t> peer_qp_to_state_idx;
+        std::map<size_t, uint32_t> state_idx_to_qp;
     };
     bool CanShareEquivalentEndpoints() const { return !ACLSHMEM_UDMA_RELAY_ENABLED && shared_jetty_enabled_; }
     EndpointMapKey ResolveEndpointKey(uint32_t owner_rank, uint32_t eid_index, uint32_t peer, uint32_t qp_idx) const;

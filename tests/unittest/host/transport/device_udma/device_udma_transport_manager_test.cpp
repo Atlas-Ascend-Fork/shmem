@@ -23,8 +23,8 @@ TEST(UdmaConnectTimeoutTest, PreservesDefaultAndAcceptsExtendedTimeout)
     uint32_t timeout = 0;
     ASSERT_TRUE(ParseUdmaConnectTimeout(nullptr, timeout));
     EXPECT_EQ(timeout, 120000U);
-    for (const auto& test : std::vector<std::pair<const char*, uint32_t>>{
-             {"1000", 1000U}, {"600000", 600000U}, {"3600000", 3600000U}}) {
+    for (const auto& test :
+         std::vector<std::pair<const char*, uint32_t>>{{"1000", 1000U}, {"600000", 600000U}, {"3600000", 3600000U}}) {
         ASSERT_TRUE(ParseUdmaConnectTimeout(test.first, timeout));
         EXPECT_EQ(timeout, test.second);
     }
@@ -33,8 +33,9 @@ TEST(UdmaConnectTimeoutTest, PreservesDefaultAndAcceptsExtendedTimeout)
 TEST(UdmaConnectTimeoutTest, RejectsInvalidValuesWithoutIntegerOverflow)
 {
     uint32_t timeout = 0;
-    for (const char* value : {"", "0", "999", "3600001", "4294967296", "999999999999999999999",
-                              "-1", "+600000", " 600000", "600000 ", "600000ms"}) {
+    for (const char* value :
+         {"", "0", "999", "3600001", "4294967296", "999999999999999999999", "-1", "+600000", " 600000", "600000 ",
+          "600000ms"}) {
         EXPECT_FALSE(ParseUdmaConnectTimeout(value, timeout)) << value;
     }
 }
@@ -57,6 +58,19 @@ TEST(UdmaTransportManagerTest, RejectsMultipleQpsInRelayModeBeforeOpeningDevice)
     UdmaTransportManager manager;
     TransportOptions options{};
     options.udmaQpConfig.qpNum = 2;
+
+    EXPECT_EQ(manager.OpenDevice(options), ACLSHMEM_NOT_SUPPORTED);
+}
+
+TEST(UdmaTransportManagerTest, RejectsSharedJettyInRelayModeBeforeOpeningDevice)
+{
+    // Relay routing resolves one jetty per (actual_pe, relay_pe) slot and cannot honor the
+    // group-wide queue-state semantics shared jetty implies, so the combination is rejected
+    // before any resource is opened (qpNum stays at the relay-supported 1).
+    UdmaTransportManager manager;
+    TransportOptions options{};
+    options.udmaQpConfig.qpNum = 1;
+    options.udmaQpConfig.sharedJettyEnabled = true;
 
     EXPECT_EQ(manager.OpenDevice(options), ACLSHMEM_NOT_SUPPORTED);
 }

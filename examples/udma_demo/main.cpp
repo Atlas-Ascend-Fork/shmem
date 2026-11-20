@@ -26,6 +26,8 @@ int g_npus = 8;
 const char* ipport;
 int f_pe = 0;
 int f_npu = 0;
+// UDMA shared jetty switch: 1 enables it through attr.runtime_config.udma_shared_jetty.
+int g_shared_jetty = 0;
 constexpr uint64_t DEBUG_DUMP_SIZE = 200 * 1024 * 1024;
 extern void launch_udma_all_gather(uint32_t block_dim, void* stream, uint8_t* gva, uint8_t* dump, int message_length);
 extern void launch_udma_put_signal(
@@ -61,6 +63,10 @@ int init_acl_shmem(
     test_set_attr(pe_id, n_pes, local_mem_size, ipport, default_flag_uid, &attributes);
 
     attributes.option_attr.data_op_engine_type = ACLSHMEM_DATA_OP_UDMA;
+    // Shared jetty must be enabled before initialization and kept identical on every PE.
+    if (g_shared_jetty != 0) {
+        attributes.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED;
+    }
     status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes);
     if (status != ACLSHMEM_SUCCESS) {
         (void)aclrtDestroyStream(stream);
@@ -303,6 +309,11 @@ int main(int argc, char* argv[])
     int test_type = 0;
     if (argIdx < argc) {
         test_type = atoi(argv[argIdx++]);
+    }
+
+    // Optional shared jetty switch: 0 disables (default), 1 enables.
+    if (argIdx < argc) {
+        g_shared_jetty = atoi(argv[argIdx++]);
     }
 
     if (test_type == 1) {

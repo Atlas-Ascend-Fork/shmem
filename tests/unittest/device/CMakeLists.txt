@@ -9,6 +9,8 @@
 # -----------------------------------------------------------------------------------------------------------
 
 file(GLOB_RECURSE TEST_KERNEL_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*_kernel.cpp")
+# Keep timeout fault-injection kernels isolated from the regular UT kernels.
+list(FILTER TEST_KERNEL_FILES EXCLUDE REGEX "sync/barrier/sync_timeout_kernel[.]cpp$")
 if(NOT SOC_TYPE STREQUAL "Ascend950" OR NOT ACLSHMEM_SIMT_SUPPORT)
     list(FILTER TEST_KERNEL_FILES EXCLUDE REGEX "multi_instance/simt_instance_routing_kernel[.]cpp$")
     list(FILTER TEST_KERNEL_FILES EXCLUDE REGEX "multi_instance/simt_instance_selection_kernel[.]cpp$")
@@ -46,6 +48,14 @@ target_include_directories(aclshmem_unittest_device PRIVATE
     ${PROJECT_SOURCE_DIR}/src/host/bootstrap/config_store
     ${PROJECT_SOURCE_DIR}/src/host/utils
 )
+
+add_library(aclshmem_sync_timeout_test_device SHARED sync/barrier/sync_timeout_kernel.cpp)
+set_target_properties(aclshmem_sync_timeout_test_device PROPERTIES ACLSHMEM_META_HOST_PROVIDED TRUE)
+target_compile_options(aclshmem_sync_timeout_test_device PRIVATE
+    ${CMAKE_CCE_COMPILE_OPTIONS} ${CCE_AICORE_ARCH} -fvisibility=hidden)
+target_link_options(aclshmem_sync_timeout_test_device PRIVATE --cce-fatobj-link)
+target_include_directories(aclshmem_sync_timeout_test_device PRIVATE
+    $<TARGET_PROPERTY:aclshmem_unittest_device,INCLUDE_DIRECTORIES>)
 if (ACLSHMEM_SIMT_SUPPORT)
     target_include_directories(aclshmem_unittest_device PRIVATE
         ${PROJECT_SOURCE_DIR}/src/device_simt/

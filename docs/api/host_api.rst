@@ -7,6 +7,24 @@ shmem_host_init.h
 .. doxygenfile:: shmem_host_init.h
     :project: ACLSHMEM_CPP_API
 
+Synchronization timeout configuration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Set ``attr.runtime_config.sync_timeout_us`` before SHMEM initialization.
+The unit is microseconds. Zero means unspecified: use 60000000 (60 seconds)
+for the first instance, or inherit the frozen value for subsequent instances.
+The uint32_t field accepts explicit values in [1, ``ACLSHMEM_SYNC_TIMEOUT_MAX_US``]
+(UINT32_MAX microseconds, approximately 71 minutes 35 seconds). A conflicting
+explicit value while any instance is alive returns ``ACLSHMEM_NOT_SUPPORTED``.
+Failed initialization leaves the effective configuration unchanged; finalizing
+the last instance restores the default. The setting covers collective synchronization
+and software local barriers::
+
+    aclshmemx_init_attr_t attr{};
+    // Fill the remaining initialization attributes.
+    attr.runtime_config.sync_timeout_us = 5000000; // 5 seconds
+    int ret = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr);
+
 shmem_log.h
 ---------------------------------
 
@@ -42,7 +60,7 @@ shmem_host_so.h
 
 .. doxygenfile:: shmem_host_so.h
     :project: ACLSHMEM_CPP_API
-    
+
 shmem_host_team.h
 ---------------------------------
 

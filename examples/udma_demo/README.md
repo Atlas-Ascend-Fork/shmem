@@ -34,6 +34,7 @@ bash scripts/build.sh -examples -soc_type Ascend950
 ```bash
 bash examples/udma_demo/run.sh 0 # allgather测试
 bash examples/udma_demo/run.sh 1 # put signal 测试
+bash examples/udma_demo/run.sh 0 -shared_jetty 1 # allgather测试，启用shared jetty
 ```
 默认按单机8卡启动，脚本依次拉起`PE 0`到`PE 7`，并等待所有进程退出。
 
@@ -48,11 +49,13 @@ WQE staging block。
 
 3.run.sh脚本命令行参数说明
 
-脚本按位置解析参数，所有参数均可选，缺省时使用默认值。
+脚本支持一个可选的命名开关，可以出现在命令行任意位置，其余参数仍按位置解析（均可选，缺省时使用默认值）：
+
 ```bash
-bash examples/udma_demo/run.sh <test_type> <n_pes> <g_npus> <ipport> <f_pe> <local_pes> <f_npu>
+bash examples/udma_demo/run.sh [-shared_jetty 0|1] <test_type> <n_pes> <g_npus> <ipport> <f_pe> <local_pes> <f_npu>
 ```
 
+- -shared_jetty: 可选命名开关，`1`表示启用shared jetty，`0`（默认，不传即关闭）表示关闭。开启时通过初始化参数`attr.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED`设置；该配置必须在初始化前设置，且所有PE必须一致。shared jetty会使解析到同一本地EID的对端PE共享底层jetty（一条SQ/CQ环和一个队列状态），开启时要求运行环境中的libhcomm.so提供channel config接口，否则初始化会失败并返回`ACLSHMEM_NOT_SUPPORTED`；同时在共享组内发送操作需由调用方串行下发。
 - test_type: 测试类型，0表示运行all-gather测试（默认），1表示运行put signal测试。
 - n_pes: 跨所有机器的全局PE总数（默认8）。
 - g_npus: 本机使用的NPU卡数量（默认8）。
@@ -68,6 +71,7 @@ bash examples/udma_demo/run.sh 0 16 8 192.168.1.10:8899 0 8 0
 # node1：f_pe=8，拉起全局 PE 8~15
 bash examples/udma_demo/run.sh 0 16 8 192.168.1.10:8899 8 8 0
 ```
+多机场景如需启用shared jetty，在两个节点上均追加`-shared_jetty 1`（所有节点必须一致）。
 
 ### mssanitizer 检测
 
@@ -86,7 +90,7 @@ mssanitizer -- bash examples/udma_demo/run.sh 1
 
 4.底层二进制命令行参数说明
 ```bash
-./udma_demo <n_pes> <pe_id> <ipport> <g_npus> <f_pe> <f_npu> [test_type]
+./udma_demo <n_pes> <pe_id> <ipport> <g_npus> <f_pe> <f_npu> [test_type] [shared_jetty]
 ```
 
 - n_pes: 全局PE数量。
@@ -96,3 +100,4 @@ mssanitizer -- bash examples/udma_demo/run.sh 1
 - f_pe: 当前机器上使用的第一个PE号。
 - f_npu: 当前机器执行本样例使用的第一张NPU卡的卡号。
 - test_type: 测试类型（可选），0表示运行all-gather测试（默认），1表示运行put signal测试。
+- shared_jetty: 是否启用shared jetty（可选），0表示关闭（默认），1表示开启；所有PE必须一致。
