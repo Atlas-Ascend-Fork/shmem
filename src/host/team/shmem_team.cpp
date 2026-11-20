@@ -411,12 +411,16 @@ int32_t aclshmem_team_split_strided(
         return ACLSHMEM_INVALID_PARAM;
     }
 
-    aclshmemx_team_t my_team;
+    aclshmemx_team_t my_team{};
     my_team.mype = (global_pe - global_pe_start) / global_pe_stride;
 
     if (global_pe < global_pe_start || (global_pe - global_pe_start) % global_pe_stride || my_team.mype >= pe_size) {
         SHM_LOG_INFO("This PE is not a member of the new team.");
         return ACLSHMEM_SUCCESS;
+    }
+
+    for (int i = 0; i < ACLSHMEM_MAX_PES; i++) {
+        my_team.pe_mapping[i + ACLSHMEM_MAX_PES] = -1;
     }
 
     my_team.start = global_pe_start;

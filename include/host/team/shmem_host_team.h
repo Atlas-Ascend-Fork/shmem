@@ -29,10 +29,9 @@ extern "C" {
  *
  * @return 0 on successful creation of new_team; otherwise nonzero.
  */
-ACLSHMEM_HOST_API int aclshmem_team_split_strided(aclshmem_team_t parent_team, int pe_start, int pe_stride, int pe_size,
-                                            aclshmem_team_t *new_team);
+ACLSHMEM_HOST_API int aclshmem_team_split_strided(
+    aclshmem_team_t parent_team, int pe_start, int pe_stride, int pe_size, aclshmem_team_t* new_team);
 #define shmem_team_split_strided aclshmem_team_split_strided
-
 
 /**
  * @brief Collective Interface. Split team from an existing parent team based on a 2D Cartsian Space.
@@ -44,10 +43,9 @@ ACLSHMEM_HOST_API int aclshmem_team_split_strided(aclshmem_team_t parent_team, i
  *
  * @return 0 on successful creation of new_team; otherwise nonzero.
  */
-ACLSHMEM_HOST_API int aclshmem_team_split_2d(aclshmem_team_t parent_team, int x_range, aclshmem_team_t *x_team,
-                                       aclshmem_team_t *y_team);
+ACLSHMEM_HOST_API int aclshmem_team_split_2d(
+    aclshmem_team_t parent_team, int x_range, aclshmem_team_t* x_team, aclshmem_team_t* y_team);
 #define shmem_team_split_2d aclshmem_team_split_2d
-
 
 /**
  * @brief Translate a given PE number in one team into the corresponding PE number in another team.
@@ -56,12 +54,11 @@ ACLSHMEM_HOST_API int aclshmem_team_split_2d(aclshmem_team_t parent_team, int x_
  * @param src_pe             [in] The PE number in src_team.
  * @param dest_team          [in] A ACLSHMEM team handle.
  *
- * @return The number of PEs in the specified team.
- *         If the team handle is ACLSHMEM_TEAM_INVALID, returns -1.
+ * @return The PE number in dest_team corresponding to src_pe, or -1 if either
+ *         team handle is invalid, src_pe is out of range, or the PE is not in dest_team.
  */
 ACLSHMEM_HOST_API int aclshmem_team_translate_pe(aclshmem_team_t src_team, int src_pe, aclshmem_team_t dest_team);
 #define shmem_team_translate_pe aclshmem_team_translate_pe
-
 
 /**
  * @brief Collective Interface. Destroys the team referenced by the team handle.
@@ -71,7 +68,6 @@ ACLSHMEM_HOST_API int aclshmem_team_translate_pe(aclshmem_team_t src_team, int s
 ACLSHMEM_HOST_API void aclshmem_team_destroy(aclshmem_team_t team);
 #define shmem_team_destroy aclshmem_team_destroy
 
-
 /**
  * @brief Returns the PE number of the local PE
  *
@@ -80,7 +76,6 @@ ACLSHMEM_HOST_API void aclshmem_team_destroy(aclshmem_team_t team);
 ACLSHMEM_HOST_API int aclshmem_my_pe(void);
 #define shmem_my_pe aclshmem_my_pe
 
-
 /**
  * @brief Returns the number of PEs running in the program.
  *
@@ -88,7 +83,6 @@ ACLSHMEM_HOST_API int aclshmem_my_pe(void);
  */
 ACLSHMEM_HOST_API int aclshmem_n_pes(void);
 #define shmem_n_pes aclshmem_n_pes
-
 
 /**
  * @brief Returns the number of the calling PE in the specified team.
@@ -101,7 +95,6 @@ ACLSHMEM_HOST_API int aclshmem_n_pes(void);
 ACLSHMEM_HOST_API int aclshmem_team_my_pe(aclshmem_team_t team);
 #define shmem_team_my_pe aclshmem_team_my_pe
 
-
 /**
  * @brief Returns the number of PEs in the specified team.
  *
@@ -113,7 +106,6 @@ ACLSHMEM_HOST_API int aclshmem_team_my_pe(aclshmem_team_t team);
 ACLSHMEM_HOST_API int aclshmem_team_n_pes(aclshmem_team_t team);
 #define shmem_team_n_pes aclshmem_team_n_pes
 
-
 /**
  * @brief return team config which pass in as team created
  *
@@ -121,9 +113,8 @@ ACLSHMEM_HOST_API int aclshmem_team_n_pes(aclshmem_team_t team);
  * @param config [out] the config associated with team, reserved for future use
  * @return Returns 0 on success or an error code on failure
  */
-ACLSHMEM_HOST_API int aclshmem_team_get_config(aclshmem_team_t team, aclshmem_team_config_t *config);
+ACLSHMEM_HOST_API int aclshmem_team_get_config(aclshmem_team_t team, aclshmem_team_config_t* config);
 #define shmem_team_get_config aclshmem_team_get_config
-
 
 #ifdef __cplusplus
 }
