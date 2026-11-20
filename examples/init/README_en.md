@@ -106,7 +106,7 @@ bash run.sh -mode default -pesize 4 -fpe 2 -gnpus 2 -ipport ${IP address:port nu
 ```
 
 Execute the MPI/UID workflow on two servers, with 2 PEs on each server.
-The two workflows depend on the MPI capability. For cross-server execution, you need to configure the hostfile file. The following uses the MPICH configuration file as an example:
+Both workflows depend on MPI. For cross-server execution, create a file named `hostfile` in `examples/init` on the launching server and run `bash run.sh` from that directory. The script looks for the file in the current directory. The following example uses MPICH:
 
 ```sh
 # Replace the IP addresses with the actual ones and ensure that the server where PE0 is located is placed at the very top. After the colon (:), configure the number of PEs that can be started on each server. The number of PEs must be less than the number of devices. It is recommended that the number of PEs started on each server be the same.

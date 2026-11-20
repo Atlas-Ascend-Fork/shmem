@@ -90,7 +90,7 @@ bash run.sh -t bi_put -pes 16 -gnpus 8 -fpe 8 -fnpu 0 -ipport tcp://192.168.1.10
 UDMA 是异步 NBI 接口，benchmark 把 `put_nbi/get_nbi` 提交与 `quiet` 等待分开计时。两种 metric 都是**单窗口覆盖 `loop_count` 次提交**（内置性能采集机制包含 `pipe_barrier` 开销；每次循环采集会将测量开销叠加到延时数字上，因此在循环外采集总耗时并除以 `loop_count`），区别只在 `quiet` 是否在窗口内：
 
 - **`--metric bw`（默认）**：`prof_start → loop(put_nbi) → quiet → prof_end`，窗口包含 `quiet`。
-  - `Bandwidth/GB/s` = `datasize × qp_count / (window_us / loop_count)`；`datasize` 是单个 QP 的数据量
+  - `Bandwidth/GB/s` = `datasize × qp_count × loop_count / (window_us × 1000)`。`datasize` 是单个 QP 每轮传输的字节数，`window_us` 以微秒为单位，GB/s 使用十进制。
   - `CoreMaxTime/SingleCoreTime` 列填 `window_us / loop_count`
   - 适用于 `put / bi_put / get / bi_get / put_signal`
 - **`--metric lat`**：遍历四种接口形态测下发时延（不含完成等待），见下方"时延路径的接口遍历"。**仅 `-t put` 且单 QP 支持**。

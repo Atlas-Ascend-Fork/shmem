@@ -105,6 +105,24 @@ ACLSHMEM_DEVICE void aclshmemx_sdma_qp_get_nbi(__gm__ T *dst, __gm__ T *src, __u
 | qp_idx       | 当前 AIV 使用的 SDMA QP，一般取 `GetBlockIdx()`                       |
 | sync_id      | 同步ID                                                               |
 
+### aclshmemx_sdma_qp_quiet
+
+等待指定 SDMA QP 上先前提交的操作完成。两个重载都要求传入与 put/get 提交相同的 `qp_idx`。
+
+```cpp
+template <typename T>
+ACLSHMEM_DEVICE void aclshmemx_sdma_qp_quiet(
+    AscendC::LocalTensor<T>& buf, uint32_t qp_idx, uint32_t sync_id);
+
+template <typename T>
+ACLSHMEM_DEVICE void aclshmemx_sdma_qp_quiet(
+    __ubuf__ T* buf, uint32_t ub_size, uint32_t qp_idx, uint32_t sync_id);
+```
+
+临时 UB 缓冲区 `buf` 至少需要 64 字节。指针重载要求地址按 64 字节对齐，并通过 `ub_size` 传入缓冲区的字节数。`qp_idx` 必须小于已配置的 SDMA 通道数，`sync_id` 是流水同步使用的硬件事件 ID。
+
+指针形式的调用示例为 `aclshmemx_sdma_qp_quiet(tmp_buff, ub_size, qp_idx, EVENT_ID0)`。
+
 ## 注意事项
 
 当前用例申请`128M * sizeof(T)`字节对称空间，每个PE占用`16M * sizeof(T)`字节。文档支持矩阵为2、4、8卡；实际可用卡数还需满足对称空间和运行环境容量条件。底层SDMA最多支持72个AIV/QP。
@@ -117,7 +135,7 @@ ACLSHMEM_DEVICE void aclshmemx_sdma_qp_get_nbi(__gm__ T *dst, __gm__ T *src, __u
 
 `aclshmemx_sdma_qp_put_nbi`和`aclshmemx_sdma_qp_get_nbi`都是非阻塞接口，调用后立即返回，不等待数据传输完成。用户使用时，可通过以下两种方式确保数据传输完成：
 
-1. 所有调用`aclshmemx_sdma_qp_put/get_nbi`的核，在sdma任务结束后，算子内调用相同`qp_idx`的`aclshmemx_sdma_qp_quiet`接口，等待该QP上的SDMA操作完成。
+1. 各核提交 `aclshmemx_sdma_qp_put/get_nbi` 后，调用相同 `qp_idx` 的 `aclshmemx_sdma_qp_quiet`，等待该 QP 上的操作完成。
 适用场景：算子内后续操作依赖sdma任务完成，例如后续算子需要使用sdma传输好的数据。
 2. 所有调用`aclshmemx_sdma_qp_put/get_nbi`的核，在sdma任务结束后，算子内调用相同`qp_idx`的`aclshmemx_sdma_qp_notify_record`接口，然后在host侧调用`aclrtWaitAndResetNotify`接口，等待指定的同步ID完成（详细用法可查看[NotifyWait机制使用说明](../notifywait/README.md)）。
 

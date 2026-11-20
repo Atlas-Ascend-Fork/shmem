@@ -38,7 +38,7 @@
     |rank|[in]|当前进程在 ACLSHMEM 作业中的排名（0-based），必填|
     |nranks|[in]|参与 ACLSHMEM 作业的总进程数，必填|
     |mpi_comm|[in]|预留参数，无实际意义|
-    |initializer_method|[in]|指定初始化方法，必须为 ``"uid"``|
+    |initializer_method|[in]|调用时必须显式传入 ``initializer_method="uid"``。省略该参数会使用无效的空字符串并抛出 ``AclshmemInvalid``|
     |mem_size|[in]|每个 PE 分配的对称内存大小（字节），必填|
     |instance_id|[in]|实例 ID，必须为 0 到 254 范围内的非 bool 整数，默认 0|
     |返回值|-|无返回值。参数缺失引发 ``AclshmemInvalid``，初始化失败引发 ``AclshmemError``|
@@ -608,7 +608,7 @@
 
     |参数/返回值|方向|含义|
     |-|-|-|
-    |attributes|[in]|初始化属性（`InitAttr` 类型），包含 `my_pe`（本地 PE 索引，范围 0 ~ n_pes-1）、`n_pes`（PE 总数）、`local_mem_size`（每个 PE 分配的内存大小，字节）等字段|
+    |attributes|[in]|初始化属性（`InitAttr` 类型），包含 `my_rank`（本地 PE 索引，满足 `0 <= my_rank < n_ranks`）、`n_ranks`（PE 总数）、`local_mem_size`（每个 PE 分配的内存大小，字节）等字段|
     |返回值|[out]|成功返回 0，失败返回 -1|
 
 2. **aclshmem_finalize** — 销毁共享内存模块，释放所有资源。
@@ -1468,7 +1468,7 @@
     |sig|[in]|源信号变量的本地地址|
     |cmp|[in]|比较操作符。支持：``CMP_EQ`` / ``CMP_NE`` / ``CMP_GT`` / ``CMP_GE`` / ``CMP_LT`` / ``CMP_LE``|
     |cmp_val|[in]|与 sig 所指向值进行比较的值|
-    |stream|[in]|ACL 流对象，用于执行排序。必须传入有效流|
+    |stream|[in]|ACL 流的整数地址。传入 ``0`` 使用默认流，不接受 ``None``|
     |返回值|-|无返回值|
 
 64. **aclshmemx_quiet_on_stream** — 将完成点排入指定流，使该完成点之前由当前调用上下文发出的对称数据操作先于完成点结束。Host 调用立即返回；调用者须同步该流后才能观测完成。

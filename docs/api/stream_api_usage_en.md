@@ -37,7 +37,7 @@ For details about the initialization, see the `void test_cross_init()` function 
 
 **Function:**
 
-Copies data from the symmetric memory of the local card to the address of a specified PE through a specified stream. This is a synchronous API.
+Enqueues a contiguous copy from the local PE to a symmetric address on the specified PE. The host call returns after enqueueing the operation. For cross-server RDMA synchronization as shown below, enqueue `aclshmemx_handle_wait` on the same stream. Call `aclrtSynchronizeStream` on that stream when the host needs to observe completion.
 
 **Cross-server support**: Supported. MTE is preferred when HCCS/UB is connected. Otherwise, RDMA is used when the RDMA links are available.
 
@@ -102,7 +102,7 @@ aclFinalize();
 
 **Function**:
 
-Copies continuous data on the specified PE in the symmetric memory to the address of the local PE through the specified stream. This is a synchronous API.
+Enqueues a contiguous copy from symmetric memory on the specified PE to the local PE. The host call returns after enqueueing the operation. For cross-server RDMA synchronization as shown below, enqueue `aclshmemx_handle_wait` on the same stream. Call `aclrtSynchronizeStream` on that stream before the host reads the result.
 
 **Cross-server support**: Supported. MTE is preferred when HCCS/UB is connected. Otherwise, RDMA is used when the RDMA links are available.
 
@@ -168,7 +168,7 @@ aclFinalize();
 
 **Function**:
 
-Performs operations on signal variables on a specified PE. The operations are performed in a given stream. This is a synchronous API. It is often used together with `aclshmemx_signal_wait_until_on_stream`.
+Enqueues a signal operation on the specified PE through the given stream. The host call returns after enqueueing the operation. For cross-server RDMA `ACLSHMEM_SIGNAL_SET`, enqueue `aclshmemx_handle_wait` on the same stream as shown below, then synchronize the stream if the host needs to observe completion. This API is often used with `aclshmemx_signal_wait_until_on_stream`.
 
 **Cross-server support**: Partially supported
 
@@ -237,7 +237,7 @@ aclFinalize();
 
 **Function**:
 
-This is a synchronous API. Calling this API will be blocked until the value of `sig\_addr` on the PE meets the waiting condition specified by the comparison operator `cmp` and the comparison value `cmp\_val`.
+Enqueues a wait on the specified stream and returns to the host. Subsequent operations on that stream wait until the local value at `sig_addr` satisfies the condition specified by `cmp` and `cmp_val`. Call `aclrtSynchronizeStream` on that stream when the host needs to observe that the wait has completed.
 
 **Cross-server support**: Not supported.
 
@@ -276,7 +276,7 @@ int32_t* signal_var = (int32_t*)aclshmem_malloc(sizeof(int32_t));
 // 4. Set the signal value.
 aclshmemx_signal_op_on_stream(signal_var, 2, ACLSHMEM_SIGNAL_SET, target_pe, stream);
 
-// 5. Wait until the local signal is equal to the specified value (block until the condition is met). This is usually the case in multi-device scenarios.
+// 5. Enqueue a wait for the local signal on the stream.
 aclshmemx_signal_wait_until_on_stream(signal_var, ACLSHMEM_CMP_EQ, 2, stream);
 
 // 6. Wait until the operation is complete.
@@ -327,7 +327,7 @@ aclshmemx_handle_wait(handle, stream);
 
 aclrtSynchronizeStream(stream);
 
-// 6. Wait until the current PE receives the expected signal value (block until the condition is met).
+// 6. Enqueue the local signal wait, then synchronize the stream to observe completion.
 aclshmemx_signal_wait_until_on_stream(sig_addr, ACLSHMEM_CMP_EQ, expected_signal, stream);
 aclrtSynchronizeStream(stream);
 
@@ -353,4 +353,4 @@ aclFinalize();
    - `aclshmemx_signal_op_on_stream`: `ACLSHMEM_SIGNAL_SET` supports cross-server RDMA. `ACLSHMEM_SIGNAL_ADD` does not support cross-server RDMA. MTE cross-server communication is supported when HCCS/UB is connected.
    - `aclshmemx_signal_wait_until_on_stream` does not support cross-server communication. Its semantics is to wait until the address on the local NPU reaches a specified value.
    - In cross-server scenarios, ensure that the network configuration is correct and related environment variables are correctly configured.
-   - **RDMA path synchronization**: When RDMA APIs are used, `aclshmemx_handle_wait` needs to be called to ensure that data has been received.
+   - **RDMA path synchronization**: Enqueue `aclshmemx_handle_wait` on the same stream as the communication. Every PE in the handle's team must make matching calls after enqueueing the operations to be covered. Synchronize that stream when the host needs to observe completion.

@@ -4,8 +4,8 @@ Based on the SHMEM project, this example describes how to use the SDMA batch dat
 
 The example supports three verification modes: `put`, `get`, and `all`.
 
-- `put`: Verifies `aclshmemx_sdma_put_nbi`. Data is transferred from regular device memory on the local PE to `HOST_SIDE` SHMEM memory on the local PE and target PEs.
-- `get`: Verifies `aclshmemx_sdma_get_nbi`. Data is transferred from `HOST_SIDE` SHMEM memory on the local PE and target PEs to regular device memory on the local PE.
+- `put`: Verifies `aclshmemx_sdma_qp_put_nbi`. Data is transferred from regular device memory on the local PE to `HOST_SIDE` SHMEM memory on the local PE and target PEs.
+- `get`: Verifies `aclshmemx_sdma_qp_get_nbi`. Data is transferred from `HOST_SIDE` SHMEM memory on the local PE and target PEs to regular device memory on the local PE.
 - `all`: Executes `put` and then `get`.
 
 ## Supported Product Models
@@ -38,9 +38,9 @@ This example demonstrates how to use the SHMEM SDMA batch put/get APIs to transf
 
 (2) Calculate the number of bytes in each PE segment based on the number of elements and data type, and divide the data range among the kernel instances by block.
 
-(3) In the `put` kernel, call `aclshmemx_sdma_put_nbi` to write data from regular device memory on the local PE to a `HOST_SIDE` SHMEM symmetric address on the local PE or a target PE. The API converts the host-side address based on the PE ID. The `pe == my_pe` case verifies local D2H.
+(3) In the `put` kernel, call `aclshmemx_sdma_qp_put_nbi` to write data from regular device memory on the local PE to a `HOST_SIDE` SHMEM symmetric address on the local PE or a target PE. The API converts the host-side address based on the PE ID. The `pe == my_pe` case verifies local D2H.
 
-(4) In the `get` kernel, call `aclshmemx_sdma_get_nbi` to read data from a `HOST_SIDE` SHMEM symmetric address on the local PE or a target PE and write the data to regular device memory on the local PE. The API converts the source host-side address based on the PE ID. The `pe == my_pe` case verifies local H2D.
+(4) In the `get` kernel, call `aclshmemx_sdma_qp_get_nbi` to read data from a `HOST_SIDE` SHMEM symmetric address on the local PE or a target PE and write the data to regular device memory on the local PE. The API converts the source host-side address based on the PE ID. The `pe == my_pe` case verifies local H2D.
 
 (5) `aclshmemx_sdma_qp_put_nbi` and `aclshmemx_sdma_qp_get_nbi` are non-blocking APIs. In the kernel, call `aclshmemx_sdma_qp_quiet` with the same `qp_idx` to wait for completion.
 

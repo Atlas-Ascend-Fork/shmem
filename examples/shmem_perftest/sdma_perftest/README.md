@@ -51,7 +51,7 @@ bash scripts/build.sh -examples -soc_type Ascend950
 | `--loop-count <count>` | - | 每个数据点的循环次数 | 1000 |
 | `--ub-size <size>` | - | UB size，单位 KB | 16 |
 | `--metric <bw\|lat>` | - | 性能口径：`bw` 或 `lat` | bw |
-| `--batch <N>` | - | 带宽测试的 quiet 间隔。`0` 为全部 nbi 提交后 quiet 一次，`1` 为每次 nbi 后 quiet，其他值按组 quiet | 512 |
+| `--batch <N>` | - | 带宽测试的 quiet 间隔。`0` 为全部 nbi 提交后 quiet 一次，`1` 为每次 nbi 后 quiet，其他值按组 quiet | `run.sh` 为 `512`，直接运行二进制为 `0` |
 | `-pes <size>` | - | PE 数量，当前固定为 2 | 2 |
 | `-ipport <ip:port>` | - | 通信地址 | tcp://127.0.0.1:8769 |
 | `-gnpus <num>` | - | NPU 数量，当前固定为 2 | 2 |

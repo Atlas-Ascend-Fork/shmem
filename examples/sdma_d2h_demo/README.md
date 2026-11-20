@@ -4,8 +4,8 @@
 
 样例覆盖 `put`、`get` 和 `all` 三种功能验证模式：
 
-- `put`：验证 `aclshmemx_sdma_put_nbi`，数据方向为本 PE 普通 Device 内存到本 PE 和目标 PE 的 `HOST_SIDE` SHMEM 内存。
-- `get`：验证 `aclshmemx_sdma_get_nbi`，数据方向为本 PE 和目标 PE 的 `HOST_SIDE` SHMEM 内存到本 PE 普通 Device 内存。
+- `put`：验证 `aclshmemx_sdma_qp_put_nbi`，数据方向为本 PE 普通 Device 内存到本 PE 和目标 PE 的 `HOST_SIDE` SHMEM 内存。
+- `get`：验证 `aclshmemx_sdma_qp_get_nbi`，数据方向为本 PE 和目标 PE 的 `HOST_SIDE` SHMEM 内存到本 PE 普通 Device 内存。
 - `all`：依次执行 `put` 和 `get`。
 
 ## 支持的产品型号
@@ -38,9 +38,9 @@
 
 （2）根据元素个数和数据类型计算每个 PE 的 segment 字节数，并按 block 划分当前 kernel 实例负责搬运的数据范围。
 
-（3）`put` kernel 中，调用 `aclshmemx_sdma_put_nbi` 将本 PE 普通 Device 内存中的数据写入本 PE 或目标 PE 的 `HOST_SIDE` SHMEM 对称地址。接口内部根据 PE 编号完成 Host 侧地址转换，`pe == my_pe` 时验证本地 D2H。
+（3）`put` kernel 中，调用 `aclshmemx_sdma_qp_put_nbi` 将本 PE 普通 Device 内存中的数据写入本 PE 或目标 PE 的 `HOST_SIDE` SHMEM 对称地址。接口内部根据 PE 编号完成 Host 侧地址转换，`pe == my_pe` 时验证本地 D2H。
 
-（4）`get` kernel 中，调用 `aclshmemx_sdma_get_nbi` 从本 PE 或目标 PE 的 `HOST_SIDE` SHMEM 对称地址读取数据，写入本 PE 普通 Device 内存。接口内部根据源 PE 编号完成 Host 侧地址转换，`pe == my_pe` 时验证本地 H2D。
+（4）`get` kernel 中，调用 `aclshmemx_sdma_qp_get_nbi` 从本 PE 或目标 PE 的 `HOST_SIDE` SHMEM 对称地址读取数据，写入本 PE 普通 Device 内存。接口内部根据源 PE 编号完成 Host 侧地址转换，`pe == my_pe` 时验证本地 H2D。
 
 （5）`aclshmemx_sdma_qp_put_nbi` 和 `aclshmemx_sdma_qp_get_nbi` 为非阻塞接口，kernel 中调用相同 `qp_idx` 的 `aclshmemx_sdma_qp_quiet` 等待任务完成。
 

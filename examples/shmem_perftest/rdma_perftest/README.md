@@ -121,7 +121,7 @@ IN_DIE 在单 QP 且消息严格小于 32 KiB、XSCALE 在 `qp_num <= 2` 且消�
 
 - 此模式需配合 `--metric bw` 使用。`-q N` 指定 QP 数量（范围 1~56），`-i -1` 表示自动为每个 QP 分配独立数据区。
 - 例如 `-q 4 -i -1`、`DataSize=4MB`、`loop-count=1000`：4 个 QP 各自提交 1000 次 4MB 传输，单次并发总数据量 16MB，累计总数据量 16GB。
-- IN_DIE 在单 QP 且消息严格小于 32 KiB、XSCALE 在 `N <= 2` 且消息严格小于 64 KiB 时聚合提交；HNS_1825 始终立即提交。
+- XSCALE 在 `N <= 2` 且消息严格小于 64 KiB 时聚合提交。HNS_1825 使用普通 QP 指定 NBI 接口立即提交。
 
 > **云脉（XSCALE）和 1825（HNS_1825）** 均支持多 QP。其他后端会被 `run.sh` 拦截并报错退出。
 
@@ -131,7 +131,7 @@ IN_DIE 在单 QP 且消息严格小于 32 KiB、XSCALE 在 `qp_num <= 2` 且消�
 
 - `-q N` 声明 QP 池大小，`-i K` 固定选择第 K 个 QP。`-i` 必须满足 `-1 ≤ K < N`，否则 `run.sh` 会报错退出。
 - 时延测试（`--metric lat`）要求 `qp_num=1`，不支持 `qp_num>1`；计时只覆盖唯一 QP 的传输耗时。
-- IN_DIE 使用单 QP 普通接口聚合；XSCALE 的单 QP、固定 QP 和多 QP 模式遵循聚合条件；HNS_1825 始终调用 QP 指定的普通 NBI 接口立即提交。
+- 带宽测试中，XSCALE 在 `N <= 2` 且消息严格小于 64 KiB 时聚合提交。HNS_1825 使用普通 QP 指定 NBI 接口立即提交。
 
 > **云脉（XSCALE）和 1825（HNS_1825）** 均支持固定 QP 诊断模式。其他后端会被 `run.sh` 拦截并报错退出。
 
@@ -180,7 +180,7 @@ IN_DIE 在单 QP 且消息严格小于 32 KiB、XSCALE 在 `qp_num <= 2` 且消�
 # 批量完成：每 100 次操作后等待完成，再开始下一组
 ./run.sh -t put -d float --exponent-range 8 20 --loop-count 1000 --batch 100
 
-# 多 QP 带宽测试：2 个 QP 并行；IN_DIE/XSCALE 小消息按批聚合，HNS_1825 逐次 NBI 提交
+# 多 QP 带宽测试（仅 XSCALE 和 HNS_1825）：2 个 QP 并行，XSCALE 小消息按批聚合，HNS_1825 逐次 NBI 提交
 ./run.sh -t put -d float --exponent-range 8 20 --loop-count 1000 -q 2 -i -1 --metric bw --batch 100
 
 # 单 QP 诊断模式：仅测试编号为 0 的 QP，每 100 次操作后等待完成

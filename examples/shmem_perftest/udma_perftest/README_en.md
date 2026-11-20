@@ -89,7 +89,7 @@ The default local memory size is 1 GB. For large payloads, the program automatic
 UDMA uses asynchronous NBI APIs. The benchmark measures `put_nbi/get_nbi` submission separately from `quiet` completion waiting. Both metrics use **one profiling window covering `loop_count` submissions**. Built-in profiling includes `pipe_barrier` overhead, so profiling is placed outside the loop and total window time is divided by `loop_count`. The metrics differ in whether `quiet` is inside the window:
 
 - **`--metric bw` (default)**: `prof_start → loop(put_nbi) → quiet → prof_end`; the window includes `quiet`.
-  - `Bandwidth/GB/s` = `datasize × qp_count / (window_us / loop_count)`, where `datasize` is the payload of one QP.
+  - `Bandwidth/GB/s` = `datasize × qp_count × loop_count / (window_us × 1000)`. Here `datasize` is the number of bytes transferred by one QP per iteration, `window_us` is in microseconds, and GB/s uses decimal units.
   - `CoreMaxTime/SingleCoreTime` = `window_us / loop_count`.
   - Applies to `put / bi_put / get / bi_get / put_signal`.
 - **`--metric lat`**: Traverses four API forms to measure issue latency without completion waiting. See [Latency API Traversal](#latency-api-traversal---metric-lat). It supports only `-t put` and one QP.

@@ -51,7 +51,7 @@ bash scripts/build.sh -examples -soc_type Ascend950
 | `--loop-count <count>` | - | Loop count per data point | 1000 |
 | `--ub-size <size>` | - | UB size in KB | 16 |
 | `--metric <bw\|lat>` | - | Performance metric: `bw` or `lat` | bw |
-| `--batch <N>` | - | Quiet interval for bandwidth tests. `0` means one quiet after all nbi submits, `1` means quiet after every nbi submit, and other values quiet per group | 0 |
+| `--batch <N>` | - | Quiet interval for bandwidth tests. `0` means one quiet after all nbi submits, `1` means quiet after every nbi submit, and other values quiet per group | `512` via `run.sh`, `0` when running the binary directly |
 | `-pes <size>` | - | Number of PEs, currently fixed at 2 | 2 |
 | `-ipport <ip:port>` | - | Communication address | tcp://127.0.0.1:8769 |
 | `-gnpus <num>` | - | Number of NPUs, currently fixed at 2 | 2 |
@@ -138,4 +138,4 @@ The CSV file contains these fields:
 3. Each data point runs 100 warm-up iterations before measurement.
 4. Use a larger `--loop-count` for more stable performance data.
 5. With `--metric lat`, `--batch` has no effect. All nbi submits are timed in one window, and quiet runs outside that window.
-6. `--batch` defaults to 512 when unset: this amortizes the fixed cost of quiet while avoiding too many in-flight requests on one QP; if the effective value exceeds `--loop-count`, it is clamped to a single trailing quiet after all submits (e.g. the default 512 with `--loop-count 100` behaves as no grouping). If `--batch` is too large, multiple in-flight requests accumulate on one QP and may be limited by the SDMA channel SQ depth.
+6. When `--batch` is omitted, `run.sh` passes `512` to the binary. The binary defaults to `0` when launched directly without this option. In bandwidth mode, a batch of `0` or a value greater than `--loop-count` results in one quiet after all submissions. For example, the script default of `512` with `--loop-count 100` results in one quiet. Large batches may be limited by the SDMA channel SQ depth.

@@ -105,7 +105,7 @@ bash run.sh -mode default -pesize 4 -fpe 2 -gnpus 2 -ipport ${pe0机器的ip:por
 ```
 
 执行 mpi/uid 流程，双机，每个机器2 pe。
-这两个流程依赖mpi能力，跨机需自行配置hostfile文件，以mpich配置文件为例
+这两个流程依赖 MPI。跨机运行时，在启动节点的 `examples/init` 目录下创建名为 `hostfile` 的文件，并从该目录执行 `bash run.sh`。脚本从当前目录查找该文件。以下以 MPICH 配置为例：
 
 ```sh
 # 请替换成实际机器的ip，且保证pe0机器在最前面,冒号后配置每个机器支持启动的pe数，pe数需小于卡数，建议每台机器启动pe数量一致。

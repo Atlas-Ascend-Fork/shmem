@@ -35,7 +35,7 @@
     |rank|[in]|(Required) Rank (0-based) of the current process in the ACLSHMEM job.|
     |nranks|[in]|(Required) Total number of processes involved in the ACLSHMEM job.|
     |mpi_comm|[in]|Reserved. It has no actual meaning.|
-    |initializer_method|[in]|Initialization method. The value must be `"uid"`.|
+    |initializer_method|[in]|Explicitly pass `initializer_method="uid"`. Omitting this argument uses the invalid empty-string default and raises `AclshmemInvalid`.|
     |mem_size|[in]|(Required) Size of the symmetric memory allocated to each PE, in bytes.|
     |instance_id|[in]|Instance ID. It must be a non-bool integer in the range 0 to 254. The default is 0.|
     |Return Value|-|No return value. `AclshmemInvalid` is thrown due to missing parameters, and `AclshmemError` is thrown due to an initialization failure.|
@@ -602,7 +602,7 @@
 
     |Parameter/Return Value|Direction|Meaning|
     |-|-|-|
-    |attributes|[in]|Initialization attributes (of the `InitAttr` type), including `my_pe` (local PE index, ranging from `0` to `n_pes-1`), `n_pes` (total number of PEs), and `local_mem_size` (size of the memory allocated to each PE, in bytes)|
+    |attributes|[in]|Initialization attributes (`InitAttr`), including `my_rank` (local PE index satisfying `0 <= my_rank < n_ranks`), `n_ranks` (total number of PEs), and `local_mem_size` (memory allocated to each PE in bytes)|
     |Return Value|[out]|Result code. Success: 0. Failure: -1.|
 
 2. **aclshmem_finalize** — Destroy the shared memory module and release all resources.
@@ -1400,7 +1400,7 @@
     |sig|[in]|Local address of the source signal variable|
     |cmp|[in]|Comparison operator. Supported comparison operator: `CMP_EQ` / `CMP_NE` / `CMP_GT` / `CMP_GE` / `CMP_LT` / `CMP_LE`|
     |cmp_val|[in]|Value to be compared with the value pointed to by `sig`|
-    |stream|[in]|ACL stream object, which is used for sorting. A valid stream must be passed.|
+    |stream|[in]|Integer ACL stream address. Pass `0` to select the default stream. `None` is not accepted.|
     |Return Value|-|No return value.|
 
 64. **aclshmemx_quiet_on_stream** — Enqueue a completion point so that symmetric-data operations previously issued by the calling context finish before that point on the supplied stream. The host call returns immediately; synchronize the stream before observing completion.

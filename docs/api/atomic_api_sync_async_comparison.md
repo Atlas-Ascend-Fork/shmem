@@ -205,8 +205,8 @@ aclshmem_<type>_atomic_<op>(dst, val, pe)
 
 | 传输通路 | 支持类型 | 硬件平台 |
 |---|---|---|
-| MTE | int32, uint32, uint64, int64 | 950 |
-| RDMA | int32, uint32, int64, uint64, float | 950 |
+| MTE | int32, uint32, uint64, int64, float | 950 |
+| RDMA | int32, uint32, int64, uint64 | 950 |
 
 ### 6.4 `aclshmem_<type>_atomic_fetch_inc`
 

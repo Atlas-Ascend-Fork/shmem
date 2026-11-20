@@ -83,17 +83,24 @@ aclFinalize();
 ### Custom Log Printing
 
 Custom log printing is optional. If the custom log printing function is not registered, logs are printed on the screen by default. The following is an API example:
-```c
+```cpp
+#include "shmem.h"
+
 void cpp_logger_example(int level, const char* msg)
 {
     // do print here
 }
 
-// set self-defined log
-int ret = aclshmemx_set_extern_logger(cpp_logger_example);
+int configure_logging()
+{
+    int ret = aclshmemx_set_extern_logger(cpp_logger_example);
+    if (ret != ACLSHMEM_SUCCESS) {
+        return ret;
+    }
 
-// set log level. 0-debug, 1-info, 2-warn, 3-error
-ret = aclshmemx_set_log_level(level);
+    const int level = 1;  // 0-debug, 1-info, 2-warn, 3-error
+    return aclshmemx_set_log_level(level);
+}
 ```
 
 ### Registering the Private Key Password Decryption Function

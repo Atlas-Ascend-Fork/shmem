@@ -49,7 +49,7 @@ block 1 -> QP 1
 ...
 ```
 
-（2）普通 Put 模式调用 `aclshmemx_roce_qp_put_nbi`，普通 Get 模式调用 `aclshmemx_roce_qp_get_nbi`。每个 AIV 只提交一次自己负责的完整数据分片；两个后端都使用 QP 指定的聚合提交接口。
+（2）普通 Put 模式调用 `aclshmemx_roce_qp_put_nbi`，普通 Get 模式调用 `aclshmemx_roce_qp_get_nbi`。两个后端都使用不带聚合动作参数的重载，每个 AIV 对自己负责的完整数据分片提交一次。
 
 （3）聚合模式中，每个 AIV 将自己的数据分片拆成 8 个 chunk，并创建独立的 `aclshmemx_submit_state_t` 和 UB workspace。前 7 个操作使用 `aclshmemx_defer_t` 加入批次，最后一个操作使用 `aclshmemx_submit_t` 提交整个批次。
 

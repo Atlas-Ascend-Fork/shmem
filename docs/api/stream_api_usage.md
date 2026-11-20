@@ -37,7 +37,7 @@ int status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes);
 
 **功能描述：**
 
-同步接口，在指定流上将本地 PE 的连续数据复制到指定 PE 的对称地址。
+将从本地 PE 到指定 PE 对称地址的连续数据复制操作排入指定流。主机调用在提交后返回。按下文示例进行跨机 RDMA 同步时，在同一流中排入 `aclshmemx_handle_wait`。主机需要确认完成时，调用 `aclrtSynchronizeStream` 同步该流。
 
 **跨机支持：** 支持，HCCS/UB连通时优先走MTE，否则RDMA链路可用时走RDMA。
 
@@ -102,7 +102,7 @@ aclFinalize();
 
 **功能描述：**
 
-同步接口，在指定流上将指定 PE 对称内存中的连续数据复制到本地 PE。
+将从指定 PE 的对称内存到本地 PE 的连续数据复制操作排入指定流。主机调用在提交后返回。按下文示例进行跨机 RDMA 同步时，在同一流中排入 `aclshmemx_handle_wait`。主机读取结果前，调用 `aclrtSynchronizeStream` 同步该流。
 
 **跨机支持：** 支持。HCCS/UB连通时优先走MTE，否则RDMA链路可用时走RDMA。
 
@@ -168,7 +168,7 @@ aclFinalize();
 
 **功能描述：**
 
-同步接口，在指定的PE上对信号变量执行操作，该操作在给定的流上执行。通常与`aclshmemx_signal_wait_until_on_stream`配合使用。
+将指定 PE 上的信号操作排入给定的流。主机调用在提交后返回。对于跨机 RDMA 的 `ACLSHMEM_SIGNAL_SET`，按下文示例在同一流中排入 `aclshmemx_handle_wait`，主机需要确认完成时再同步该流。该接口通常与 `aclshmemx_signal_wait_until_on_stream` 配合使用。
 
 **跨机支持：** 部分支持。
 
@@ -237,7 +237,7 @@ aclFinalize();
 
 **功能描述：**
 
-同步接口，调用该接口会阻塞，直到调用PE上的sig\_addr值满足由比较操作符cmp和比较值cmp\_val指定的等待条件。
+将信号等待排入指定流，主机调用在提交后返回。流上的后续操作须等本地 PE 的 `sig_addr` 所指值满足 `cmp` 和 `cmp_val` 指定的条件。主机需要确认等待已结束时，调用 `aclrtSynchronizeStream` 同步该流。
 
 **跨机支持：** 不支持。
 
@@ -276,7 +276,7 @@ int32_t* signal_var = (int32_t*)aclshmem_malloc(sizeof(int32_t));
 // 4. 设置信号值
 aclshmemx_signal_op_on_stream(signal_var, 2, ACLSHMEM_SIGNAL_SET, target_pe, stream);
 
-// 5. 等待本地信号等于指定值（阻塞直到条件满足），通常为多卡场景
+// 5. 将本地信号等待排入流
 aclshmemx_signal_wait_until_on_stream(signal_var, ACLSHMEM_CMP_EQ, 2, stream);
 
 // 6. 等待操作完成
@@ -327,7 +327,7 @@ aclshmemx_handle_wait(handle, stream);
 
 aclrtSynchronizeStream(stream);
 
-// 6. 等待当前PE收到期望的信号值（阻塞直到条件满足）
+// 6. 将本地信号等待排入流，并同步该流以确认等待结束
 aclshmemx_signal_wait_until_on_stream(sig_addr, ACLSHMEM_CMP_EQ, expected_signal, stream);
 aclrtSynchronizeStream(stream);
 
@@ -355,4 +355,4 @@ aclFinalize();
    - `aclshmemx_signal_op_on_stream`：`ACLSHMEM_SIGNAL_SET`支持RDMA跨机；`ACLSHMEM_SIGNAL_ADD`不支持RDMA跨机，HCCS/UB可通时支持MTE跨机
    - `aclshmemx_signal_wait_until_on_stream`不支持跨机，语义为等待本卡上地址到达某个值
    - 跨机场景下需确保网络配置正确，相关环境变量已正确设置
-   - **RDMA路径同步**：当使用RDMA接口时，需要调用`aclshmemx_handle_wait`来保证数据已经被接收完成。
+   - **RDMA路径同步**：在通信操作所在的流中排入 `aclshmemx_handle_wait`。Handle 所属 team 的全部 PE 都须在通信操作之后以匹配的顺序调用它。主机需要确认完成时，再同步该流。

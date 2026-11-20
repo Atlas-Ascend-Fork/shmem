@@ -92,13 +92,31 @@ API function: This API pulls elements (with the number specified by `elem_size`)
 | qp_idx       | SDMA QP used by the current AIV, normally `GetBlockIdx()`                   |
 | sync_id      | Synchronization ID                                                              |
 
+### aclshmemx_sdma_qp_quiet
+
+Waits for previously submitted operations on the specified SDMA QP to finish. Pass the same `qp_idx` used to submit the put or get.
+
+```cpp
+template <typename T>
+ACLSHMEM_DEVICE void aclshmemx_sdma_qp_quiet(
+    AscendC::LocalTensor<T>& buf, uint32_t qp_idx, uint32_t sync_id);
+
+template <typename T>
+ACLSHMEM_DEVICE void aclshmemx_sdma_qp_quiet(
+    __ubuf__ T* buf, uint32_t ub_size, uint32_t qp_idx, uint32_t sync_id);
+```
+
+The temporary UB workspace `buf` must provide at least 64 bytes. For the pointer overload, align the address to 64 bytes and pass the buffer size in bytes as `ub_size`. The QP index must be smaller than the configured SDMA channel count. Use a hardware event ID for pipeline synchronization as `sync_id`.
+
+For example, call the pointer overload as `aclshmemx_sdma_qp_quiet(tmp_buff, ub_size, qp_idx, EVENT_ID0)`.
+
 ## Precautions
 The example allocates `128M * sizeof(T)` bytes of symmetric memory and uses `16M * sizeof(T)` bytes per PE. The documented support matrix is 2, 4, and 8 cards; actual use also depends on available symmetric-memory capacity. The SDMA infrastructure supports up to 72 AIVs/QPs.
 
 To limit the number of explicit QPs, call `aclshmemx_set_qp_num(ACLSHMEM_DATA_OP_SDMA, qp_num)` before `aclshmemx_init_attr`. The valid range of `qp_num` is 1 to the number of vector cores on the current device. If this API is not called, only one SDMA stream/QP is created. When multiple cores need to run concurrently, set the required number of QPs explicitly. In this example, each AIV uses `GetBlockIdx()` (the AIV-level global index) as `qp_idx`. Therefore, `qp_num` should be set to the number of blocks x the number of AIVs per block (currently `20 x 2 = 40`).
 
 Both `aclshmemx_sdma_qp_put_nbi` and `aclshmemx_sdma_qp_get_nbi` are non-blocking APIs. They return control to the caller right away and do not wait for the data transfer to finish. To ensure that the data transfer has finished, you can adopt one of the following methods:
-1. For each kernel that calls `aclshmemx_sdma_qp_put/get_nbi`, call `aclshmemx_sdma_qp_quiet` with the same `qp_idx` after the SDMA task ends, and wait until the operations on that QP are complete.
+1. After submitting `aclshmemx_sdma_qp_put/get_nbi`, each core calls `aclshmemx_sdma_qp_quiet` with the same `qp_idx` to wait for operations on that QP to finish.
 Scenario: Subsequent operations within the operator depend on the completion of the SDMA task. For example, subsequent operations need to use the data transferred by the SDMA.
 2. For each kernel that calls `aclshmemx_sdma_qp_put/get_nbi`, call `aclshmemx_sdma_qp_notify_record` with the same `qp_idx` after the SDMA task ends, then call `aclrtWaitAndResetNotify` on the host and wait until the specified synchronization ID completes. For details, see [NotifyWait Mechanism Usage Description](../notifywait/README_en.md).
 Scenario: Kernels on other streams must wait for the SDMA task to finish before continuing execution.

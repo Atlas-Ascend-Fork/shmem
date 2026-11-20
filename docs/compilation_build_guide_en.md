@@ -20,7 +20,7 @@ bash scripts/build.sh
 For more information about the commands, see the *README* and the `scripts/build.sh` file in the SHMEM's `master` directory.
 
 ### SHMEM Build Description
-The basic SHMEM build command is `bash build.sh`. The default build mode generates version information and creates an installation package. By default, the RDMA capability, test cases, tests, and Python APIs are not built. The following parameters can be added to implement different functions:
+Run `bash scripts/build.sh` from the SHMEM repository root. The default build mode generates version information and creates an installation package. By default, the RDMA capability, test cases, tests, and Python APIs are not built. The following parameters can be added to implement different functions:
 - `-use_cxx11_abi1`: enables `C++11 ABI`. This is the default setting.
 - `-use_cxx11_abi0`: disables `C++11 ABI`.
 - `-cann`: CANN open APIs can be used for build if the CANN version is 8.5 or later.

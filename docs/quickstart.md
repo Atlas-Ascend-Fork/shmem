@@ -470,7 +470,7 @@ aclshmemx_uniqueid_t uid;
 aclshmemx_init_attr_t attributes;
 int ret = aclshmemx_get_uniqueid(&uid);
 ret = aclshmemx_set_attr_uniqueid_args(my_pe, n_pes, mem_size, &uid, &attributes);
-status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_UNIQUEID, &attributes);
+ret = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_UNIQUEID, &attributes);
 ```
 
 ## 8 测试框架

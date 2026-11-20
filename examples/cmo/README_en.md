@@ -76,7 +76,6 @@ ACLSHMEM_DEVICE void aclshmemx_sdma_qp_quiet(AscendC::LocalTensor<T> &buf,
 - **Function**: Waits for the completion of operation tasks in the STARS queue for synchronization.
 - **Parameter description**:
   - `buf`: address of the temporary Unified Buffer
-  - `ub_size`: Unified Buffer size
   - `qp_idx`: must match the QP used for the corresponding CMO submission
   - `sync_id`: synchronization ID
 - **Characteristics**: An SDMA flag task is delivered, and the flag is polled until the operations in the STARS queue are complete.

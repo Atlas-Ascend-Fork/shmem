@@ -89,17 +89,24 @@ aclFinalize();
 
 自定义日志打印是可选操作，如果未注册自定义日志打印函数，日志则默认打屏，接口示例如下。
 
-```c
+```cpp
+#include "shmem.h"
+
 void cpp_logger_example(int level, const char* msg)
 {
     // do print here
 }
 
-// set self-defined log
-int ret = aclshmemx_set_extern_logger(cpp_logger_example);
+int configure_logging()
+{
+    int ret = aclshmemx_set_extern_logger(cpp_logger_example);
+    if (ret != ACLSHMEM_SUCCESS) {
+        return ret;
+    }
 
-// set log level. 0-debug, 1-info, 2-warn, 3-error
-ret = aclshmemx_set_log_level(level);
+    const int level = 1;  // 0-debug, 1-info, 2-warn, 3-error
+    return aclshmemx_set_log_level(level);
+}
 ```
 
 ### 注册私钥口令解密函数

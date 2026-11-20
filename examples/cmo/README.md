@@ -76,7 +76,6 @@ ACLSHMEM_DEVICE void aclshmemx_sdma_qp_quiet(AscendC::LocalTensor<T> &buf,
 - **功能**：等待STARS队列中的操作任务完成，用于同步
 - **参数说明**：
   - `buf`：临时UB缓冲区地址
-  - `ub_size`：UB缓冲区大小
   - `qp_idx`：必须与对应CMO提交使用的QP一致
   - `sync_id`：同步ID
 - **特点**：通过下发SDMA的Flag任务，并轮询Flag等待STARS队列中的操作完成
