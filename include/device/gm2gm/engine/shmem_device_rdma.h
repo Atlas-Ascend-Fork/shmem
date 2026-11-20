@@ -12,6 +12,8 @@
 #ifndef SHMEM_DEVICE_RDMA_H
 #define SHMEM_DEVICE_RDMA_H
 
+#include <type_traits>
+
 #include "kernel_operator.h"
 #include "device/shmem_def.h"
 #include "gm2gm/engine/shmem_device_rdma.hpp"
@@ -396,6 +398,212 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
  */
 template <typename T>
 ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(__gm__ T* dst, __gm__ T* src, __ubuf__ T* buf, uint32_t elem_size, int pe);
+
+/**
+ * @anchor roce_put_reduce_contract
+ * @par RoCE Put Reduce contract
+ * Supported on Ascend950 with HNS_1825. Unsupported types and backends fail at template instantiation.
+ * - OP selects the elementwise ADD (default), MAX or MIN operation at compile time.
+ *   Each update combines the previous destination value with the corresponding source element.
+ * - T is inferred from the operands: int8_t, int16_t, int32_t, uint32_t, half, float or bfloat16_t.
+ *   Select `<OP, aclshmemx_half_sat_t>` for FP16_SAT. The tag selects an overload that accepts
+ *   half pointers, GlobalTensor<half> and LocalTensor<half> as operands and workspace.
+ * - half defaults to FP16_NORMAL. FP16_SAT clamps finite arithmetic overflow to +/-65504.
+ *   uint32_t MAX/MIN are unsigned; integer overflow and floating-point special values follow NIC rules.
+ * - Both ranges must remain within their symmetric allocations and satisfy the storage type's natural alignment.
+ * - buf may be reused after return; keep src valid and unchanged until the matching quiet completes.
+ * - Initialize dst before submission. Wait for every sender's completion and ensure target cache visibility before use.
+ * - Each (pe, qp_idx) has one local submitter. Overlapping reductions require the same type and operation within
+ *   the NIC's atomic scope; do not mix other writes. An array is not updated as one atomic transaction.
+ * - Queue capacity recovery may wait for prior completions.
+ */
+
+/**
+ * @brief Asynchronously reduce local elements into symmetric destination data on pe.
+ *        Uses QP0 with the configured synchronization ID. See @ref roce_put_reduce_contract.
+ *
+ * @tparam OP               Compile-time operation: ADD (default), MAX or MIN.
+ * @tparam T                Element type inferred from dst, src and buf.
+ * @param dst               [in,out] Local symmetric address of the destination data on pe.
+ * @param src               [in] Symmetric address of the source data on the local PE.
+ * @param buf               [in] Pointer on local UB. Must be at least 128 bytes and 32-byte aligned.
+ * @param elem_size         [in] Positive number of elements. elem_size * sizeof(T) <= INT32_MAX bytes.
+ * @param pe                [in] Remote PE with an initialized RoCE connection; self-PE is not supported.
+ * @note Complete with aclshmemx_roce_quiet(pe, buf, sync_id), using the configured synchronization ID.
+ */
+template <aclshmemx_reduce_op_t OP = ACLSHMEMX_REDUCE_ADD, typename T>
+ACLSHMEM_DEVICE void aclshmemx_roce_put_reduce_nbi(
+    __gm__ T* dst, __gm__ T* src, __ubuf__ T* buf, uint32_t elem_size, int pe);
+
+/**
+ * @brief FP16_SAT overload of aclshmemx_roce_put_reduce_nbi.
+ *        Uses half operands and workspace. See @ref roce_put_reduce_contract.
+ *
+ * @tparam OP               Compile-time operation: ADD, MAX or MIN.
+ * @tparam Tag              Must be aclshmemx_half_sat_t.
+ * @note Buffer, QP and completion requirements are the same as the corresponding typed overload.
+ */
+template <aclshmemx_reduce_op_t OP, typename Tag>
+ACLSHMEM_DEVICE std::enable_if_t<std::is_same_v<Tag, aclshmemx_half_sat_t>> aclshmemx_roce_put_reduce_nbi(
+    __gm__ half* dst, __gm__ half* src, __ubuf__ half* buf, uint32_t elem_size, int pe);
+
+/**
+ * @brief Asynchronously reduce local elements into symmetric destination data on pe.
+ *        Uses QP0. See @ref roce_put_reduce_contract.
+ *
+ * @tparam OP               Compile-time operation: ADD (default), MAX or MIN.
+ * @tparam T                Element type inferred from dst, src and buf.
+ * @param dst               [in,out] Local symmetric address of the destination data on pe.
+ * @param src               [in] Symmetric address of the source data on the local PE.
+ * @param buf               [in] Pointer on local UB. Must be at least 128 bytes and 32-byte aligned.
+ * @param elem_size         [in] Positive number of elements. elem_size * sizeof(T) <= INT32_MAX bytes.
+ * @param pe                [in] Remote PE with an initialized RoCE connection; self-PE is not supported.
+ * @param sync_id           [in] Hardware event ID for MTE3 synchronization and the matching quiet call.
+ * @note Complete with aclshmemx_roce_quiet(pe, buf, sync_id).
+ */
+template <aclshmemx_reduce_op_t OP = ACLSHMEMX_REDUCE_ADD, typename T>
+ACLSHMEM_DEVICE void aclshmemx_roce_put_reduce_nbi(
+    __gm__ T* dst, __gm__ T* src, __ubuf__ T* buf, uint32_t elem_size, int pe, uint32_t sync_id);
+
+/**
+ * @brief FP16_SAT overload of aclshmemx_roce_put_reduce_nbi.
+ *        Uses half operands and workspace. See @ref roce_put_reduce_contract.
+ *
+ * @tparam OP               Compile-time operation: ADD, MAX or MIN.
+ * @tparam Tag              Must be aclshmemx_half_sat_t.
+ * @note Buffer, QP and completion requirements are the same as the corresponding typed overload.
+ */
+template <aclshmemx_reduce_op_t OP, typename Tag>
+ACLSHMEM_DEVICE std::enable_if_t<std::is_same_v<Tag, aclshmemx_half_sat_t>> aclshmemx_roce_put_reduce_nbi(
+    __gm__ half* dst, __gm__ half* src, __ubuf__ half* buf, uint32_t elem_size, int pe, uint32_t sync_id);
+
+/**
+ * @brief Asynchronously reduce local elements into symmetric destination data on pe.
+ *        Uses an explicitly selected QP. See @ref roce_put_reduce_contract.
+ *
+ * @tparam OP               Compile-time operation: ADD (default), MAX or MIN.
+ * @tparam T                Element type inferred from dst, src and buf.
+ * @param dst               [in,out] Local symmetric address of the destination data on pe.
+ * @param src               [in] Symmetric address of the source data on the local PE.
+ * @param buf               [in] Pointer on local UB. Must be at least 128 bytes and 32-byte aligned.
+ * @param elem_size         [in] Positive number of elements. elem_size * sizeof(T) <= INT32_MAX bytes.
+ * @param pe                [in] Remote PE with an initialized RoCE connection; self-PE is not supported.
+ * @param qp_idx            [in] QP index for the target PE. Must be less than the configured RDMA QP count.
+ * @param sync_id           [in] Hardware event ID for MTE3 synchronization and the matching quiet call.
+ * @note Complete with aclshmemx_roce_qp_quiet(pe, qp_idx, buf, sync_id).
+ */
+template <aclshmemx_reduce_op_t OP = ACLSHMEMX_REDUCE_ADD, typename T>
+ACLSHMEM_DEVICE void aclshmemx_roce_qp_put_reduce_nbi(
+    __gm__ T* dst, __gm__ T* src, __ubuf__ T* buf, uint32_t elem_size, int pe, uint32_t qp_idx, uint32_t sync_id);
+
+/**
+ * @brief FP16_SAT overload of aclshmemx_roce_qp_put_reduce_nbi.
+ *        Uses half operands and workspace. See @ref roce_put_reduce_contract.
+ *
+ * @tparam OP               Compile-time operation: ADD, MAX or MIN.
+ * @tparam Tag              Must be aclshmemx_half_sat_t.
+ * @note Buffer, QP and completion requirements are the same as the corresponding typed overload.
+ */
+template <aclshmemx_reduce_op_t OP, typename Tag>
+ACLSHMEM_DEVICE std::enable_if_t<std::is_same_v<Tag, aclshmemx_half_sat_t>> aclshmemx_roce_qp_put_reduce_nbi(
+    __gm__ half* dst, __gm__ half* src, __ubuf__ half* buf, uint32_t elem_size, int pe, uint32_t qp_idx,
+    uint32_t sync_id);
+
+/**
+ * @brief Asynchronously reduce local elements into symmetric destination data on pe.
+ *        Uses QP0 with the configured synchronization ID. See @ref roce_put_reduce_contract.
+ *
+ * @tparam OP               Compile-time operation: ADD (default), MAX or MIN.
+ * @tparam T                Element type inferred from dst, src and buf.
+ * @param dst               [in,out] GlobalTensor at the local symmetric address of the destination data on pe.
+ * @param src               [in] GlobalTensor at the symmetric address of the source data on the local PE.
+ * @param buf               [in] LocalTensor on local UB. At least 128 / sizeof(T) elements and 32-byte aligned.
+ * @param elem_size         [in] Positive number of elements. elem_size * sizeof(T) <= INT32_MAX bytes.
+ * @param pe                [in] Remote PE with an initialized RoCE connection; self-PE is not supported.
+ * @note Complete with aclshmemx_roce_qp_quiet(pe, 0, buf, sync_id), using the configured synchronization ID.
+ */
+template <aclshmemx_reduce_op_t OP = ACLSHMEMX_REDUCE_ADD, typename T>
+ACLSHMEM_DEVICE void aclshmemx_roce_put_reduce_nbi(
+    const AscendC::GlobalTensor<T>& dst, const AscendC::GlobalTensor<T>& src, const AscendC::LocalTensor<T>& buf,
+    uint32_t elem_size, int pe);
+
+/**
+ * @brief FP16_SAT overload of aclshmemx_roce_put_reduce_nbi.
+ *        Uses half operands and workspace. See @ref roce_put_reduce_contract.
+ *
+ * @tparam OP               Compile-time operation: ADD, MAX or MIN.
+ * @tparam Tag              Must be aclshmemx_half_sat_t.
+ * @note Buffer, QP and completion requirements are the same as the corresponding typed overload.
+ */
+template <aclshmemx_reduce_op_t OP, typename Tag>
+ACLSHMEM_DEVICE std::enable_if_t<std::is_same_v<Tag, aclshmemx_half_sat_t>> aclshmemx_roce_put_reduce_nbi(
+    const AscendC::GlobalTensor<half>& dst, const AscendC::GlobalTensor<half>& src,
+    const AscendC::LocalTensor<half>& buf, uint32_t elem_size, int pe);
+
+/**
+ * @brief Asynchronously reduce local elements into symmetric destination data on pe.
+ *        Uses QP0. See @ref roce_put_reduce_contract.
+ *
+ * @tparam OP               Compile-time operation: ADD (default), MAX or MIN.
+ * @tparam T                Element type inferred from dst, src and buf.
+ * @param dst               [in,out] GlobalTensor at the local symmetric address of the destination data on pe.
+ * @param src               [in] GlobalTensor at the symmetric address of the source data on the local PE.
+ * @param buf               [in] LocalTensor on local UB. At least 128 / sizeof(T) elements and 32-byte aligned.
+ * @param elem_size         [in] Positive number of elements. elem_size * sizeof(T) <= INT32_MAX bytes.
+ * @param pe                [in] Remote PE with an initialized RoCE connection; self-PE is not supported.
+ * @param sync_id           [in] Hardware event ID for MTE3 synchronization and the matching quiet call.
+ * @note Complete with aclshmemx_roce_qp_quiet(pe, 0, buf, sync_id).
+ */
+template <aclshmemx_reduce_op_t OP = ACLSHMEMX_REDUCE_ADD, typename T>
+ACLSHMEM_DEVICE void aclshmemx_roce_put_reduce_nbi(
+    const AscendC::GlobalTensor<T>& dst, const AscendC::GlobalTensor<T>& src, const AscendC::LocalTensor<T>& buf,
+    uint32_t elem_size, int pe, uint32_t sync_id);
+
+/**
+ * @brief FP16_SAT overload of aclshmemx_roce_put_reduce_nbi.
+ *        Uses half operands and workspace. See @ref roce_put_reduce_contract.
+ *
+ * @tparam OP               Compile-time operation: ADD, MAX or MIN.
+ * @tparam Tag              Must be aclshmemx_half_sat_t.
+ * @note Buffer, QP and completion requirements are the same as the corresponding typed overload.
+ */
+template <aclshmemx_reduce_op_t OP, typename Tag>
+ACLSHMEM_DEVICE std::enable_if_t<std::is_same_v<Tag, aclshmemx_half_sat_t>> aclshmemx_roce_put_reduce_nbi(
+    const AscendC::GlobalTensor<half>& dst, const AscendC::GlobalTensor<half>& src,
+    const AscendC::LocalTensor<half>& buf, uint32_t elem_size, int pe, uint32_t sync_id);
+
+/**
+ * @brief Asynchronously reduce local elements into symmetric destination data on pe.
+ *        Uses an explicitly selected QP. See @ref roce_put_reduce_contract.
+ *
+ * @tparam OP               Compile-time operation: ADD (default), MAX or MIN.
+ * @tparam T                Element type inferred from dst, src and buf.
+ * @param dst               [in,out] GlobalTensor at the local symmetric address of the destination data on pe.
+ * @param src               [in] GlobalTensor at the symmetric address of the source data on the local PE.
+ * @param buf               [in] LocalTensor on local UB. At least 128 / sizeof(T) elements and 32-byte aligned.
+ * @param elem_size         [in] Positive number of elements. elem_size * sizeof(T) <= INT32_MAX bytes.
+ * @param pe                [in] Remote PE with an initialized RoCE connection; self-PE is not supported.
+ * @param qp_idx            [in] QP index for the target PE. Must be less than the configured RDMA QP count.
+ * @param sync_id           [in] Hardware event ID for MTE3 synchronization and the matching quiet call.
+ * @note Complete with aclshmemx_roce_qp_quiet(pe, qp_idx, buf, sync_id).
+ */
+template <aclshmemx_reduce_op_t OP = ACLSHMEMX_REDUCE_ADD, typename T>
+ACLSHMEM_DEVICE void aclshmemx_roce_qp_put_reduce_nbi(
+    const AscendC::GlobalTensor<T>& dst, const AscendC::GlobalTensor<T>& src, const AscendC::LocalTensor<T>& buf,
+    uint32_t elem_size, int pe, uint32_t qp_idx, uint32_t sync_id);
+
+/**
+ * @brief FP16_SAT overload of aclshmemx_roce_qp_put_reduce_nbi.
+ *        Uses half operands and workspace. See @ref roce_put_reduce_contract.
+ *
+ * @tparam OP               Compile-time operation: ADD, MAX or MIN.
+ * @tparam Tag              Must be aclshmemx_half_sat_t.
+ * @note Buffer, QP and completion requirements are the same as the corresponding typed overload.
+ */
+template <aclshmemx_reduce_op_t OP, typename Tag>
+ACLSHMEM_DEVICE std::enable_if_t<std::is_same_v<Tag, aclshmemx_half_sat_t>> aclshmemx_roce_qp_put_reduce_nbi(
+    const AscendC::GlobalTensor<half>& dst, const AscendC::GlobalTensor<half>& src,
+    const AscendC::LocalTensor<half>& buf, uint32_t elem_size, int pe, uint32_t qp_idx, uint32_t sync_id);
 
 /**
  * @brief Asynchronously copy contiguous data from local device memory to symmetric memory on the specified PE.

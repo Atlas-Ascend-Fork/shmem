@@ -427,7 +427,7 @@ ACLSHMEM_DEVICE __ubuf__ uint8_t* aclshmemi_roce_hns_1825_fill_wqe_ctrl_seg(
 // fields are stored in the byte order consumed by the NIC.
 ACLSHMEM_DEVICE __ubuf__ uint8_t* aclshmemi_roce_hns_1825_fill_wqe_task_seg(
     __ubuf__ uint8_t* wqe_addr, uint32_t rkey, __gm__ uint8_t* remote_addr, uint32_t lkey, uint32_t message_len,
-    aclshmemi_hns_1825_msg_type_t opcode, bool isSubmit)
+    aclshmemi_hns_1825_msg_type_t opcode, bool isSubmit, uint8_t reduce_info = 0)
 {
     __ubuf__ aclshmemi_hns_1825_wqe_rdma_task_seg_t* task =
         (__ubuf__ aclshmemi_hns_1825_wqe_rdma_task_seg_t*)(__ubuf__ void*)wqe_addr;
@@ -448,7 +448,7 @@ ACLSHMEM_DEVICE __ubuf__ uint8_t* aclshmemi_roce_hns_1825_fill_wqe_task_seg(
     }
     task->va = aclshmemi_hns_1825_htobe64((uint64_t)remote_addr);
     task->rkey = aclshmemi_hns_1825_htobe32(rkey);
-    task->ulp = aclshmemi_hns_1825_htobe32(lkey & 0xffffff00U);
+    task->ulp = aclshmemi_hns_1825_htobe32((lkey & 0xffffff00U) | reduce_info);
     return wqe_addr + sizeof(aclshmemi_hns_1825_wqe_rdma_task_seg_t);
 }
 
@@ -488,7 +488,8 @@ ACLSHMEM_DEVICE void aclshmemi_roce_hns_1825_write_invalid_wqebb(uint64_t sq_bas
 // copy the whole WQE to the SQ in one transfer. Returns the WQE size for the caller's cache flush.
 ACLSHMEM_DEVICE uint32_t aclshmemi_roce_hns_1825_fill_wqe_write_read(
     aclshmemi_rdma_send_wr& wr, __gm__ aclshmemi_rdma_sq_ctx*& sq_context, __gm__ uint8_t* wqe_addr, uint32_t cur_head,
-    aclshmemi_hns_1825_msg_type_t opcode, AscendC::LocalTensor<uint32_t>& wqe_ub_local, uint32_t sync_id)
+    aclshmemi_hns_1825_msg_type_t opcode, AscendC::LocalTensor<uint32_t>& wqe_ub_local, uint32_t sync_id,
+    uint8_t reduce_info = 0)
 {
     // This single-SGE WRITE/READ WQE is one 64B WQEBB (ctrl 16B + task 32B + data 16B); other opcodes/tasks
     // may use a different WQE size, so this constant is scoped to WRITE/READ rather than a generic WQE size.
@@ -496,7 +497,7 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_hns_1825_fill_wqe_write_read(
     __ubuf__ uint8_t* wqe_ub_addr = (__ubuf__ uint8_t*)wqe_ub_local.GetPhyAddr();
     wqe_ub_addr = aclshmemi_roce_hns_1825_fill_wqe_ctrl_seg(wqe_ub_addr, cur_head, sq_context->depth, true);
     wqe_ub_addr = aclshmemi_roce_hns_1825_fill_wqe_task_seg(
-        wqe_ub_addr, wr.rkey, wr.remote_addr, wr.lkey, (uint32_t)wr.message_len, opcode, true);
+        wqe_ub_addr, wr.rkey, wr.remote_addr, wr.lkey, (uint32_t)wr.message_len, opcode, true, reduce_info);
     (void)aclshmemi_roce_hns_1825_fill_wqe_data_seg(wqe_ub_addr, wr.lkey, wr.local_addr, (uint32_t)wr.message_len);
     aclshmemi_roce_hns_1825_write_invalid_wqebb(sq_context->buf_addr, sq_context->depth, cur_head + 1);
     aclshmemi_roce_write_ub_to_gm_with_sync(
@@ -617,11 +618,12 @@ ACLSHMEM_DEVICE void aclshmemi_roce_ring_sq_doorbell<aclshmemi_rdma_backend_t::H
  * @param ub_local64 64-bit UB workspace, unused by this backend
  * @param ub_local32 32-bit UB workspace; a 64B WQE view is derived from its base address before WQE staging
  * @param sync_id Hardware synchronization event ID
+ * @param reduce_info Encoded reduction operation/type for WRITE; zero for ordinary READ/WRITE
  */
 template <aclshmemi_rdma_opcode_t OP_CODE>
 ACLSHMEM_DEVICE void aclshmemi_hns_1825_post_send_read_write(
     aclshmemi_rdma_send_wr& wr, uint32_t pe, uint32_t qp_idx, AscendC::LocalTensor<uint64_t>& ub_local64,
-    AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
+    AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id, uint8_t reduce_info = 0)
 {
     constexpr aclshmemi_hns_1825_msg_type_t OPCODE =
         OP_CODE == aclshmemi_rdma_opcode_t::OP_RDMA_READ ?
@@ -674,8 +676,8 @@ ACLSHMEM_DEVICE void aclshmemi_hns_1825_post_send_read_write(
     AscendC::LocalTensor<uint32_t> wqe_ub_local =
         aclshmemi_hns_1825_make_wqe_ub(ub_local32, ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE);
     __gm__ uint8_t* wqe_addr = aclshmemi_roce_hns_1825_get_send_wqe(sq_context, cur_head & (sq_context->depth - 1));
-    uint32_t wqe_total_size =
-        aclshmemi_roce_hns_1825_fill_wqe_write_read(wr, sq_context, wqe_addr, cur_head, OPCODE, wqe_ub_local, sync_id);
+    uint32_t wqe_total_size = aclshmemi_roce_hns_1825_fill_wqe_write_read(
+        wr, sq_context, wqe_addr, cur_head, OPCODE, wqe_ub_local, sync_id, reduce_info);
     dcci_cachelines(wqe_addr, wqe_total_size);
     ACLSHMEM_DEBUG_FUNC(aclshmemi_rdma_dump_sq_wqe, sq_context, cur_head, ACLSHMEMI_HNS_1825_WRITE_READ_WQE_SIZE, 1U);
     cur_head++;
@@ -1000,6 +1002,51 @@ ACLSHMEM_DEVICE void aclshmemi_hns_1825_post_send_atomic(
 
 template <>
 struct aclshmemi_backend_traits<aclshmemi_rdma_backend_t::HNS_1825> {
+    template <typename T>
+    struct reduce_op_traits {
+        static_assert(
+            std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> || std::is_same_v<T, int32_t> ||
+                std::is_same_v<T, uint32_t> || std::is_same_v<T, half> || std::is_same_v<T, float> ||
+                std::is_same_v<T, bfloat16_t> || std::is_same_v<T, aclshmemx_half_sat_t>,
+            "HNS_1825 Put Reduce supports int8, int16, int32, uint32, half, float, bfloat16 and aclshmemx_half_sat_t");
+
+        static ACLSHMEM_DEVICE constexpr uint8_t data_type()
+        {
+            if constexpr (std::is_same_v<T, int8_t>) {
+                return 0x0;
+            } else if constexpr (std::is_same_v<T, int16_t>) {
+                return 0x1;
+            } else if constexpr (std::is_same_v<T, int32_t>) {
+                return 0x2;
+            } else if constexpr (std::is_same_v<T, uint32_t>) {
+                return 0x5;
+            } else if constexpr (std::is_same_v<T, half>) {
+                return 0x6;
+            } else if constexpr (std::is_same_v<T, float>) {
+                return 0x7;
+            } else if constexpr (std::is_same_v<T, bfloat16_t>) {
+                return 0x8;
+            } else {
+                return 0x9; // FP16_SAT
+            }
+        }
+
+        template <aclshmemx_reduce_op_t OP>
+        static ACLSHMEM_DEVICE void post_send(
+            aclshmemi_rdma_send_wr& wr, uint32_t pe, uint32_t qp_idx, AscendC::LocalTensor<uint64_t>& ub_local64,
+            AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
+        {
+            static_assert(
+                OP == ACLSHMEMX_REDUCE_ADD || OP == ACLSHMEMX_REDUCE_MAX || OP == ACLSHMEMX_REDUCE_MIN,
+                "Unsupported RoCE Put Reduce operation");
+            constexpr uint8_t opcode = OP == ACLSHMEMX_REDUCE_ADD ? 0xA : OP == ACLSHMEMX_REDUCE_MAX ? 0x8 : 0x9;
+            // ULP low byte: reduce_opcode[7:4], reduce_data_type[3:0].
+            constexpr uint8_t reduce_info = static_cast<uint8_t>((opcode << 4) | data_type());
+            aclshmemi_hns_1825_post_send_read_write<aclshmemi_rdma_opcode_t::OP_RDMA_WRITE>(
+                wr, pe, qp_idx, ub_local64, ub_local32, sync_id, reduce_info);
+        }
+    };
+
     template <typename T, bool IS_MASKED>
     struct atomic_op_traits {
         template <aclshmemi_rdma_atomic_op_t ATOMIC_OP_CODE>

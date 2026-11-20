@@ -66,6 +66,49 @@ ACLSHMEM_DEVICE void aclshmemi_rdma_debug_assert_qp_params_valid(__gm__ aclshmem
     }
 }
 
+template <typename Element>
+ACLSHMEM_DEVICE void aclshmemi_roce_debug_assert_reduce_params_valid(
+    __gm__ Element* dst, __gm__ Element* src, __ubuf__ Element* buf, uint32_t elem_size, uint32_t pe, uint32_t qp_idx)
+{
+    const uint64_t message_len = static_cast<uint64_t>(elem_size) * sizeof(Element);
+    if (elem_size == 0 || message_len > 0x7fffffffULL || reinterpret_cast<uint64_t>(dst) % sizeof(Element) != 0 ||
+        reinterpret_cast<uint64_t>(src) % sizeof(Element) != 0 ||
+        reinterpret_cast<uint64_t>(buf) % UB_ALIGN_SIZE != 0) {
+        aclshmemi_kernel_abort("Invalid RoCE Put Reduce length or alignment: elem_size=%u\n", elem_size);
+        return;
+    }
+    auto* device_state = aclshmemi_get_state();
+    if (pe >= static_cast<uint32_t>(device_state->npes) || pe == static_cast<uint32_t>(device_state->mype) ||
+        (device_state->topo_list[pe] & ACLSHMEM_TRANSPORT_ROCE) == 0) {
+        aclshmemi_kernel_abort("Invalid RoCE Put Reduce peer: pe=%u\n", pe);
+        return;
+    }
+    auto* rdma_info = aclshmemi_qp_info_fetch();
+    if (rdma_info == nullptr || qp_idx >= rdma_info->qp_num || rdma_info->mem_ptr == 0 || rdma_info->sq_ptr == 0 ||
+        rdma_info->scq_ptr == 0) {
+        aclshmemi_kernel_abort("Invalid RoCE Put Reduce queue: pe=%u qp_idx=%u\n", pe, qp_idx);
+        return;
+    }
+    const uint64_t heap_base = reinterpret_cast<uint64_t>(device_state->heap_base);
+    const uint64_t src_offset = reinterpret_cast<uint64_t>(src) - heap_base;
+    const uint64_t dst_offset = reinterpret_cast<uint64_t>(dst) - heap_base;
+    if (src_offset > device_state->heap_size || message_len > device_state->heap_size - src_offset ||
+        dst_offset > device_state->heap_size || message_len > device_state->heap_size - dst_offset) {
+        aclshmemi_kernel_abort("RoCE Put Reduce range is outside the symmetric heap\n");
+    }
+}
+
+template <typename Element>
+ACLSHMEM_DEVICE void aclshmemi_roce_debug_assert_reduce_tensor_capacity(
+    const AscendC::GlobalTensor<Element>& dst, const AscendC::GlobalTensor<Element>& src,
+    const AscendC::LocalTensor<Element>& buf, uint32_t elem_size)
+{
+    if (static_cast<uint64_t>(buf.GetSize()) * sizeof(Element) < UB_ALIGN_SIZE_64 * 2 ||
+        (dst.GetSize() != 0 && dst.GetSize() < elem_size) || (src.GetSize() != 0 && src.GetSize() < elem_size)) {
+        aclshmemi_kernel_abort("Insufficient RoCE Put Reduce tensor capacity\n");
+    }
+}
+
 ACLSHMEM_DEVICE void aclshmemi_rdma_debug_ensure_sq_capacity(
     __gm__ aclshmemi_rdma_sq_ctx* sq_context, uint32_t pe, uint32_t qp_idx, uint32_t wqe_count)
 {
@@ -135,6 +178,15 @@ ACLSHMEM_DEVICE void aclshmemi_roce_read(
     AscendC::LocalTensor<uint64_t> ub_local64, AscendC::LocalTensor<uint32_t> ub_local32, uint32_t sync_id)
 {
     aclshmemi_roce_read<T, ACLSHMEMI_K_RDMA_BACKEND>(
+        dst, src, pe, qp_idx, message_len, ub_local64, ub_local32, sync_id);
+}
+
+template <typename T, aclshmemx_reduce_op_t OP, typename Element>
+ACLSHMEM_DEVICE void aclshmemi_roce_write_reduce(
+    __gm__ Element* dst, __gm__ Element* src, uint32_t pe, uint32_t qp_idx, uint64_t message_len,
+    AscendC::LocalTensor<uint64_t>& ub_local64, AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
+{
+    aclshmemi_roce_write_reduce<T, ACLSHMEMI_K_RDMA_BACKEND, OP>(
         dst, src, pe, qp_idx, message_len, ub_local64, ub_local32, sync_id);
 }
 
@@ -559,6 +611,127 @@ ACLSHMEM_DEVICE void aclshmemx_roce_get_nbi(
     aclshmemi_roce_commit_rma_wqes<ACLSHMEMI_K_RDMA_BACKEND, aclshmemi_rdma_opcode_t::OP_RDMA_READ>(
         (__gm__ uint8_t*)ptr, (__gm__ uint8_t*)dst.GetPhyAddr(), pe, 0, elem_size * sizeof(T), ub_tensor_64,
         ub_tensor_32, wqes_buf, sync_id, action);
+}
+
+template <aclshmemx_reduce_op_t OP, typename T, typename Element>
+ACLSHMEM_DEVICE void aclshmemi_roce_qp_put_reduce_nbi(
+    __gm__ Element* dst, __gm__ Element* src, __ubuf__ Element* buf, uint32_t elem_size, int pe, uint32_t qp_idx,
+    uint32_t sync_id)
+{
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ != 3510)
+    static_assert(sizeof(Element) == 0, "RoCE Put Reduce requires Ascend950");
+#endif
+    static_assert(
+        !std::is_same_v<Element, aclshmemx_half_sat_t>,
+        "aclshmemx_half_sat_t is a type tag; operands and workspace must use half");
+    ACLSHMEM_DEBUG_FUNC(aclshmemi_roce_debug_assert_reduce_params_valid, dst, src, buf, elem_size, pe, qp_idx);
+    const uint64_t message_len = static_cast<uint64_t>(elem_size) * sizeof(Element);
+    AscendC::LocalTensor<uint32_t> ub_local32;
+    ub_local32.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
+    ub_local32.address_.bufferAddr = reinterpret_cast<uint64_t>(buf);
+    ub_local32.address_.dataLen = UB_ALIGN_SIZE;
+    AscendC::LocalTensor<uint64_t> ub_local64;
+    ub_local64.address_.logicPos = static_cast<uint8_t>(AscendC::TPosition::VECOUT);
+    ub_local64.address_.bufferAddr = reinterpret_cast<uint64_t>(buf) + UB_ALIGN_SIZE;
+    ub_local64.address_.dataLen = UB_ALIGN_SIZE;
+    aclshmemi_roce_write_reduce<T, OP>(dst, src, pe, qp_idx, message_len, ub_local64, ub_local32, sync_id);
+}
+
+template <aclshmemx_reduce_op_t OP, typename T>
+ACLSHMEM_DEVICE void aclshmemx_roce_qp_put_reduce_nbi(
+    __gm__ T* dst, __gm__ T* src, __ubuf__ T* buf, uint32_t elem_size, int pe, uint32_t qp_idx, uint32_t sync_id)
+{
+    aclshmemi_roce_qp_put_reduce_nbi<OP, T>(dst, src, buf, elem_size, pe, qp_idx, sync_id);
+}
+
+template <aclshmemx_reduce_op_t OP, typename Tag>
+ACLSHMEM_DEVICE std::enable_if_t<std::is_same_v<Tag, aclshmemx_half_sat_t>> aclshmemx_roce_qp_put_reduce_nbi(
+    __gm__ half* dst, __gm__ half* src, __ubuf__ half* buf, uint32_t elem_size, int pe, uint32_t qp_idx,
+    uint32_t sync_id)
+{
+    aclshmemi_roce_qp_put_reduce_nbi<OP, Tag>(dst, src, buf, elem_size, pe, qp_idx, sync_id);
+}
+
+template <aclshmemx_reduce_op_t OP, typename T>
+ACLSHMEM_DEVICE void aclshmemx_roce_qp_put_reduce_nbi(
+    const AscendC::GlobalTensor<T>& dst, const AscendC::GlobalTensor<T>& src, const AscendC::LocalTensor<T>& buf,
+    uint32_t elem_size, int pe, uint32_t qp_idx, uint32_t sync_id)
+{
+    ACLSHMEM_DEBUG_FUNC(aclshmemi_roce_debug_assert_reduce_tensor_capacity, dst, src, buf, elem_size);
+    aclshmemx_roce_qp_put_reduce_nbi<OP, T>(
+        const_cast<__gm__ T*>(dst.GetPhyAddr()), const_cast<__gm__ T*>(src.GetPhyAddr()),
+        reinterpret_cast<__ubuf__ T*>(buf.GetPhyAddr()), elem_size, pe, qp_idx, sync_id);
+}
+
+template <aclshmemx_reduce_op_t OP, typename Tag>
+ACLSHMEM_DEVICE std::enable_if_t<std::is_same_v<Tag, aclshmemx_half_sat_t>> aclshmemx_roce_qp_put_reduce_nbi(
+    const AscendC::GlobalTensor<half>& dst, const AscendC::GlobalTensor<half>& src,
+    const AscendC::LocalTensor<half>& buf, uint32_t elem_size, int pe, uint32_t qp_idx, uint32_t sync_id)
+{
+    ACLSHMEM_DEBUG_FUNC(aclshmemi_roce_debug_assert_reduce_tensor_capacity, dst, src, buf, elem_size);
+    aclshmemx_roce_qp_put_reduce_nbi<OP, Tag>(
+        const_cast<__gm__ half*>(dst.GetPhyAddr()), const_cast<__gm__ half*>(src.GetPhyAddr()),
+        reinterpret_cast<__ubuf__ half*>(buf.GetPhyAddr()), elem_size, pe, qp_idx, sync_id);
+}
+
+template <aclshmemx_reduce_op_t OP, typename T>
+ACLSHMEM_DEVICE void aclshmemx_roce_put_reduce_nbi(
+    __gm__ T* dst, __gm__ T* src, __ubuf__ T* buf, uint32_t elem_size, int pe, uint32_t sync_id)
+{
+    aclshmemx_roce_qp_put_reduce_nbi<OP, T>(dst, src, buf, elem_size, pe, 0, sync_id);
+}
+
+template <aclshmemx_reduce_op_t OP, typename Tag>
+ACLSHMEM_DEVICE std::enable_if_t<std::is_same_v<Tag, aclshmemx_half_sat_t>> aclshmemx_roce_put_reduce_nbi(
+    __gm__ half* dst, __gm__ half* src, __ubuf__ half* buf, uint32_t elem_size, int pe, uint32_t sync_id)
+{
+    aclshmemx_roce_qp_put_reduce_nbi<OP, Tag>(dst, src, buf, elem_size, pe, 0, sync_id);
+}
+
+template <aclshmemx_reduce_op_t OP, typename T>
+ACLSHMEM_DEVICE void aclshmemx_roce_put_reduce_nbi(
+    __gm__ T* dst, __gm__ T* src, __ubuf__ T* buf, uint32_t elem_size, int pe)
+{
+    aclshmemx_roce_put_reduce_nbi<OP, T>(dst, src, buf, elem_size, pe, aclshmemi_get_state()->rdma_config.sync_id);
+}
+
+template <aclshmemx_reduce_op_t OP, typename Tag>
+ACLSHMEM_DEVICE std::enable_if_t<std::is_same_v<Tag, aclshmemx_half_sat_t>> aclshmemx_roce_put_reduce_nbi(
+    __gm__ half* dst, __gm__ half* src, __ubuf__ half* buf, uint32_t elem_size, int pe)
+{
+    aclshmemx_roce_put_reduce_nbi<OP, Tag>(dst, src, buf, elem_size, pe, aclshmemi_get_state()->rdma_config.sync_id);
+}
+
+template <aclshmemx_reduce_op_t OP, typename T>
+ACLSHMEM_DEVICE void aclshmemx_roce_put_reduce_nbi(
+    const AscendC::GlobalTensor<T>& dst, const AscendC::GlobalTensor<T>& src, const AscendC::LocalTensor<T>& buf,
+    uint32_t elem_size, int pe, uint32_t sync_id)
+{
+    aclshmemx_roce_qp_put_reduce_nbi<OP, T>(dst, src, buf, elem_size, pe, 0, sync_id);
+}
+
+template <aclshmemx_reduce_op_t OP, typename Tag>
+ACLSHMEM_DEVICE std::enable_if_t<std::is_same_v<Tag, aclshmemx_half_sat_t>> aclshmemx_roce_put_reduce_nbi(
+    const AscendC::GlobalTensor<half>& dst, const AscendC::GlobalTensor<half>& src,
+    const AscendC::LocalTensor<half>& buf, uint32_t elem_size, int pe, uint32_t sync_id)
+{
+    aclshmemx_roce_qp_put_reduce_nbi<OP, Tag>(dst, src, buf, elem_size, pe, 0, sync_id);
+}
+
+template <aclshmemx_reduce_op_t OP, typename T>
+ACLSHMEM_DEVICE void aclshmemx_roce_put_reduce_nbi(
+    const AscendC::GlobalTensor<T>& dst, const AscendC::GlobalTensor<T>& src, const AscendC::LocalTensor<T>& buf,
+    uint32_t elem_size, int pe)
+{
+    aclshmemx_roce_put_reduce_nbi<OP, T>(dst, src, buf, elem_size, pe, aclshmemi_get_state()->rdma_config.sync_id);
+}
+
+template <aclshmemx_reduce_op_t OP, typename Tag>
+ACLSHMEM_DEVICE std::enable_if_t<std::is_same_v<Tag, aclshmemx_half_sat_t>> aclshmemx_roce_put_reduce_nbi(
+    const AscendC::GlobalTensor<half>& dst, const AscendC::GlobalTensor<half>& src,
+    const AscendC::LocalTensor<half>& buf, uint32_t elem_size, int pe)
+{
+    aclshmemx_roce_put_reduce_nbi<OP, Tag>(dst, src, buf, elem_size, pe, aclshmemi_get_state()->rdma_config.sync_id);
 }
 
 template <typename T>

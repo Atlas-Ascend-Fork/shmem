@@ -97,6 +97,11 @@ enum aclshmem_mem_type_t {
 enum aclshmem_signal_op_type_t { ACLSHMEM_SIGNAL_SET, ACLSHMEM_SIGNAL_ADD };
 
 /**
+ * @brief Elementwise reduction operations.
+ */
+enum aclshmemx_reduce_op_t { ACLSHMEMX_REDUCE_ADD = 0, ACLSHMEMX_REDUCE_MAX, ACLSHMEMX_REDUCE_MIN };
+
+/**
  * @brief Signal comparison operations, used by the signalee in peer-to-peer synchronization
  */
 enum aclshmem_cmp_op_type_t {
@@ -460,6 +465,12 @@ typedef struct {
 
 #ifdef __cplusplus
 }
+
+/**
+ * @brief Select FP16_SAT for RoCE Put Reduce; operands and workspace use half storage.
+ * @note Use `<OP, aclshmemx_half_sat_t>`. Finite arithmetic overflow is clamped to +/-65504.
+ */
+struct aclshmemx_half_sat_t {};
 #endif
 
 #endif /* ACLSHMEM_TYPES_H */

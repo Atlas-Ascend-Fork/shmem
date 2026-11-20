@@ -218,6 +218,26 @@ ACLSHMEM_DEVICE void aclshmemi_roce_commit_rma_wqes(
     action.state.pending_count = 0;
 }
 
+/**
+ * @brief Submit a typed array reduction through the selected RoCE backend.
+ * @param message_len Transfer length in bytes.
+ */
+template <typename T, aclshmemi_rdma_backend_t B, aclshmemx_reduce_op_t OP, typename Element>
+ACLSHMEM_DEVICE void aclshmemi_roce_write_reduce(
+    __gm__ Element* dst, __gm__ Element* src, uint32_t pe, uint32_t qp_idx, uint64_t message_len,
+    AscendC::LocalTensor<uint64_t>& ub_local64, AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
+{
+    static_assert(B == aclshmemi_rdma_backend_t::HNS_1825, "RoCE Put Reduce requires the HNS_1825 backend");
+    if constexpr (B == aclshmemi_rdma_backend_t::HNS_1825) {
+        aclshmemi_rdma_send_wr wr = {};
+        wr.remote_addr = reinterpret_cast<__gm__ uint8_t*>(dst);
+        wr.local_addr = reinterpret_cast<__gm__ uint8_t*>(src);
+        wr.message_len = message_len;
+        aclshmemi_backend_traits<B>::template reduce_op_traits<T>::template post_send<OP>(
+            wr, pe, qp_idx, ub_local64, ub_local32, sync_id);
+    }
+}
+
 template <typename T, bool IS_MASKED, aclshmemi_rdma_backend_t B>
 ACLSHMEM_DEVICE T aclshmemi_roce_atomic_fetch_and_add(
     __gm__ T* dst, __gm__ T* src, uint32_t pe, uint32_t qp_idx, uint64_t add_val, uint64_t boundary,
