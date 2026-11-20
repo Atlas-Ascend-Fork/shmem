@@ -181,8 +181,7 @@ Result AclMemSegmentDevice::UnReserveMemorySpace() noexcept
     if (options_.userBufferHeapInput != nullptr) {
         return ReleaseUserBufferHeapResources();
     }
-    FreeMemory();
-    return ACLSHMEM_SUCCESS;
+    return FreeMemory();
 }
 
 Result AclMemSegmentDevice::AllocLocalMemory(uint64_t size, std::shared_ptr<MemSlice>& slice) noexcept
@@ -193,14 +192,15 @@ Result AclMemSegmentDevice::AllocLocalMemory(uint64_t size, std::shared_ptr<MemS
         }
         return BuildUserBufferHeap(slice);
     }
-    if ((size % DEVICE_LARGE_PAGE_SIZE) != 0UL || size + allocatedSize_ > options_.size) {
+    if ((size % DEVICE_LARGE_PAGE_SIZE) != 0UL || allocatedSize_ > options_.size ||
+        size > options_.size - allocatedSize_) {
         SHM_LOG_ERROR(
             "invalid allocate memory size : " << size << ", now used " << allocatedSize_ << " of " << options_.size);
         return ACLSHMEM_INVALID_PARAM;
     }
     // VA is pre-reserved by ReserveMemorySpace and released by UnReserveMemorySpace/FreeMemory.
     // AllocLocalMemory does not own the VA — failure paths must not call aclrtReleaseMemAddress on it.
-    auto localVirtualBase = reservedVirtualAddresses_[options_.rankId];
+    const auto localVirtualAddress = reservedVirtualAddresses_[options_.rankId] + allocatedSize_;
     aclrtPhysicalMemProp prop;
     prop.handleType = ACL_MEM_HANDLE_TYPE_NONE;
     prop.allocationType = ACL_MEM_ALLOCATION_TYPE_PINNED;
@@ -209,7 +209,8 @@ Result AclMemSegmentDevice::AllocLocalMemory(uint64_t size, std::shared_ptr<MemS
     prop.location.type =
         (options_.segType == HYBM_MST_DRAM) ? ACL_MEM_LOCATION_TYPE_HOST_NUMA : ACL_MEM_LOCATION_TYPE_DEVICE;
     prop.reserve = 0;
-    auto ret = aclrtMallocPhysical(&local_handle_, size, &prop, 0);
+    aclrtDrvMemHandle handle = nullptr;
+    auto ret = aclrtMallocPhysical(&handle, size, &prop, 0);
     if (ret != ACLSHMEM_SUCCESS) {
         SHM_LOG_ERROR(
             options_.rankId << " aclrtMallocPhysical memory failed: " << ret << " segType: " << (int)options_.segType);
@@ -217,25 +218,38 @@ Result AclMemSegmentDevice::AllocLocalMemory(uint64_t size, std::shared_ptr<MemS
     }
     SHM_LOG_DEBUG(
         options_.rankId << " aclrtMallocPhysical memory success size: " << size << " vaddr: "
-                        << reinterpret_cast<void*>(localVirtualBase) << " segType: " << (int)options_.segType);
-    ret = aclrtMapMem(reinterpret_cast<void*>(localVirtualBase), size, 0, local_handle_, 0);
+                        << reinterpret_cast<void*>(localVirtualAddress) << " segType: " << (int)options_.segType);
+    ret = aclrtMapMem(reinterpret_cast<void*>(localVirtualAddress), size, 0, handle, 0);
     if (ret != ACLSHMEM_SUCCESS) {
         SHM_LOG_ERROR("aclrtMapMem failed: " << ret);
-        (void)aclrtFreePhysical(local_handle_);
-        local_handle_ = nullptr;
+        (void)aclrtFreePhysical(handle);
         return ACLSHMEM_DL_FUNC_FAILED;
     }
 
     if (SetMemAccess() != ACLSHMEM_SUCCESS) {
-        (void)aclrtUnmapMem(reinterpret_cast<void*>(localVirtualBase));
-        (void)aclrtFreePhysical(local_handle_);
-        local_handle_ = nullptr;
+        (void)aclrtUnmapMem(reinterpret_cast<void*>(localVirtualAddress));
+        (void)aclrtFreePhysical(handle);
         return ACLSHMEM_SMEM_ERROR;
     }
 
-    slice = std::make_shared<MemSlice>(
-        sliceCount_++, MEM_TYPE_DEVICE_HBM, MEM_PT_TYPE_SVM, reinterpret_cast<uint64_t>(localVirtualBase), size);
-    slices_.emplace(slice->index_, slice);
+    try {
+        auto candidate =
+            std::make_shared<MemSlice>(sliceCount_, MEM_TYPE_DEVICE_HBM, MEM_PT_TYPE_SVM, localVirtualAddress, size);
+        auto inserted = slices_.emplace(candidate->index_, MemSliceStatus(candidate, handle));
+        if (!inserted.second) {
+            SHM_LOG_ERROR("duplicate slice index: " << candidate->index_);
+            (void)aclrtUnmapMem(reinterpret_cast<void*>(localVirtualAddress));
+            (void)aclrtFreePhysical(handle);
+            return ACLSHMEM_INNER_ERROR;
+        }
+        slice = std::move(candidate);
+    } catch (const std::bad_alloc&) {
+        (void)aclrtUnmapMem(reinterpret_cast<void*>(localVirtualAddress));
+        (void)aclrtFreePhysical(handle);
+        return ACLSHMEM_MALLOC_FAILED;
+    }
+    ++sliceCount_;
+    allocatedSize_ += size;
     SHM_LOG_DEBUG("allocate slice(idx:" << slice->index_ << ", size:" << slice->size_ << ").");
     return ACLSHMEM_SUCCESS;
 }
@@ -372,9 +386,21 @@ Result AclMemSegmentDevice::ReleaseSliceMemory(const std::shared_ptr<MemSlice>& 
     }
     auto res = aclrtUnmapMem(reinterpret_cast<void*>(slice->vAddress_));
     SHM_LOG_INFO("unmap slice(idx:" << slice->index_ << "), size: " << slice->size_ << " return:" << res);
+    if (res != ACL_SUCCESS) {
+        SHM_LOG_ERROR("aclrtUnmapMem failed for slice(idx:" << slice->index_ << "), ret: " << res);
+        return ACLSHMEM_DL_FUNC_FAILED;
+    }
+
+    auto freeRet = ACL_SUCCESS;
+    if (pos->second.handle != nullptr) {
+        freeRet = aclrtFreePhysical(reinterpret_cast<aclrtDrvMemHandle>(pos->second.handle));
+        if (freeRet != ACL_SUCCESS) {
+            SHM_LOG_ERROR("aclrtFreePhysical failed for slice(idx:" << slice->index_ << "), ret: " << freeRet);
+        }
+    }
 
     slices_.erase(pos);
-    return ACLSHMEM_SUCCESS;
+    return freeRet == ACL_SUCCESS ? ACLSHMEM_SUCCESS : ACLSHMEM_DL_FUNC_FAILED;
 }
 
 Result AclMemSegmentDevice::Export(std::string& exInfo) noexcept
@@ -412,7 +438,12 @@ Result AclMemSegmentDevice::Export(const std::shared_ptr<MemSlice>& slice, std::
 
     HbmExportInfo info{};
     auto handle_type = ACL_MEM_SHARE_HANDLE_TYPE_FABRIC;
-    auto ret = aclrtMemExportToShareableHandleV2(local_handle_, 1, handle_type, &info.shareHandle);
+    if (pos->second.handle == nullptr) {
+        SHM_LOG_ERROR("physical handle for slice(idx:" << slice->index_ << ") is nullptr");
+        return ACLSHMEM_INVALID_PARAM;
+    }
+    auto ret = aclrtMemExportToShareableHandleV2(
+        reinterpret_cast<aclrtDrvMemHandle>(pos->second.handle), 1, handle_type, &info.shareHandle);
     if (ret != 0) {
         SHM_LOG_ERROR("aclrtMemExportToShareableHandleV2 failed, ret: " << ret);
         return ACLSHMEM_INNER_ERROR;
@@ -649,7 +680,7 @@ Result AclMemSegmentDevice::Mmap() noexcept
             continue;
         }
 
-        auto remoteAddress = reservedVirtualAddresses_[im.rankId];
+        auto remoteAddress = reservedVirtualAddresses_[im.rankId] + im.mappingOffset;
         if (mappedMem_.find((uint64_t)remoteAddress) != mappedMem_.end()) {
             SHM_LOG_INFO("remote slice on rank(" << im.rankId << ") has maped: " << (void*)remoteAddress);
             continue;
@@ -965,18 +996,25 @@ Result AclMemSegmentDevice::ReleaseUserBufferHeapResources() noexcept
     return firstError;
 }
 
-void AclMemSegmentDevice::FreeMemory() noexcept
+Result AclMemSegmentDevice::FreeMemory() noexcept
 {
+    Result firstError = ACLSHMEM_SUCCESS;
     while (!slices_.empty()) {
         auto slice = slices_.begin()->second.slice;
-        ReleaseSliceMemory(slice);
+        auto releaseRet = ReleaseSliceMemory(slice);
+        if (releaseRet != ACLSHMEM_SUCCESS) {
+            if (slices_.find(slice->index_) != slices_.end()) {
+                return releaseRet;
+            }
+            firstError = releaseRet;
+        }
     }
 
     if (local_handle_ != nullptr) {
         auto ret = aclrtFreePhysical(local_handle_);
         if (ret != 0) {
             SHM_LOG_ERROR("aclrtFreePhysical failed. ret: " << ret);
-            return;
+            return ACLSHMEM_DL_FUNC_FAILED;
         }
     }
 
@@ -994,6 +1032,7 @@ void AclMemSegmentDevice::FreeMemory() noexcept
         totalVirtualSize_ = 0;
         globalVirtualAddress_ = nullptr;
     }
+    return firstError;
 }
 
 bool AclMemSegmentDevice::CanMapRemote(const HbmExportInfo& rmi) noexcept

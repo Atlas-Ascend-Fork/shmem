@@ -150,7 +150,7 @@ public:
     static void GetDeviceInfo(uint32_t& sdId, uint32_t& serverId, uint32_t& superPodId) noexcept;
 
 protected:
-    void FreeMemory() noexcept;
+    Result FreeMemory() noexcept;
     Result SetMemAccess() noexcept;
     Result FindAvaliableVirtualAddr(uint64_t size, uint64_t& baseVa) noexcept;
     Result ReserveEachPeMemorySpace(size_t reserveAlignedSize, size_t totalReservedSize, uint64_t expectSt) noexcept;
