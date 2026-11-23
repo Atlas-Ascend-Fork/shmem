@@ -31,7 +31,7 @@ bash run.sh -pes ${PES} -type ${TYPES}
 ## NotifyWait Usage Description
 
 ### Example
-![notifywait](../../docs/images/notifywait_en.png)
+![notifywait](../../docs/en/images/notifywait.png)
 ```c++
 //Step 1:
 Kernel 1 on stream 1: Call the explicit-QP SDMA API to transfer data and call aclshmemx_sdma_qp_notify_record.

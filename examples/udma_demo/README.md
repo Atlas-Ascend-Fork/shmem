@@ -11,7 +11,7 @@
 
 0.运行前确认环境已使能UDMA：
 - 单机：执行`npu-smi info -t topo`查看NPU卡间拓扑，卡间连接类型为`UB`即表示支持UDMA：
-![npu-smi info -t topo 输出示例](../../docs/images/udma_demo_env.png)
+![npu-smi info -t topo 输出示例](../../docs/zh/images/udma_demo_env.png)
 - 跨机：server和pod机型支持跨机UDMA通信，运行前需先确认节点间UB链路连通，可使用`hccn_tool`在节点间发起UB ping验证（也可使用CANN自带的hccl_test工具在节点间运行集合通信用例验证连通性，详见[HCCL 性能测试工具](https://www.hiascend.com/document/redirect/CANNCommunityToolHcclTest)）；定制机型需结合具体硬件配置判断是否支持。
   `hccn_tool`随Ascend HDK驱动包安装，位于`<驱动安装路径>/driver/tools/`目录（默认驱动安装路径为`/usr/local/Ascend`）。
   1. 分别在两个节点上执行以下命令，查询本节点NPU的EID（输出中的字段`ipourma`的`IP Address`为可取的`eid`）：

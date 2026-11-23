@@ -264,7 +264,7 @@ package/$(uname -m)/SHMEM_*.run --install-path=/opt/ascend
 
 run 包安装前会检查 CANN 环境变量，并确认当前用户与 CANN 安装目录的所有者一致。`--install-path` 必须使用绝对路径，示例会安装到 `/opt/ascend/shmem`。
 
-`--check` 会输出芯片和设备数量、HDK/CANN 版本、MTE/SDMA/UDMA/RDMA 支持情况及包产物状态。检查项出现 `WARN` 时请根据最终汇总处理；当前命令退出成功不代表所有可选通信能力均满足要求。详细检查项参见 [shmem-config 命令参考](tools/shmem_config_guide.md)。
+`--check` 会输出芯片和设备数量、HDK/CANN 版本、MTE/SDMA/UDMA/RDMA 支持情况及包产物状态。检查项出现 `WARN` 时请根据最终汇总处理；当前命令退出成功不代表所有可选通信能力均满足要求。详细检查项参见 [shmem-config 命令参考](zh/tools/shmem_config_guide.md)。
 
 终端输出 `SHMEM {version} install success, InstallPath: {install_dir}` 后，根据执行用户加载环境变量：
 
@@ -333,7 +333,7 @@ shmem-config --diagnose
 bash tests/package_smoke/run_install_smoke.sh dist/cann_shmem-*.whl
 ```
 
-首次 `import shmem` 自动检查、`--check`、`--diagnose` 及其他参数详见 [shmem-config 命令参考](tools/shmem_config_guide.md)。
+首次 `import shmem` 自动检查、`--check`、`--diagnose` 及其他参数详见 [shmem-config 命令参考](zh/tools/shmem_config_guide.md)。
 
 #### 5.1.4 通用配置（可选）
 
@@ -396,11 +396,11 @@ bash run.sh -pes 2 -type int32_t
    bash scripts/build.sh -soc_type Ascend950 -examples -debug
    ```
 
-注意：此处 `-examples` 参数非必选项，仅提供[使用参考](./debug/Troubleshooting_FAQs.md#shmem-常见问题)。
+注意：此处 `-examples` 参数非必选项，仅提供[使用参考](zh/debug/Troubleshooting_FAQs.md#shmem-常见问题)。
 
 ## 6 Python 侧 test 用例
 
-[Python 接口 API 列表](api/pythonAPI.md)
+[Python 接口 API 列表](zh/api/pythonAPI.md)
 
 1. 按照[安装方式](#51-安装方式)中的“方式三：pip 安装”构建或安装 Python wheel，并完成后端和安装完整性检查。
 

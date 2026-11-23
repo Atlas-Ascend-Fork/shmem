@@ -14,47 +14,55 @@ Welcome to Shmem's Documentation!
     :caption: Using SHMEM
     :name: Using SHMEM
 
-    example/api_demo.md
-    debug/log_debug.md
-    debug/tools_debug.md
-    debug/profiling.md
-    debug/dump_debug.md
-    tools/shmem_config_guide.md
+    zh/example/api_demo.md
+    en/example/api_demo.md
+    zh/debug/log_debug.md
+    en/debug/log_debug.md
+    zh/debug/tools_debug.md
+    en/debug/tools_debug.md
+    zh/debug/profiling.md
+    en/debug/profiling.md
+    zh/debug/dump_debug.md
+    en/debug/dump_debug.md
+    zh/tools/shmem_config_guide.md
 
 .. toctree::
     :maxdepth: 2
     :caption: API
     :name: API
 
-    api/def.rst
-    api/host_api.rst
-    api/device_api.rst
-    api/pythonAPI.md
-    api/env_vars_intro.md
+    zh/api/def.rst
+    zh/api/host_api.rst
+    zh/api/device_api.rst
+    zh/api/pythonAPI.md
+    en/api/pythonAPI.md
+    zh/api/env_vars_intro.md
+    en/api/env_vars_intro.md
 
 .. toctree::
     :maxdepth: 2
     :caption: Example
     :name: Example
 
-    example/example.md
+    zh/example/example.md
+    en/example/example.md
 
 .. toctree::
     :maxdepth: 2
     :caption: Multi_Instance
     :name: Multi_Instance
 
-    principles/multi_instance.md
-    principles/multi_instance_en.md
+    zh/principles/multi_instance.md
+    en/principles/multi_instance.md
 
 .. toctree::
     :maxdepth: 2
     :caption: Architecture
     :name: Architecture
 
-    principles/init_finalize.md
-    principles/config_store_bootstrap.md
-    principles/team.md
+    zh/principles/init_finalize.md
+    zh/principles/config_store_bootstrap.md
+    zh/principles/team.md
     code_organization.md
 
 .. toctree::
@@ -62,7 +70,8 @@ Welcome to Shmem's Documentation!
     :caption: Troubleshooting And FAQs
     :name: Troubleshooting And FAQs
 
-    debug/Troubleshooting_FAQs.md
+    zh/debug/Troubleshooting_FAQs.md
+    en/debug/Troubleshooting_FAQs.md
 
 .. toctree::
     :maxdepth: 2

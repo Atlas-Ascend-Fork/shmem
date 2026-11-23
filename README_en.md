@@ -78,7 +78,7 @@ By default, the build reuses the CMake cache and compiled objects in the reposit
 
 > For complete installation steps (including CANN environment preparation, dependency descriptions, Docker containers, build execution, and local verification), see the [Quick Start document](docs/quickstart_en.md).
 
-After installing the Python wheel, you can use the [shmem-config command reference](docs/tools/shmem_config_guide.md) to query backends and installation paths, and run environment checks and diagnostics.
+After installing the Python wheel, you can use the [shmem-config command reference](docs/zh/tools/shmem_config_guide.md) to query backends and installation paths, and run environment checks and diagnostics.
 
 For abbreviations and terms used in the documentation and APIs, see the [Glossary](docs/glossary.md).
 
@@ -90,7 +90,7 @@ SHMEM is a multi-server, multi-device memory communication library designed for 
 - For more information, see [SHMEM](https://shmem-doc.pages.dev/).
 
 ## 2. Core Functions
-![Core Functions](docs/images/readme_features_en.png)
+![Core Functions](docs/en/images/readme_features.png)
 
 **1. Dual-side API system**
 
@@ -119,7 +119,7 @@ The API design follows the Ascend operator development paradigm and supports hos
 
 The following figure shows the full-link communication paths supported by SHMEM (using Ascend 910A3 as an example), covering different transmission engines on the host and device sides:
 
-<img src="docs/images/dma_en.png" width="800"/>
+<img src="docs/en/images/dma.png" width="800"/>
 
 As shown in the figure, SHMEM supports diverse communication engines and paths:
 
@@ -205,7 +205,7 @@ A: Ensure that the CANN toolkit has been installed and `source /usr/local/Ascend
 
 **Q2: What do I do if "inter-device communication timeout" is reported when running an example?**
 
-A: Check whether the RDMA NIC is available, whether the network between nodes is connected, whether the firewall allows the initialization communication port (8666 by default), whether the lossless network configuration on the switch is correct, and whether the clocks of all nodes are synchronized. The RDMA link setup listening port is automatically assigned by the system and does not need to be configured manually. For RDMA port usage rules, see [Troubleshooting](docs/debug/Troubleshooting_FAQs_en.md).
+A: Check whether the RDMA NIC is available, whether the network between nodes is connected, whether the firewall allows the initialization communication port (8666 by default), whether the lossless network configuration on the switch is correct, and whether the clocks of all nodes are synchronized. The RDMA link setup listening port is automatically assigned by the system and does not need to be configured manually. For RDMA port usage rules, see [Troubleshooting](docs/en/debug/Troubleshooting_FAQs.md).
 
 **Q3: What do I do if "module not found" is reported when importing shmem in Python?**
 
@@ -231,7 +231,7 @@ A: This repository currently does not maintain a standalone Dockerfile. You are 
 
 A: Dependency checks and build verification can be performed, but `scripts/run.sh` and `scripts/run_examples.sh` require available NPUs, drivers, and the CANN runtime. Running results must be verified in a hardware environment or in project CI.
 
-> For more troubleshooting information, see [Troubleshooting](docs/debug/Troubleshooting_FAQs_en.md).
+> For more troubleshooting information, see [Troubleshooting](docs/en/debug/Troubleshooting_FAQs.md).
 
 ## 6. Contributions
 ### Contributors

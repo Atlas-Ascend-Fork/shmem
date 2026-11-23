@@ -11,7 +11,7 @@ Instructions:
 
 0. Before running, confirm that UDMA is enabled in the environment:
 - Single server: run `npu-smi info -t topo` to check the inter-NPU topology. If the connection type between NPUs is `UB`, UDMA is supported:
-![Example output of npu-smi info -t topo](../../docs/images/udma_demo_env.png)
+![Example output of npu-smi info -t topo](../../docs/en/images/udma_demo_env.png)
 - Cross-server: server and pod models support cross-server UDMA communication. Before running, confirm that the UB links between nodes are connected. You can use `hccn_tool` to send a UB ping between the nodes (or use the hccl_test tool shipped with CANN to run collective communication test cases across nodes, see [HCCL performance test tool](https://www.hiascend.com/document/redirect/CANNCommunityToolHcclTest)). For customized models, determine whether UDMA is supported based on the specific hardware configuration.
   `hccn_tool` is installed with the Ascend HDK driver package and is located in the `<driver installation path>/driver/tools/` directory (the default driver installation path is `/usr/local/Ascend`).
   1. Run the following command on each of the two nodes to query the EID of the local NPU (the `IP Address` in the `ipourma` field of the output is the available `eid`):

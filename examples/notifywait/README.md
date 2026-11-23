@@ -41,7 +41,7 @@ SDMA功能需要CANN 9.0.0-beta.2及以上版本支持。请参考[CANN版本说
 
 ### 用法示例
 
-![notifywait](../../docs/images/notifywait.png)
+![notifywait](../../docs/zh/images/notifywait.png)
 
 ```c++
 // 步骤1：

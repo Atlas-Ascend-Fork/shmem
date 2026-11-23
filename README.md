@@ -77,7 +77,7 @@ source install/set_env.sh
 
 > 完整安装步骤（含 CANN 环境准备、依赖说明、Docker 容器、编译执行和本地验证等）详见 [快速入门文档](docs/quickstart.md)。
 
-安装 Python wheel 后，可通过 [shmem-config 命令参考](docs/tools/shmem_config_guide.md)查询后端和安装路径，执行环境检查及问题诊断。
+安装 Python wheel 后，可通过 [shmem-config 命令参考](docs/zh/tools/shmem_config_guide.md)查询后端和安装路径，执行环境检查及问题诊断。
 
 若您需要了解文档和接口中出现的缩写与名词，请参考[术语表](docs/glossary.md)。
 
@@ -92,7 +92,7 @@ SHMEM 是面向昇腾平台的多机多卡内存通信库，通过封装 Host �
 
 ## 二、核心功能
 
-![核心功能](docs/images/readme_features.png)
+![核心功能](docs/zh/images/readme_features.png)
 
 **1. 双侧接口体系**
 
@@ -121,7 +121,7 @@ SHMEM 是面向昇腾平台的多机多卡内存通信库，通过封装 Host �
 
 下图展示了 SHMEM 支持的全链路通信通路（以910A3为例），覆盖 Host 侧与 Device 侧的不同传输引擎：
 
-<img src="docs/images/dma.png" width="800"/>
+<img src="docs/zh/images/dma.png" width="800"/>
 
 如图所示，SHMEM 支持多种通信引擎和通路：
 
@@ -207,7 +207,7 @@ A：确认已安装 CANN toolkit，并已执行 `source /usr/local/Ascend/ascend
 
 **Q2：运行示例时报「卡间通信超时」？**
 
-A：检查 RDMA 网卡是否可用、节点间网络是否连通、防火墙是否放行初始化通信端口（默认 8666）、交换机无损网络配置是否正确，以及各节点时钟是否同步。RDMA 建链监听端口由系统自动分配，无需手工配置，RDMA 端口使用规则见 [Troubleshooting - RDMA 端口管理规则](docs/debug/Troubleshooting_FAQs.md#rdma-端口管理规则)。
+A：检查 RDMA 网卡是否可用、节点间网络是否连通、防火墙是否放行初始化通信端口（默认 8666）、交换机无损网络配置是否正确，以及各节点时钟是否同步。RDMA 建链监听端口由系统自动分配，无需手工配置，RDMA 端口使用规则见 [Troubleshooting - RDMA 端口管理规则](docs/zh/debug/Troubleshooting_FAQs.md#rdma-端口管理规则)。
 
 **Q3：Python 导入 shmem 时报「找不到模块」？**
 
@@ -233,7 +233,7 @@ A：本仓当前不维护独立 Dockerfile。建议根据芯片、系统架构�
 
 A：可以做依赖检查和编译验证，但 `scripts/run.sh`、`scripts/run_examples.sh` 需要可用 NPU、驱动和 CANN 运行时，运行结果需在硬件环境或项目 CI 中验证。
 
-> 更多故障排查见：[Troubleshooting](docs/debug/Troubleshooting_FAQs.md)
+> 更多故障排查见：[Troubleshooting](docs/zh/debug/Troubleshooting_FAQs.md)
 
 ## 六、贡献
 

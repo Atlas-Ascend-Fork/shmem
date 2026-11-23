@@ -155,7 +155,7 @@ shmem-config --check
 shmem-config --diagnose
 ```
 
-Expect backend `910` on A2/A3 and `950` on Ascend 950. In the diagnostic JSON, `native_load.ok` and `backend_artifacts.complete` should be true, while `degraded` and `multi_so_conflict.detected` should be false. For a source-built wheel, run `bash tests/package_smoke/run_install_smoke.sh dist/cann_shmem-*.whl` for the full installation smoke test. See the [shmem-config command reference](tools/shmem_config_guide.md) for the report fields.
+Expect backend `910` on A2/A3 and `950` on Ascend 950. In the diagnostic JSON, `native_load.ok` and `backend_artifacts.complete` should be true, while `degraded` and `multi_so_conflict.detected` should be false. For a source-built wheel, run `bash tests/package_smoke/run_install_smoke.sh dist/cann_shmem-*.whl` for the full installation smoke test. See the [shmem-config command reference](zh/tools/shmem_config_guide.md) for the report fields.
 
 ### Run an example
 
@@ -166,7 +166,7 @@ cd examples/allgather
 bash run.sh -pes 2 -type int32_t
 ```
 
-The [allgather README](../examples/allgather/README_en.md) describes the data type, address, port, and local device and PE options. For a debug build, add `-debug` to the build command. See the [troubleshooting guide](debug/Troubleshooting_FAQs_en.md).
+The [allgather README](../examples/allgather/README_en.md) describes the data type, address, port, and local device and PE options. For a debug build, add `-debug` to the build command. See the [troubleshooting guide](en/debug/Troubleshooting_FAQs.md).
 
 ## Function self-test case
 
@@ -190,7 +190,7 @@ After [installing and checking the wheel](#python-installation), run the supplie
 torchrun --nproc-per-node=2 examples/python_extension/test/init_test.py
 ```
 
-The test prints `init_test.py running success!` on success. For custom tests, see the [Python API list](api/pythonAPI_en.md) and [additional test cases](../examples/python_extension/test/).
+The test prints `init_test.py running success!` on success. For custom tests, see the [Python API list](en/api/pythonAPI.md) and [additional test cases](../examples/python_extension/test/).
 
 ## Unique ID Initialization Method
 
