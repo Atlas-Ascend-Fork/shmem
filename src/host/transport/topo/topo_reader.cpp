@@ -190,6 +190,19 @@ const nlohmann::json* GetRequiredArray(
 
 } // namespace
 
+EndpointResourceKey TopoReader::MakeEndpointResourceKey(const RankAddr& rankAddr, TopoFabric fabric)
+{
+    EndpointResourceKey identity;
+    identity.addrType = rankAddr.addrType;
+    identity.eid = rankAddr.eidData;
+    identity.fabric = fabric;
+    identity.planeId = rankAddr.planeId;
+    identity.ports = rankAddr.ports;
+    std::sort(identity.ports.begin(), identity.ports.end());
+    identity.ports.erase(std::unique(identity.ports.begin(), identity.ports.end()), identity.ports.end());
+    return identity;
+}
+
 bool TopoReader::LoadRootInfoJson(uint32_t phyId, nlohmann::json& out, int family)
 {
     bool shouldFallback = false;

@@ -18,6 +18,7 @@
 #include <map>
 #include <memory>
 #include <ostream>
+#include <tuple>
 #include <unordered_map>
 #include <string>
 #include <vector>
@@ -69,6 +70,22 @@ struct RootInfo {
     std::map<EidIndex, std::shared_ptr<RankAddr>> eidIndexToRankAddr{};
     std::map<EidPort, std::shared_ptr<RankAddr>> portsToRankAddr{};
 };
+
+// Local identity of an interchangeable endpoint resource. Routing metadata such as netLayer and
+// netInstanceId is intentionally omitted: it selects a route, not the underlying HCOMM resource.
+struct EndpointResourceKey {
+    RankAddrType addrType{RankAddrType::EID};
+    EidData eid{};
+    TopoFabric fabric{TopoFabric::Unknown};
+    std::string planeId{};
+    std::vector<EidPort> ports{};
+};
+
+inline bool operator<(const EndpointResourceKey& lhs, const EndpointResourceKey& rhs)
+{
+    return std::tie(lhs.addrType, lhs.eid, lhs.fabric, lhs.planeId, lhs.ports) <
+           std::tie(rhs.addrType, rhs.eid, rhs.fabric, rhs.planeId, rhs.ports);
+}
 
 struct MeshTopoEdge {
     uint32_t localA{};
@@ -187,6 +204,7 @@ public:
     static constexpr const char* ROOTINFO_PATH = "/etc/hccl_rootinfo.json";
     static bool ParseRootInfo(uint32_t phyId, RootInfo& out);
     static bool ParseTopoInfo(const std::string& path, TopoInfo& out);
+    static EndpointResourceKey MakeEndpointResourceKey(const RankAddr& rankAddr, TopoFabric fabric);
     static bool GetLocalId(const RootInfo& root, uint32_t deviceId, uint32_t& localId);
 
     static bool GetEidCount(const RootInfo& root, uint32_t& count);

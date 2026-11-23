@@ -381,6 +381,7 @@ Result UdmaTransportManager::OpenDevice(const TransportOptions& options)
     net_layer_policy_ = options.udmaQpConfig.netLayerPolicy;
     multi_link_enabled_ = options.udmaQpConfig.multiLinkEnabled;
     peer_routes_.clear();
+    local_endpoint_groups_.clear();
     all_local_routes_.clear();
     const Result prepare_result = PrepareOpenDevice(device_id, rank_count_);
     if (prepare_result != ACLSHMEM_SUCCESS) {
@@ -935,7 +936,7 @@ Result UdmaTransportManager::BindQueueStateAddr(
 void UdmaTransportManager::AppendRouteEndpointKeys(const PeerRouteInfo& routes, std::vector<EndpointKey>& keys) const
 {
     const auto add_key = [&keys, this](uint32_t local_eid_index, uint32_t qp_idx) {
-        const EndpointKey key{local_eid_index, EndpointQpSlot(qp_idx)};
+        const EndpointKey key = ResolveLocalEndpointKey(local_eid_index, qp_idx);
         if (std::find(keys.begin(), keys.end(), key) == keys.end()) {
             keys.push_back(key);
         }
@@ -1318,8 +1319,9 @@ Result UdmaTransportManager::GatherEndpointChunks(
 Result UdmaTransportManager::ExchangeEndpointDescriptors(EndpointExchange& exchange) const
 {
     // Saturate instead of truncating so every rank rejects an unrepresentable count below.
+    const auto published_descs = BuildPublishedEndpointDescs();
     const uint32_t local_endpoint_count = static_cast<uint32_t>(
-        std::min(endpoint_desc_map_.size(), static_cast<size_t>(std::numeric_limits<uint32_t>::max())));
+        std::min(published_descs.size(), static_cast<size_t>(std::numeric_limits<uint32_t>::max())));
     exchange.counts.assign(rank_count_, 0);
     auto ret = g_boot_handle.allgather(&local_endpoint_count, exchange.counts.data(), sizeof(uint32_t), &g_boot_handle);
     if (ret != ACLSHMEM_SUCCESS) {
@@ -1344,20 +1346,23 @@ Result UdmaTransportManager::ExchangeEndpointDescriptors(EndpointExchange& excha
     // Pack this rank's descriptors into the first slots; the rest stay zero (valid == 0).
     std::vector<ExchangedEndpointDesc> local_endpoints(exchange.max_count);
     uint32_t packed_index = 0;
-    for (const auto& endpoint_entry : endpoint_desc_map_) {
-        auto port_it = endpoint_listen_port_map_.find(endpoint_entry.first);
-        if (port_it == endpoint_listen_port_map_.end() || port_it->second == 0) {
+    for (const auto& published_endpoint : published_descs) {
+        const auto& logical_key = published_endpoint.logical;
+        const auto& resource_key = published_endpoint.resource;
+        auto desc_it = endpoint_desc_map_.find(resource_key);
+        auto port_it = endpoint_listen_port_map_.find(resource_key);
+        if (desc_it == endpoint_desc_map_.end() || port_it == endpoint_listen_port_map_.end() || port_it->second == 0) {
             SHM_LOG_ERROR(
-                "No valid listen port for local Hcomm endpoint on EID index "
-                << endpoint_entry.first.eid_index << ", qpSlot = " << endpoint_entry.first.qp_slot);
+                "No valid local Hcomm endpoint descriptor for EID index " << logical_key.eid_index
+                                                                          << ", qpSlot = " << logical_key.qp_slot);
             return ACLSHMEM_INNER_ERROR;
         }
         ExchangedEndpointDesc& packed = local_endpoints[packed_index];
-        packed.eid_index = endpoint_entry.first.eid_index;
-        packed.qp_slot = endpoint_entry.first.qp_slot;
+        packed.eid_index = logical_key.eid_index;
+        packed.qp_slot = logical_key.qp_slot;
         packed.valid = 1;
         packed.listen_port = port_it->second;
-        packed.desc = endpoint_entry.second;
+        packed.desc = desc_it->second;
         ++packed_index;
     }
 
@@ -1367,6 +1372,41 @@ Result UdmaTransportManager::ExchangeEndpointDescriptors(EndpointExchange& excha
         return ret;
     }
     return ACLSHMEM_SUCCESS;
+}
+
+std::vector<UdmaTransportManager::PublishedEndpoint> UdmaTransportManager::BuildPublishedEndpointDescs() const
+{
+    std::map<EidIndex, size_t> endpoint_count_by_eid;
+    for (const auto& resource_entry : endpoint_desc_map_) {
+        ++endpoint_count_by_eid[resource_entry.first.eid_index];
+    }
+
+    size_t published_count = 0;
+    for (const auto& [logical_eid, representative_eid] : local_endpoint_groups_) {
+        const auto count_it = endpoint_count_by_eid.find(representative_eid);
+        published_count += count_it == endpoint_count_by_eid.end() ? 0U : count_it->second;
+    }
+    for (const auto& resource_entry : endpoint_desc_map_) {
+        if (local_endpoint_groups_.find(resource_entry.first.eid_index) == local_endpoint_groups_.end()) {
+            ++published_count;
+        }
+    }
+
+    std::vector<PublishedEndpoint> published_descs;
+    published_descs.reserve(published_count);
+    for (const auto& [logical_eid, representative_eid] : local_endpoint_groups_) {
+        auto resource_it = endpoint_desc_map_.lower_bound(EndpointKey{representative_eid, 0U});
+        for (; resource_it != endpoint_desc_map_.end() && resource_it->first.eid_index == representative_eid;
+             ++resource_it) {
+            published_descs.push_back({EndpointKey{logical_eid, resource_it->first.qp_slot}, resource_it->first});
+        }
+    }
+    for (const auto& resource_entry : endpoint_desc_map_) {
+        if (local_endpoint_groups_.find(resource_entry.first.eid_index) == local_endpoint_groups_.end()) {
+            published_descs.push_back({resource_entry.first, resource_entry.first});
+        }
+    }
+    return published_descs;
 }
 
 const UdmaTransportManager::ExchangedEndpointDesc* UdmaTransportManager::FindRemoteEndpointDesc(
@@ -1389,7 +1429,7 @@ Result UdmaTransportManager::CreateChannelsForSlot(
 {
     // Endpoint keys for this batch; all current callers pass channel_num == 1, so the qp
     // dimension is the channel's qp_idx.
-    const EndpointKey local_endpoint_key{local_eid_index, EndpointQpSlot(first_qp_idx)};
+    const EndpointKey local_endpoint_key = ResolveLocalEndpointKey(local_eid_index, first_qp_idx);
     const EndpointKey remote_endpoint_key{remote_eid_index, EndpointQpSlot(first_qp_idx)};
     auto endpoint_it = endpoint_handle_map_.find(local_endpoint_key);
     if (endpoint_it == endpoint_handle_map_.end() || endpoint_it->second == nullptr) {
@@ -1844,6 +1884,44 @@ bool UdmaTransportManager::BuildSyncEndpoints(
     return true;
 }
 
+void UdmaTransportManager::BuildLocalEndpointGroups(const RootInfo& root_info, const TopoInfo& topo_info)
+{
+    local_endpoint_groups_.clear();
+    if (!CanShareEquivalentEndpoints()) {
+        return;
+    }
+
+    std::map<EndpointResourceKey, EidIndex> representatives;
+    for (const auto& [eid_index, rank_addr] : root_info.eidIndexToRankAddr) {
+        if (rank_addr == nullptr || rank_addr->levelInfo == nullptr) {
+            continue;
+        }
+        const TopoFabric fabric = ResolveEndpointFabric(rank_addr->levelInfo->netType, topo_info, rank_addr->ports);
+        const EndpointResourceKey identity = TopoReader::MakeEndpointResourceKey(*rank_addr, fabric);
+        const EidIndex representative = representatives.emplace(identity, eid_index).first->second;
+        local_endpoint_groups_.emplace(eid_index, representative);
+    }
+    for (const auto& [eid_index, representative] : local_endpoint_groups_) {
+        if (eid_index != representative) {
+            SHM_LOG_INFO(
+                "Share UDMA endpoint resource: eidIndex=" << eid_index
+                                                          << ", representativeEidIndex=" << representative);
+        }
+    }
+}
+
+UdmaTransportManager::EndpointKey UdmaTransportManager::ResolveLocalEndpointKey(
+    uint32_t eid_index, uint32_t qp_idx) const
+{
+    if (CanShareEquivalentEndpoints()) {
+        const auto group_it = local_endpoint_groups_.find(eid_index);
+        if (group_it != local_endpoint_groups_.end()) {
+            eid_index = group_it->second;
+        }
+    }
+    return {eid_index, EndpointQpSlot(qp_idx)};
+}
+
 Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank_count)
 {
     RootInfo root_info;
@@ -1894,6 +1972,7 @@ Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank
     g_boot_handle.allgather(&local_id, local_id_list.data(), sizeof(uint32_t), &g_boot_handle);
 
     std::vector<std::vector<SyncEndpoint>> rank_idx_to_sync_endpoint;
+    BuildLocalEndpointGroups(root_info, topo_info);
     if (!BuildSyncEndpoints(root_info, topo_info, rank_count, rank_idx_to_sync_endpoint)) {
         SHM_LOG_ERROR("Failed to gather sync endpoints across ranks.");
         return ACLSHMEM_INNER_ERROR;
@@ -1955,7 +2034,7 @@ Result UdmaTransportManager::PrepareOpenDevice(uint32_t device_id, uint32_t rank
                 route.localEidIndex, route.remoteEidIndex, route.netType, route.netLayer, route.netInstanceId,
                 route.planeId, route.portCount});
             // route_idx maps 1:1 to qp_idx on the direct build (route_count == qp_num_).
-            const EndpointKey key{route.localEidIndex, EndpointQpSlot(route_idx)};
+            const EndpointKey key = ResolveLocalEndpointKey(route.localEidIndex, route_idx);
             if (!CreateEndpoint(key, route.localEidRaw)) {
                 SHM_LOG_ERROR(
                     "CreateEndpoint failed for peer " << peer << " route_idx " << route_idx << " with EID index "
@@ -2267,6 +2346,7 @@ void UdmaTransportManager::CleanupResources()
     }
     endpoint_handle_map_.clear();
     peer_routes_.clear();
+    local_endpoint_groups_.clear();
     endpoint_desc_map_.clear();
     endpoint_listen_port_map_.clear();
     channel_handles_.clear();

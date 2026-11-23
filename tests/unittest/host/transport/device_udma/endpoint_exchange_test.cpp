@@ -12,6 +12,12 @@
 
 #include <cstring>
 #include <limits>
+#include <map>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include <gmock/gmock.h>
 
 // Test-only access override scoped strictly to the two under-api headers, so this fixture can
 // replace their dynamically loaded entry points with local recorders. Pre-include the transitive
@@ -304,11 +310,37 @@ protected:
         return manager.endpoint_desc_map_.size();
     }
 
+    static uint32_t PublishedEndpointCount(const UdmaTransportManager& manager)
+    {
+        return static_cast<uint32_t>(manager.BuildPublishedEndpointDescs().size());
+    }
+
     static void ConfigureManager(UdmaTransportManager& manager, uint32_t rank, uint32_t ranks, uint32_t qp_num)
     {
         manager.rank_id_ = rank;
         manager.rank_count_ = ranks;
         manager.qp_num_ = qp_num;
+    }
+
+    static void EnableSharedJetty(UdmaTransportManager& manager) { manager.shared_jetty_enabled_ = true; }
+
+    static void SetLocalEndpointGroups(UdmaTransportManager& manager, std::map<EidIndex, EidIndex> groups)
+    {
+        manager.local_endpoint_groups_ = std::move(groups);
+    }
+
+    static void BuildEndpointGroupsForTest(
+        UdmaTransportManager& manager, const RootInfo& root_info, const TopoInfo& topo_info)
+    {
+        manager.BuildLocalEndpointGroups(root_info, topo_info);
+    }
+
+    static std::pair<uint32_t, uint32_t> ResolveResourceKey(
+        UdmaTransportManager& manager, uint32_t eid, uint32_t peer, uint32_t qp)
+    {
+        (void)peer;
+        const auto key = manager.ResolveLocalEndpointKey(eid, qp);
+        return {key.eid_index, key.qp_slot};
     }
 
     static void AddRoute(
@@ -352,6 +384,36 @@ protected:
         return manager.BuildSyncEndpoints(root_info, topo_info, rank_count, endpoints);
     }
 
+    static Result ExchangeDescriptors(UdmaTransportManager& manager, Exchange& exchange)
+    {
+        return manager.ExchangeEndpointDescriptors(exchange);
+    }
+
+    static int GatherEndpointPair(const void* send, void* recv, int len, aclshmemi_bootstrap_handle_t* handle)
+    {
+        MirrorAllGather(send, recv, len, handle);
+        lengths_.push_back(len);
+        if (lengths_.size() == 1) {
+            // The first allgather exchanges one uint32_t length per rank.
+            if (static_cast<size_t>(len) != sizeof(uint32_t) || handle->npes < 2) {
+                ADD_FAILURE() << "Unexpected endpoint-length allgather layout: len=" << len
+                              << ", expectedLen=" << sizeof(uint32_t) << ", npes=" << handle->npes;
+                return ACLSHMEM_BOOTSTRAP_ERROR;
+            }
+            auto* exchanged_lengths = static_cast<uint32_t*>(recv);
+            exchanged_lengths[1] = static_cast<uint32_t>(peer_endpoint_blob_.size());
+        } else {
+            // The second allgather reserves len bytes per rank; rank 1 carries the peer blob.
+            if (static_cast<size_t>(len) < peer_endpoint_blob_.size()) {
+                ADD_FAILURE() << "Endpoint blob does not fit in one rank slot: len=" << len
+                              << ", blobSize=" << peer_endpoint_blob_.size();
+                return ACLSHMEM_BOOTSTRAP_ERROR;
+            }
+            std::memcpy(static_cast<uint8_t*>(recv) + len, peer_endpoint_blob_.data(), peer_endpoint_blob_.size());
+        }
+        return ACLSHMEM_SUCCESS;
+    }
+
     aclshmemi_bootstrap_handle_t saved_handle_{};
     HcommMemRegFunc saved_mem_reg_{nullptr};
     HcommMemUnregFunc saved_mem_unreg_{nullptr};
@@ -374,6 +436,7 @@ protected:
     inline static std::vector<EndpointHandle> channel_create_with_config_endpoints_;
     inline static size_t legacy_channel_create_calls_{0};
     inline static uintptr_t next_handle_{1000};
+    inline static std::vector<uint8_t> peer_endpoint_blob_;
 };
 
 TEST_F(UdmaEndpointExchangeTest, AcceptsBoundaryAndRejectsNextEndpoint)
@@ -413,6 +476,227 @@ TEST_F(UdmaEndpointExchangeTest, KeepsExplicitClosFabricWhenPortsAlsoMatchMeshTo
     ASSERT_EQ(endpoints[0].size(), 1U);
     EXPECT_EQ(endpoints[0][0].netType, NetType::Clos);
     EXPECT_EQ(endpoints[0][0].fabric, TopoFabric::Clos);
+}
+
+TEST_F(UdmaEndpointExchangeTest, SharedDirectUdmaGroupsOnlyEquivalentEndpointResources)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        GTEST_SKIP() << "Endpoint resource grouping applies to direct builds";
+    }
+    RootInfo root;
+    TopoInfo topo;
+    auto first = std::make_shared<RankAddr>();
+    first->eidData[0] = 1;
+    first->planeId = "plane";
+    first->ports = {"0/0", "0/1"};
+    first->levelInfo = std::make_shared<LevelInfo>(LevelInfo{0, "local", NetType::Clos, ""});
+    root.eidIndexToRankAddr.emplace(0, first);
+
+    auto same_resource = std::make_shared<RankAddr>(*first);
+    same_resource->levelInfo = std::make_shared<LevelInfo>(LevelInfo{1, "global", NetType::Clos, ""});
+    same_resource->ports = {"0/1", "0/0", "0/1"};
+    root.eidIndexToRankAddr.emplace(1, same_resource);
+    auto other_eid = std::make_shared<RankAddr>(*same_resource);
+    other_eid->eidData[0] = 2;
+    root.eidIndexToRankAddr.emplace(2, other_eid);
+    auto other_plane = std::make_shared<RankAddr>(*same_resource);
+    other_plane->planeId = "other-plane";
+    root.eidIndexToRankAddr.emplace(3, other_plane);
+    auto other_ports = std::make_shared<RankAddr>(*same_resource);
+    other_ports->ports = {"0/1"};
+    root.eidIndexToRankAddr.emplace(4, other_ports);
+    auto mesh = std::make_shared<RankAddr>(*first);
+    mesh->levelInfo = std::make_shared<LevelInfo>(LevelInfo{0, "local", NetType::Mesh, ""});
+    root.eidIndexToRankAddr.emplace(5, mesh);
+    root.eidIndexToRankAddr.emplace(6, std::make_shared<RankAddr>(*mesh));
+
+    for (bool shared : {false, true}) {
+        UdmaTransportManager manager;
+        if (shared) {
+            EnableSharedJetty(manager);
+        }
+        BuildEndpointGroupsForTest(manager, root, topo);
+        EXPECT_EQ(ResolveResourceKey(manager, 0, 2, 0).first, 0U);
+        EXPECT_EQ(ResolveResourceKey(manager, 1, 2, 0).first, shared ? 0U : 1U);
+        for (EidIndex index : {2U, 3U, 4U}) {
+            EXPECT_EQ(ResolveResourceKey(manager, index, 2, 0).first, index);
+        }
+        EXPECT_EQ(ResolveResourceKey(manager, 6, 2, 0).first, shared ? 5U : 6U);
+    }
+}
+
+TEST_F(UdmaEndpointExchangeTest, SharedDirectUdmaGroupsEndpointsWithDifferentNetInstances)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        GTEST_SKIP() << "Endpoint resource grouping applies to direct builds";
+    }
+    RootInfo root;
+    TopoInfo topo;
+    auto first = std::make_shared<RankAddr>();
+    first->eidData[0] = 1;
+    first->planeId = "plane";
+    first->ports = {"0/0"};
+    first->levelInfo = std::make_shared<LevelInfo>(LevelInfo{1, "instance-a", NetType::Clos, ""});
+    root.eidIndexToRankAddr.emplace(0, first);
+
+    auto same_resource = std::make_shared<RankAddr>(*first);
+    same_resource->levelInfo = std::make_shared<LevelInfo>(LevelInfo{1, "instance-b", NetType::Clos, ""});
+    root.eidIndexToRankAddr.emplace(1, same_resource);
+
+    for (bool shared : {false, true}) {
+        UdmaTransportManager manager;
+        if (shared) {
+            EnableSharedJetty(manager);
+        }
+        BuildEndpointGroupsForTest(manager, root, topo);
+        EXPECT_EQ(ResolveResourceKey(manager, 1, 2, 0).first, shared ? 0U : 1U);
+    }
+}
+
+TEST_F(UdmaEndpointExchangeTest, LocalEndpointGroupingDoesNotChangeRoutingKeys)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        GTEST_SKIP() << "Endpoint resource grouping applies to direct builds";
+    }
+    UdmaTransportManager manager;
+    ConfigureManager(manager, 0, 3, 2);
+    EnableSharedJetty(manager);
+    SetLocalEndpointGroups(manager, {{1, 0}});
+    EXPECT_EQ(ResolveResourceKey(manager, 1, 2, 0).first, 0U);
+    EXPECT_EQ(ResolveResourceKey(manager, 1, 2, 1), std::make_pair(0U, 1U));
+}
+
+TEST_F(UdmaEndpointExchangeTest, SyncEndpointWireFormatOmitsLocalGroupIdentity)
+{
+    SyncEndpoint endpoint;
+    endpoint.eidIndex = 1;
+    endpoint.netLayer = 2;
+    endpoint.netInstanceId = "instance";
+    nlohmann::json wire = endpoint;
+    EXPECT_FALSE(wire.contains("endpointEidIndex"));
+    EXPECT_FALSE(wire.contains("EndpointResourceKey"));
+    SyncEndpoint decoded;
+    from_json(wire, decoded);
+    EXPECT_EQ(decoded.eidIndex, 1U);
+    EXPECT_EQ(decoded.netLayer, 2U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, MultiRankSyncEndpointGatherNeedsNoGroupMapping)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        GTEST_SKIP() << "Endpoint resource grouping applies to direct builds";
+    }
+    auto address = std::make_shared<RankAddr>();
+    address->eidData[0] = 1;
+    address->planeId = "plane";
+    address->ports = {"0/0"};
+    address->levelInfo = std::make_shared<LevelInfo>(LevelInfo{0, "local", NetType::Clos, ""});
+    RootInfo root;
+    root.eidIndexToRankAddr = {{0, address}, {1, address}};
+
+    UdmaTransportManager manager;
+    EnableSharedJetty(manager);
+    ConfigureManager(manager, 0, 2, 2);
+    g_boot_handle.npes = 2;
+    g_boot_handle.allgather = GatherEndpointPair;
+    std::vector<SyncEndpoint> peer{2};
+    peer[0].eidIndex = 2;
+    peer[1].eidIndex = 3;
+    peer_endpoint_blob_ = nlohmann::json::to_msgpack(nlohmann::json(peer));
+    lengths_.clear();
+    std::vector<std::vector<SyncEndpoint>> endpoints;
+    ASSERT_TRUE(BuildSyncEndpointsForTest(manager, root, TopoInfo{}, 2, endpoints));
+    ASSERT_EQ(lengths_.size(), 2U);
+    EXPECT_EQ(endpoints[0][0].eidIndex, 0U);
+    EXPECT_EQ(endpoints[0][1].eidIndex, 1U);
+    EXPECT_EQ(endpoints[1][0].eidIndex, 2U);
+    EXPECT_EQ(endpoints[1][1].eidIndex, 3U);
+    BuildEndpointGroupsForTest(manager, root, TopoInfo{});
+    EXPECT_EQ(ResolveResourceKey(manager, 1, 1, 1).first, 0U);
+}
+
+TEST_F(UdmaEndpointExchangeTest, SharedEndpointPublishesDescriptorsForOriginalRoutes)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        GTEST_SKIP() << "Endpoint resource grouping applies to direct builds";
+    }
+    UdmaTransportManager manager;
+    ConfigureManager(manager, 0, 3, 2);
+    EnableSharedJetty(manager);
+    SetLocalEndpointGroups(manager, {{1, 0}, {2, 0}});
+    AddEndpointWithSlot(manager, 0, 0, 10);
+    AddEndpointWithSlot(manager, 0, 1, 11);
+    TransportMemoryRegion region{};
+    region.addr = 0x200000;
+    region.size = 0x4000;
+    region.flags = REG_MR_FLAG_HBM;
+    ASSERT_EQ(manager.RegisterMemoryRegion(region), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(PublishedEndpointCount(manager), 6U);
+
+    AddRoute(manager, 1, 2, 20, 0);
+    AddRoute(manager, 1, 0, 21, 1);
+
+    Exchange exchange;
+    lengths_.clear();
+    g_boot_handle.npes = 3;
+    g_boot_handle.allgather = MirrorAllGather;
+    InstallChannelConfigApis();
+    ASSERT_EQ(ExchangeDescriptors(manager, exchange), ACLSHMEM_SUCCESS);
+    ASSERT_EQ(exchange.max_count, 6U);
+    ASSERT_EQ(exchange.counts[0], 6U);
+    AddRemoteDescriptorWithSlot(exchange, 1, 0, 20, 0);
+    AddRemoteDescriptorWithSlot(exchange, 1, 1, 21, 1);
+    std::vector<uint32_t> slots;
+    std::vector<uint32_t> dst_pes;
+    std::vector<uint32_t> qp_indices;
+    ASSERT_EQ(BuildDirect(manager, exchange, slots, dst_pes, qp_indices), ACLSHMEM_SUCCESS);
+    EXPECT_EQ(channel_endpoints_, (std::vector<EndpointHandle>{Handle(10), Handle(11)}));
+    EXPECT_EQ(slots, (std::vector<uint32_t>{1, 1}));
+    EXPECT_EQ(qp_indices, (std::vector<uint32_t>{0, 1}));
+}
+
+TEST_F(UdmaEndpointExchangeTest, SharedEndpointFailsWhenRepresentativeEndpointIsMissing)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        GTEST_SKIP() << "Endpoint resource grouping applies to direct builds";
+    }
+    UdmaTransportManager manager;
+    ConfigureManager(manager, 0, 3, 2);
+    EnableSharedJetty(manager);
+    SetLocalEndpointGroups(manager, {{1, 0}});
+    AddRoute(manager, 1, 1, 20, 0);
+
+    Exchange exchange;
+    exchange.counts.assign(3, 0);
+    std::vector<uint32_t> slots;
+    std::vector<uint32_t> dst_pes;
+    std::vector<uint32_t> qp_indices;
+    EXPECT_EQ(BuildDirect(manager, exchange, slots, dst_pes, qp_indices), ACLSHMEM_INNER_ERROR);
+    EXPECT_TRUE(slots.empty());
+    EXPECT_TRUE(channel_endpoints_.empty());
+}
+
+TEST_F(UdmaEndpointExchangeTest, SharedEndpointFailsWhenRemoteDescriptorIsMissing)
+{
+    if constexpr (ACLSHMEM_UDMA_RELAY_ENABLED) {
+        GTEST_SKIP() << "Endpoint resource grouping applies to direct builds";
+    }
+    UdmaTransportManager manager;
+    ConfigureManager(manager, 0, 3, 2);
+    EnableSharedJetty(manager);
+    SetLocalEndpointGroups(manager, {{1, 0}});
+    AddEndpointWithSlot(manager, 0, 0, 10);
+    AddRoute(manager, 1, 1, 20, 0);
+
+    Exchange exchange;
+    exchange.counts.assign(3, 1);
+    exchange.max_count = 1;
+    std::vector<uint32_t> slots;
+    std::vector<uint32_t> dst_pes;
+    std::vector<uint32_t> qp_indices;
+    EXPECT_EQ(BuildDirect(manager, exchange, slots, dst_pes, qp_indices), ACLSHMEM_INNER_ERROR);
+    EXPECT_TRUE(slots.empty());
+    EXPECT_TRUE(channel_endpoints_.empty());
 }
 
 TEST_F(UdmaEndpointExchangeTest, RejectsEmptyAndOverflowingDimensions)

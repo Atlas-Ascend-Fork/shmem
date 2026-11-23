@@ -94,6 +94,12 @@ private:
     {
         return l.eid_index == r.eid_index && l.qp_slot == r.qp_slot;
     }
+    // A descriptor is published under the route-visible logical key while reusing the descriptor
+    // of the representative local resource key.
+    struct PublishedEndpoint {
+        EndpointKey logical{};
+        EndpointKey resource{};
+    };
     // One rank's local HCOMM endpoint descriptor as exchanged via allgather. `valid` distinguishes
     // real entries from the zero padding used to make every rank contribute max_count slots.
     // eid_index/qp_slot are stored split so the logs read the real EID.
@@ -150,6 +156,10 @@ private:
         // First qp_idx bound to each state; a different qp_idx on the same state is a split violation.
         std::map<size_t, uint32_t> state_idx_to_qp;
     };
+    bool CanShareEquivalentEndpoints() const { return !ACLSHMEM_UDMA_RELAY_ENABLED && shared_jetty_enabled_; }
+    EndpointKey ResolveLocalEndpointKey(uint32_t eid_index, uint32_t qp_idx) const;
+    std::vector<PublishedEndpoint> BuildPublishedEndpointDescs() const;
+    void BuildLocalEndpointGroups(const RootInfo& root_info, const TopoInfo& topo_info);
     bool CreateEndpoint(const EndpointKey& key, const std::array<uint8_t, 16>& target_eid_raw);
     Result PrepareOpenDevice(uint32_t device_id, uint32_t rank_count);
     // Allgather the local HCOMM endpoint descriptors into `exchange`.
@@ -272,6 +282,9 @@ private:
     // peerRankId -> route state. default_route is the first resolved route and is used by
     // relay/legacy slots; qp_routes is used by direct multi-QP slots.
     std::map<uint32_t, PeerRouteInfo> peer_routes_;
+    // Local routing EID index -> representative EID index of an interchangeable HCOMM endpoint
+    // group. This is local resource-sharing state only and is never exchanged.
+    std::map<EidIndex, EidIndex> local_endpoint_groups_;
     // N x N routing matrix: [rank * rank_count_ + peer] = local-port eid_index `rank` uses to reach
     // `peer`. Only read on the relay path to resolve each (actual_pe, relay_pe) slot's target EID.
     std::vector<int32_t> all_local_routes_;
