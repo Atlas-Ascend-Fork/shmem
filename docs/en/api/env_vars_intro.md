@@ -14,6 +14,13 @@ SHMEM_UID_SOCK_IFNAME configuration example (select one):
 export SHMEM_UID_SOCK_IFNAME=enpxxxx:inet4  # IPv4
 export SHMEM_UID_SOCK_IFNAME=enpxxxx:inet6  # IPv6
 
+### RDMA Scenario
+
+In RDMA scenarios, configure TC and SL.
+
+* `HCCL_RDMA_TC`: Reuses the HCCL environment variable to configure the traffic class of the RDMA NIC. The value range is [0, 255] and must be an integer multiple of 4. Default value: 132. [Reference](https://www.hiascend.com/document/detail/zh/canncommercial/900/maintenref/envvar/envref_07_0089.html)
+* `HCCL_RDMA_SL`: Reuses the HCCL environment variable to configure the service level of the RDMA NIC. This value must be consistent with the PFC priority configured on the NIC. An inconsistency may cause performance deterioration. The value must be an integer in the range [0, 7]. Default value: 4. [Reference](https://www.hiascend.com/document/detail/zh/canncommercial/900/maintenref/envvar/envref_07_0090.html)
+
 ## Multi-instance Related
 Since each instance has an independent bootstrap, an available port must be provided when each bootstrap is built.
 

@@ -42,8 +42,16 @@ For details about kernel debugging APIs, see [DumpTensor](https://www.hiascend.c
 
 1. Enable the tool's build switch `-enable_ascendc_dump` to enable the Ascend C operator debugging APIs for building the operator sample.
 
+   - A2/A3 platform:
+
    ```sh
    bash scripts/build.sh -enable_ascendc_dump -examples
+   ```
+
+   - Ascend950 platform:
+
+   ```sh
+   bash scripts/build.sh -soc_type Ascend950 -enable_ascendc_dump -examples
    ```
 2. Run the demo in the `examples/sdma` directory:
 

@@ -90,9 +90,19 @@ mssanitizer <options> -- <user_program> <user_options>
 SHMEM's [AllGather](https://gitcode.com/cann/shmem/tree/master/examples/allgather) sample running script provides the tool option to start the tool.
 
 Compile the sample and enable the tool capability.
+
+- A2/A3 platform:
+
 ```sh
 bash scripts/build.sh -examples -mssanitizer
 ```
+
+- Ascend950 platform:
+
+```sh
+bash scripts/build.sh -soc_type Ascend950 -examples -mssanitizer
+```
+
 Use msSanitizer to start the AllGather sample for memory detection.
 ```sh
 cd examples/allgather
