@@ -16,6 +16,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "acc_common_util.h"
 #include "acc_tcp_ssl_helper.h"
 #include "openssl_api_dl.h"
 
@@ -270,4 +271,42 @@ TEST_F(AccTcpSslHelperTest, LoadCaCertFailsOnMissingCaFile)
     EXPECT_NE(CallLoadCaCert(), ACC_OK);
     EXPECT_EQ(g_x509Alloc, 0);
     EXPECT_EQ(g_x509Free, 0);
+}
+
+TEST(AccCommonUtilAddressTest, HexadecimalHostnamesAreNotIPv6)
+{
+    for (const std::string& name : {"a", "face", "dead", "cafe", "FACE", "beef", "abcd", "0"}) {
+        SCOPED_TRACE(name);
+        EXPECT_FALSE(AccCommonUtil::IsValidIPv6(name));
+    }
+}
+
+TEST(AccCommonUtilAddressTest, AcceptsCompleteIPv6Literals)
+{
+    for (const std::string& address :
+         {"::", "::1", "2001::", "2001:db8::1", "2001:db8:0:1:2:3:4:5", "FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF",
+          "::ffff:127.0.0.1"}) {
+        SCOPED_TRACE(address);
+        EXPECT_TRUE(AccCommonUtil::IsValidIPv6(address));
+    }
+}
+
+TEST(AccCommonUtilAddressTest, RejectsIncompleteOrMalformedIPv6Literals)
+{
+    for (const std::string& address :
+         {"", "1:2", "1:2:3:4:5:6:7", "1:2:3:4:5:6:7:8:9", "1:::2", "1::2::3", ":1", "1:", "2001:db8::xyz",
+          "ordinary-shmem-host", "127.0.0.1", "[::1]", " ::1", "::1 ", "fe80::1%eth0"}) {
+        SCOPED_TRACE(address);
+        EXPECT_FALSE(AccCommonUtil::IsValidIPv6(address));
+    }
+    EXPECT_FALSE(AccCommonUtil::IsValidIPv6(std::string("::1\0suffix", 10)));
+}
+
+TEST(AccCommonUtilAddressTest, KeepsIPv4Classification)
+{
+    EXPECT_TRUE(AccCommonUtil::IsValidIPv4("127.0.0.1"));
+    EXPECT_TRUE(AccCommonUtil::IsValidIPv4("192.0.2.1"));
+    EXPECT_FALSE(AccCommonUtil::IsValidIPv4("::1"));
+    EXPECT_FALSE(AccCommonUtil::IsValidIPv4("face"));
+    EXPECT_FALSE(AccCommonUtil::IsValidIPv4("256.0.0.1"));
 }

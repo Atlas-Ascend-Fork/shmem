@@ -7,6 +7,7 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <cstring>
 
@@ -16,10 +17,10 @@
 
 namespace shm {
 namespace acc {
-bool AccCommonUtil::IsValidIPv4(const std::string& ip) {
+bool AccCommonUtil::IsValidIPv4(const std::string& ip)
+{
     std::vector<std::string> parts = utils::StringUtil::Split(ip, '.');
     if (parts.size() != 4) {
-
         return false;
     }
     for (const auto& part : parts) {
@@ -31,34 +32,16 @@ bool AccCommonUtil::IsValidIPv4(const std::string& ip) {
     return true;
 }
 
-bool AccCommonUtil::IsValidIPv6(const std::string& ip) {
-    // :: abbreviation must appear at most once
-    auto firstAbbr = ip.find("::");
-    if (firstAbbr != std::string::npos && ip.find("::", firstAbbr + 2) != std::string::npos) {
+bool AccCommonUtil::IsValidIPv6(const std::string& ip)
+{
+    if (ip.find('\0') != std::string::npos) {
         return false;
     }
-    std::vector<std::string> parts = utils::StringUtil::Split(ip, ':');
-    // max 9 parts possible with leading/trailing :: (e.g. ::1 produces 3 parts)
-    if (parts.empty() || parts.size() > 9) {
-        return false;
-    }
-    for (const auto& part : parts) {
-        if (part.empty()) {
-            continue;  // part of :: abbreviation
-        }
-        if (part.length() > 4) {
-            return false;
-        }
-        for (char c : part) {
-            if (!std::isxdigit(static_cast<unsigned char>(c))) {
-                return false;
-            }
-        }
-    }
-    return true;
+    struct in6_addr address {};
+    return inet_pton(AF_INET6, ip.c_str(), &address) == 1;
 }
 
-Result AccCommonUtil::SslShutdownHelper(SSL *ssl)
+Result AccCommonUtil::SslShutdownHelper(SSL* ssl)
 {
     if (!ssl) {
         LOG_ERROR("ssl ptr is nullptr");
@@ -66,7 +49,7 @@ Result AccCommonUtil::SslShutdownHelper(SSL *ssl)
     }
 
     const int sslShutdownTimes = 5;
-    const int sslRetryInterval = 1;  // s
+    const int sslRetryInterval = 1; // s
     int ret = OpenSslApiWrapper::SslShutdown(ssl);
     if (ret == 1) {
         return ACC_OK;
@@ -96,11 +79,11 @@ Result AccCommonUtil::SslShutdownHelper(SSL *ssl)
     return ACC_ERROR;
 }
 
-uint32_t AccCommonUtil::GetEnvValue2Uint32(const char *envName)
+uint32_t AccCommonUtil::GetEnvValue2Uint32(const char* envName)
 {
     // 0 should be illegal for this env variable
     constexpr uint32_t maxUint32Len = 35;
-    const char *tmpEnvValue = std::getenv(envName);
+    const char* tmpEnvValue = std::getenv(envName);
     if (tmpEnvValue != nullptr && strlen(tmpEnvValue) <= maxUint32Len && IsAllDigits(tmpEnvValue)) {
         uint32_t envValue = 0;
         std::string str(tmpEnvValue);
@@ -113,75 +96,74 @@ uint32_t AccCommonUtil::GetEnvValue2Uint32(const char *envName)
     return 0;
 }
 
-bool AccCommonUtil::IsAllDigits(const std::string &str)
+bool AccCommonUtil::IsAllDigits(const std::string& str)
 {
     if (str.empty()) {
         return false;
     }
-    return std::all_of(str.begin(), str.end(), [](unsigned char ch) {
-        return std::isdigit(ch);
-    });
+    return std::all_of(str.begin(), str.end(), [](unsigned char ch) { return std::isdigit(ch); });
 }
 
-#define CHECK_FILE_PATH_TLS(key, path)                                                         \
-    do {                                                                                       \
-        if (shm::utils::FileUtil::IsSymlink(path) || !shm::utils::FileUtil::Realpath(path)           \
-            || !shm::utils::FileUtil::IsFile(path) || !shm::utils::FileUtil::CheckFileSize(path)) {  \
-            LOG_ERROR("TLS " #key " check failed");                                            \
-            return ACC_ERROR;                                                                  \
-        }                                                                                      \
+#define CHECK_FILE_PATH_TLS(key, path)                                                           \
+    do {                                                                                         \
+        if (shm::utils::FileUtil::IsSymlink(path) || !shm::utils::FileUtil::Realpath(path) ||    \
+            !shm::utils::FileUtil::IsFile(path) || !shm::utils::FileUtil::CheckFileSize(path)) { \
+            LOG_ERROR("TLS " #key " check failed");                                              \
+            return ACC_ERROR;                                                                    \
+        }                                                                                        \
     } while (0)
 
-#define CHECK_FILE_PATH(key, required)                                           \
-    do {                                                                         \
-        if (!tlsOption.key.empty()) {                                            \
-            std::string path = tlsOption.tlsTopPath + "/" + tlsOption.key;       \
-            CHECK_FILE_PATH_TLS(key, path);                                      \
-        } else if (required) {                                                   \
-            LOG_ERROR("TLS check failed, " #key " is required");                 \
-            return ACC_ERROR;                                                    \
-        }                                                                        \
+#define CHECK_FILE_PATH(key, required)                                     \
+    do {                                                                   \
+        if (!tlsOption.key.empty()) {                                      \
+            std::string path = tlsOption.tlsTopPath + "/" + tlsOption.key; \
+            CHECK_FILE_PATH_TLS(key, path);                                \
+        } else if (required) {                                             \
+            LOG_ERROR("TLS check failed, " #key " is required");           \
+            return ACC_ERROR;                                              \
+        }                                                                  \
     } while (0)
 
-#define CHECK_DIR_PATH_TLS(key, path)                                                    \
-    do {                                                                                 \
-        if (shm::utils::FileUtil::IsSymlink(path) || !shm::utils::FileUtil::Realpath(path)     \
-            || !shm::utils::FileUtil::IsDir(path)) {                                        \
-            LOG_ERROR("TLS " #key " check failed");                                      \
-            return ACC_ERROR;                                                            \
-        }                                                                                \
+#define CHECK_DIR_PATH_TLS(key, path)                                                         \
+    do {                                                                                      \
+        if (shm::utils::FileUtil::IsSymlink(path) || !shm::utils::FileUtil::Realpath(path) || \
+            !shm::utils::FileUtil::IsDir(path)) {                                             \
+            LOG_ERROR("TLS " #key " check failed");                                           \
+            return ACC_ERROR;                                                                 \
+        }                                                                                     \
     } while (0)
 
-#define CHECK_DIR_PATH(key, required)                                                                               \
-    do {                                                                                                            \
-        if (!tlsOption.key.empty()) {                                                                               \
-            std::string path = (std::strcmp(#key, "tlsTopPath") == 0) ? tlsOption.key : tlsOption.tlsTopPath + "/" + tlsOption.key; \
-            CHECK_DIR_PATH_TLS(key, path);                                                                          \
-        } else if (required) {                                                                                      \
-            LOG_ERROR("TLS check failed, " #key " is required");                                                    \
-            return ACC_ERROR;                                                                                       \
-        }                                                                                                           \
+#define CHECK_DIR_PATH(key, required)                                                                                \
+    do {                                                                                                             \
+        if (!tlsOption.key.empty()) {                                                                                \
+            std::string path =                                                                                       \
+                (std::strcmp(#key, "tlsTopPath") == 0) ? tlsOption.key : tlsOption.tlsTopPath + "/" + tlsOption.key; \
+            CHECK_DIR_PATH_TLS(key, path);                                                                           \
+        } else if (required) {                                                                                       \
+            LOG_ERROR("TLS check failed, " #key " is required");                                                     \
+            return ACC_ERROR;                                                                                        \
+        }                                                                                                            \
     } while (0)
 
-#define CHECK_FILE_SET_TLS(key, topPath)                                                 \
-    do {                                                                                 \
-        for (const std::string &file : tlsOption.key) {                                  \
-            std::string filePath = (topPath) + "/" + (file);                             \
-            CHECK_FILE_PATH_TLS(key, filePath);                                          \
-        }                                                                                \
+#define CHECK_FILE_SET_TLS(key, topPath)                     \
+    do {                                                     \
+        for (const std::string& file : tlsOption.key) {      \
+            std::string filePath = (topPath) + "/" + (file); \
+            CHECK_FILE_PATH_TLS(key, filePath);              \
+        }                                                    \
     } while (0)
 
-#define CHECK_FILE_SET(key, topPath, required)                                               \
-    do {                                                                                     \
-        if (!tlsOption.key.empty()) {                                                        \
-            CHECK_FILE_SET_TLS(key, topPath);                                                \
-        } else if (required) {                                                               \
-            LOG_ERROR("TLS check failed, " #key " is required");                             \
-            return ACC_ERROR;                                                                \
-        }                                                                                    \
+#define CHECK_FILE_SET(key, topPath, required)                   \
+    do {                                                         \
+        if (!tlsOption.key.empty()) {                            \
+            CHECK_FILE_SET_TLS(key, topPath);                    \
+        } else if (required) {                                   \
+            LOG_ERROR("TLS check failed, " #key " is required"); \
+            return ACC_ERROR;                                    \
+        }                                                        \
     } while (0)
 
-Result AccCommonUtil::CheckTlsOptions(const AccTlsOption &tlsOption)
+Result AccCommonUtil::CheckTlsOptions(const AccTlsOption& tlsOption)
 {
     if (!tlsOption.enableTls) {
         return ACC_OK;
@@ -194,5 +176,5 @@ Result AccCommonUtil::CheckTlsOptions(const AccTlsOption &tlsOption)
     CHECK_FILE_SET(tlsCrlFile, tlsOption.tlsTopPath + "/" + tlsOption.tlsCrlPath, false);
     return ACC_OK;
 }
-}  // namespace acc
-}  // namespace shm
+} // namespace acc
+} // namespace shm
