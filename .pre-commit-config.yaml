@@ -1,3 +1,11 @@
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ---------------------------------------------------------------------------------------------------------
 minimum_pre_commit_version: 4.0.0
 exclude: ^LICENSES/|\.(html|csv|svg)$
 
@@ -46,13 +54,14 @@ repos:
           ]
 
   # OAT 合规性检查 (Open Source Audit Tool)
-  - repo: local
+  # exclude .pre-commit-config.yaml: CI (cann precommit.py) rewrites this file
+  # without comments before running hooks, so its license header is always
+  # stripped in CI and OAT would report NoLicenseHeader false-positively.
+  - repo: https://gitcode.com/HiAgent/compliance
+    rev: v1.0.5
     hooks:
       - id: oat-check
-        name: OAT Compliance Check
-        entry: bash scripts/oat_check.sh
-        language: system
         pass_filenames: true
-        types: [file]
-        stages: [commit]
+        stages: [pre-commit]
         verbose: true
+        exclude: ^\.pre-commit-config\.yaml$
