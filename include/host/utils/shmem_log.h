@@ -23,9 +23,8 @@ extern "C" {
  * @param func the logging function, takes level and msg as parameter
  * @return Returns 0 on success or an error code on failure
  */
-ACLSHMEM_HOST_API int32_t aclshmemx_set_extern_logger(void (*func)(int level, const char *msg));
+ACLSHMEM_HOST_API int32_t aclshmemx_set_extern_logger(void (*func)(int level, const char* msg));
 #define shmem_set_extern_logger aclshmemx_set_extern_logger
-
 
 /**
  * @brief Set the logging level.
@@ -36,8 +35,7 @@ ACLSHMEM_HOST_API int32_t aclshmemx_set_extern_logger(void (*func)(int level, co
 ACLSHMEM_HOST_API int32_t aclshmemx_set_log_level(int level);
 #define shmem_set_log_level aclshmemx_set_log_level
 
-
- /**
+/**
  * @brief Print profiling data for all PEs to the console.
  *
  * @note **Deprecated**: This interface will be sunset in a future release. Please use
@@ -46,8 +44,7 @@ ACLSHMEM_HOST_API int32_t aclshmemx_set_log_level(int level);
  *
  * @deprecated Use @c aclshmemx_get_prof(nullptr, true) for equivalent behavior.
  */
-ACLSHMEM_HOST_API void aclshmemx_show_prof();
-
+ACLSHMEM_HOST_API void aclshmemx_show_prof(void);
 
 /**
  * @brief Print profiling data for all PEs and/or return profiling data pointer.
@@ -61,7 +58,7 @@ ACLSHMEM_HOST_API void aclshmemx_show_prof();
  * @note This is the **recommended** interface, superseding the zero-argument version
  *       @ref aclshmemx_show_prof().
  */
-ACLSHMEM_HOST_API void aclshmemx_get_prof(aclshmem_prof_pe_t **out_profs, bool verbose);
+ACLSHMEM_HOST_API void aclshmemx_get_prof(aclshmem_prof_pe_t** out_profs, bool verbose);
 
 #ifdef __cplusplus
 }
