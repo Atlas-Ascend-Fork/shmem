@@ -21,6 +21,8 @@ import glob
 import csv
 from math import ceil
 from collections import defaultdict
+from pathlib import Path
+from urllib.parse import quote
 
 def bytes_to_human_readable(x, pos):
     """Convert bytes to human-readable units (B, KB, MB, etc.)"""
@@ -517,7 +519,7 @@ def generate_markdown(root_dir, csv_data_dict):
                 for img in images:
                     img_path = img['path']
                     # 计算相对路径
-                    rel_img_path = os.path.relpath(img_path, root_dir)
+                    rel_img_path = quote(Path(os.path.relpath(img_path, root_dir)).as_posix())
                     md_content.append(f"\n##### {img['name']}\n")
                     md_content.append(f"- **描述**: {img['description']}\n")
                     if img['subplots']:

@@ -127,7 +127,7 @@ def test_process_csv_accepts_rdma_latency_legacy_ubsize_header(tmp_path):
 
 
 def test_cli_report_and_plot_cover_latency_schema(tmp_path):
-    source = tmp_path / "udma_lat_put_float_0.csv"
+    source = tmp_path / "latency run #1.csv"
     write_lat_csv(source)
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--csv-path", str(source)],
@@ -142,3 +142,4 @@ def test_cli_report_and_plot_cover_latency_schema(tmp_path):
         assert col in report
     images = list((tmp_path / "picture").rglob("*latency_curves.png"))
     assert images, "latency curve chart was not generated"
+    assert "![latency_curves](picture/latency%20run%20%231/latency%20run%20%231_latency_curves.png)" in report
