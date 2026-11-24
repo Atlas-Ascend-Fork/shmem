@@ -139,7 +139,9 @@ def get_peer_buffer(buf: Buffer, pe: int) -> Buffer:
         Buffer: A remote symmetric address on the specified PE that can be accessed using memory loads and stores.
 
     Raises:
-        AclshmemError:  If the input address is illegal.
+        AclshmemInvalid: If buf is invalid, released, or belongs to another instance, or pe is not a
+            non-negative integer (bool is not accepted).
+        AclshmemError: If the current instance context is unavailable or the native peer address lookup fails.
     """
     with _instance_lock:
         if not isinstance(buf, Buffer):

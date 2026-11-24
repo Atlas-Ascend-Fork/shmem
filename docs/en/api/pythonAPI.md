@@ -86,7 +86,7 @@
     |-|-|-|
     |buf|[in]|Symmetric address on the local PE|
     |pe|[in]|PE ID|
-    |Return Value|[out]|Corresponding symmetric address buffer on the specified PE. If the input address or PE is invalid, `AclshmemError` is thrown.|
+    |Return Value|[out]|Corresponding symmetric address buffer on the specified PE. An invalid, released, or mismatched-instance buf, or a non-integer, bool, or negative pe raises `AclshmemInvalid`. Failure to obtain the current instance context or to query the native peer address raises `AclshmemError`.|
 
 8. **put_signal** — Copy contiguous data from the local PE to the symmetric memory address of a specified PE and update the remote signal variable after the copy completes. This call completes the operation before returning; all addresses must remain valid for the duration of the call.
 
