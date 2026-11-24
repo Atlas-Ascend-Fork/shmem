@@ -6,21 +6,23 @@ English | <a href="./README.md">简体中文</a>
 
 <div align="center">
 
-[![Documentation](https://img.shields.io/badge/Documentation-SHMEM-blue)](https://shmem-doc.pages.dev/)[![Release](https://img.shields.io/badge/Release-v1.7.0-brightgreen)](https://gitcode.com/cann/shmem/releases/v1.7.0)[![Platform](https://img.shields.io/badge/Platform-Ascend%20NPU-red)](https://www.hiascend.com/)[![SIG](https://img.shields.io/badge/SIG-shmem-lightgrey)](https://gitcode.com/cann/community/tree/master/CANN/sigs/shmem)
+[![Documentation](https://img.shields.io/badge/Documentation-SHMEM-blue)](https://shmem-doc.pages.dev/)[![Release](https://img.shields.io/badge/Release-v1.8.0-brightgreen)](https://gitcode.com/cann/shmem/releases/v1.8.0)[![Platform](https://img.shields.io/badge/Platform-Ascend%20NPU-red)](https://www.hiascend.com/)[![SIG](https://img.shields.io/badge/SIG-shmem-lightgrey)](https://gitcode.com/cann/community/tree/master/CANN/sigs/shmem)
 
 </div>
 
 ## What's New
 
-🚀 [October 2026] [SHMEM v1.7.0](https://gitcode.com/cann/shmem/releases/v1.7.0) is now available.
+🚀 [November 2026] [SHMEM v1.8.0](https://gitcode.com/cann/shmem/releases/v1.8.0) is now available.
 
-   - Added QP-specific put/get APIs for Ascend 950PR&950DT products RDMA/UDMA, expanded aggregate submission support, and enabled concurrent UDMA communication across multiple links.
-   - Added QP-specific put/get APIs for A2/A3 SDMA to support multi-QP communication.
-   - Improved installation and runtime diagnostics, with new MegaMoE and UDMA AllReduce examples and multi-QP performance tests.
+   - Updated team and global synchronization on the host and device, including host APIs that enqueue synchronization on a stream.
+   - Extended UDMA put-with-signal on Ascend 950PR/950DT. In direct mode, a SIMT warp or block can issue put/get and quiet on a specific QP.
+   - HNS_1825 RDMA supports multi-QP batching and hardware atomics.
 
-> Before upgrading, read the [v1.7.0 release notes](https://gitcode.com/cann/shmem/releases/v1.7.0) for multi-QP usage constraints, asynchronous communication completion semantics, and compatibility requirements.
+> Before upgrading, check the [v1.8.0 release notes](https://gitcode.com/cann/shmem/releases/v1.8.0) for communication completion rules, the device barrier return type, and HNS_1825 driver requirements.
 
-📌 [July 2026] [SHMEM v1.6.0](https://gitcode.com/cann/shmem/releases/v1.6.0): expanded Ascend 950PR&950DT products RDMA, UDMA/MTE, and SIMT capabilities, and improved Python wheel installation and `shmem-config` diagnostics.
+📌 [October 2026] [SHMEM v1.7.0](https://gitcode.com/cann/shmem/releases/v1.7.0) added QP-specific put/get APIs and concurrent transfers across UDMA links.
+
+📌 [July 2026] [SHMEM v1.6.0](https://gitcode.com/cann/shmem/releases/v1.6.0) expanded RDMA, UDMA/MTE, and SIMT communication support.
 
 📌 [April 2026] [SHMEM v1.3.0](https://gitcode.com/cann/shmem/releases/v1.3.0): added AI Core direct-driven capabilities and 40+ communication APIs, with expanded DFX tooling.
 

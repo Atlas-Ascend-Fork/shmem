@@ -7,21 +7,23 @@
 
 <div align="center">
 
-[![Documentation](https://img.shields.io/badge/Documentation-SHMEM-blue)](https://shmem-doc.pages.dev/)[![Release](https://img.shields.io/badge/Release-v1.7.0-brightgreen)](https://gitcode.com/cann/shmem/releases/v1.7.0)[![Platform](https://img.shields.io/badge/Platform-Ascend%20NPU-red)](https://www.hiascend.com/)[![SIG](https://img.shields.io/badge/SIG-shmem-lightgrey)](https://gitcode.com/cann/community/tree/master/CANN/sigs/shmem)
+[![Documentation](https://img.shields.io/badge/Documentation-SHMEM-blue)](https://shmem-doc.pages.dev/)[![Release](https://img.shields.io/badge/Release-v1.8.0-brightgreen)](https://gitcode.com/cann/shmem/releases/v1.8.0)[![Platform](https://img.shields.io/badge/Platform-Ascend%20NPU-red)](https://www.hiascend.com/)[![SIG](https://img.shields.io/badge/SIG-shmem-lightgrey)](https://gitcode.com/cann/community/tree/master/CANN/sigs/shmem)
 
 </div>
 
 ## 最新动态
 
-🚀 [2026/10] [SHMEM v1.7.0](https://gitcode.com/cann/shmem/releases/v1.7.0) 正式发布。
+🚀 [2026/11] [SHMEM v1.8.0](https://gitcode.com/cann/shmem/releases/v1.8.0) 正式发布。
 
-   - Ascend 950PR&950DT系列产品 RDMA/UDMA 新增 QP-specific put/get 接口，扩展聚合提交能力，支持 UDMA 多链路并发。
-   - A2/A3 SDMA 新增 QP-specific put/get 接口，支持多 QP 通信。
-   - 完善安装与运行时诊断，新增 MegaMoE、UDMA AllReduce 示例及多 QP 性能测试。
+   - 完善 Host 和 Device 侧的 Team 与全局同步，Host 侧可在指定流上发起同步。
+   - Ascend 950PR/950DT 的 UDMA 补齐 put-with-signal 接口，SIMT 在 direct 模式下支持 warp 或 block 在指定 QP 上执行 put/get 和 quiet。
+   - HNS_1825 RDMA 支持多 QP 聚合提交和硬件原子操作。
 
-> 升级前请阅读 [v1.7.0 Release Notes](https://gitcode.com/cann/shmem/releases/v1.7.0)，了解多 QP 使用约束、异步通信完成语义及兼容性要求。
+> 升级前请阅读 [v1.8.0 Release Notes](https://gitcode.com/cann/shmem/releases/v1.8.0)，确认通信完成条件、Device 侧 barrier 返回类型和 HNS_1825 驱动配套要求。
 
-📌 [2026/07] [SHMEM v1.6.0](https://gitcode.com/cann/shmem/releases/v1.6.0) 发布：完善 Ascend 950PR&950DT系列产品 RDMA、UDMA/MTE 与 SIMT 能力，改进 Python wheel 安装与 `shmem-config` 诊断。
+📌 [2026/10] [SHMEM v1.7.0](https://gitcode.com/cann/shmem/releases/v1.7.0) 新增按 QP 指定的 put/get 接口，支持 UDMA 多链路并发。
+
+📌 [2026/07] [SHMEM v1.6.0](https://gitcode.com/cann/shmem/releases/v1.6.0) 扩展 RDMA、UDMA/MTE 与 SIMT 通信能力。
 
 📌 [2026/04] [SHMEM v1.3.0](https://gitcode.com/cann/shmem/releases/v1.3.0) 发布：新增 AICore 直驱能力和 40+ 通信接口，并完善 DFX 工具链。
 
