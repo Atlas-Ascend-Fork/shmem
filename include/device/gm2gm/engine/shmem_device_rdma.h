@@ -919,6 +919,8 @@ ACLSHMEM_DEVICE void aclshmemx_roce_put_nbi(
  * @brief RDMA Quiet function. This synchronous function ensures all previous RDMA WQEs on default QP are completed
  * (data has arrived at the destination NIC).
  *
+ * @warning On IN_DIE, using the same AIV to send data and wait for completion on the same QP is recommended.
+ *
  * @param pe                [in] PE number of the remote PE.
  * @param buf               [in] Pointer on local UB, available space larger than 64 Bytes.
  * @param sync_id           [in] ID used to Sync S\\MTE3 Event.

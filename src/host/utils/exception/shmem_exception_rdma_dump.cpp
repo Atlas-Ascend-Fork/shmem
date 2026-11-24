@@ -621,7 +621,8 @@ bool DumpCq(
 #if defined(ACLSHMEMI_RDMA_K_BACKEND_XSCALE) || defined(ACLSHMEMI_RDMA_K_BACKEND_HNS_1825)
         const uint32_t wqe_index = CqeWqeIndex(cqe, sq_head, sq.depth);
 #else
-        const uint32_t wqe_index = sq.depth == 0U ? 0U : logical_index % sq.depth;
+        // CQ and SQ indices diverge when deferred WQEs do not request CQEs.
+        const uint32_t wqe_index = sq.depth == 0U ? 0U : (ReadLe32(raw, 0U) >> 16U) % sq.depth;
 #endif
         DumpSqWqe(instance, rank, peer, qp, sq, wqe_index, mr, device_entry);
         return !aclshmemi::exception::rdma::IsErrorCqe(cqe);

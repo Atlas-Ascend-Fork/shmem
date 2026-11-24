@@ -146,17 +146,16 @@ ACLSHMEM_DEVICE void aclshmemi_roce_ring_sq_doorbell<aclshmemi_rdma_backend_t::I
  * @param remote_addr        [in] Remote GM address.
  * @param lkey               [in] Local memory key.
  * @param local_addr         [in] Local GM address.
- * @param isSubmit           [in] Unused: every IN_DIE WQE is SIGNALED, CQE compression is not yet
- *                             supported (follow-up item alongside XSCALE's ce=1 optimization).
+ * @param isSubmit           [in] Request a CQE for submit; deferred WQEs do not request a CQE.
  * @return                   [out] WQE size in bytes (sizeof(aclshmemi_wqe_ctx) + sizeof(aclshmemi_sge_ctx)).
  */
 ACLSHMEM_DEVICE uint32_t aclshmemi_roce_in_die_fill_wqe_ub_write_read(
     __ubuf__ uint8_t* wqe_addr, uint32_t wqe_head, uint32_t message_len, aclshmemi_rdma_in_die_opcode_t opcode,
     uint32_t rkey, __gm__ uint8_t* remote_addr, uint32_t lkey, __gm__ uint8_t* local_addr, bool isSubmit)
 {
-    (void)isSubmit;
     uint32_t owner = (wqe_head >> 13) & 1;
-    uint32_t byte4 = static_cast<uint32_t>(opcode) | ((~owner << 7) & (1u << 7)) | (1u << 8);
+    uint32_t byte4 =
+        static_cast<uint32_t>(opcode) | ((~owner << 7) & (1u << 7)) | (static_cast<uint32_t>(isSubmit) << 8);
     *(__ubuf__ uint32_t*)wqe_addr = byte4;
     *(__ubuf__ uint32_t*)(wqe_addr + 4) = message_len;
     *(__ubuf__ uint32_t*)(wqe_addr + 8) = 0;
@@ -244,9 +243,7 @@ ACLSHMEM_DEVICE void aclshmemi_roce_post_send_read_write(
     // Poll CQ if send queue is full
     dcci_cachelines((__gm__ uint8_t*)sq_ci_addr, 8);
     if ((cur_head + 10) % depth == (*(__gm__ uint32_t*)(sq_ci_addr)) % depth) {
-        aclshmemi_roce_poll_cq<aclshmemi_rdma_backend_t::IN_DIE>(
-            pe, qp_idx, *(__gm__ uint32_t*)(sq_ci_addr) + ACLSHMEM_NUM_CQE_PER_POLL_CQ, ub_local64, ub_local32,
-            sync_id);
+        aclshmemi_roce_poll_cq<aclshmemi_rdma_backend_t::IN_DIE>(pe, qp_idx, cur_head, ub_local64, ub_local32, sync_id);
     }
     ACLSHMEM_DEBUG_FUNC(aclshmemi_rdma_debug_ensure_sq_capacity, sq_context, pe, qp_idx, 1U);
 
@@ -330,16 +327,6 @@ ACLSHMEM_DEVICE void aclshmemi_roce_ring_cq_doorbell<aclshmemi_rdma_backend_t::I
         AscendC::DataCopyPad(db_gm, ub_local64, copy_params);
     }
 
-    // Update WQ tail
-    __gm__ aclshmemi_rdma_sq_ctx* sq_context =
-        (__gm__ aclshmemi_rdma_sq_ctx*)(rdma_info->sq_ptr + (pe * qp_num + qp_idx) * sizeof(aclshmemi_rdma_sq_ctx));
-    auto sq_ci_addr = sq_context->tail_addr;
-    ub_local32.SetValue(0, cur_tail);
-    AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(sync_id);
-    AscendC::GlobalTensor<uint32_t> sq_tail_gm;
-    sq_tail_gm.SetGlobalBuffer((__gm__ uint32_t*)sq_ci_addr);
-    AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(sync_id);
-    AscendC::DataCopyPad(sq_tail_gm, ub_local32, copy_params_tail);
     AscendC::PipeBarrier<PIPE_MTE3>();
     AscendC::SetFlag<AscendC::HardEvent::MTE3_S>(sync_id);
     AscendC::WaitFlag<AscendC::HardEvent::MTE3_S>(sync_id);
@@ -350,14 +337,20 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_poll_cq<aclshmemi_rdma_backend_t::IN_DIE
     uint32_t pe, uint32_t qp_idx, uint32_t target_idx, AscendC::LocalTensor<uint64_t>& ub_local64,
     AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
 {
-    if (target_idx == 0) {
-        return 0;
-    }
     __gm__ aclshmemi_rdma_info* rdma_info = aclshmemi_qp_info_fetch();
 
     uint32_t qp_num = rdma_info->qp_num;
     __gm__ aclshmemi_rdma_cq_ctx* cq_context =
         (__gm__ aclshmemi_rdma_cq_ctx*)(rdma_info->scq_ptr + (pe * qp_num + qp_idx) * sizeof(aclshmemi_rdma_cq_ctx));
+    __gm__ aclshmemi_rdma_sq_ctx* sq_context =
+        (__gm__ aclshmemi_rdma_sq_ctx*)(rdma_info->sq_ptr + (pe * qp_num + qp_idx) * sizeof(aclshmemi_rdma_sq_ctx));
+    AscendC::GlobalTensor<uint32_t> sq_tail;
+    sq_tail.SetGlobalBuffer(reinterpret_cast<__gm__ uint32_t*>(sq_context->tail_addr));
+    dcci_cachelines(reinterpret_cast<__gm__ uint8_t*>(sq_context->tail_addr), sizeof(uint32_t));
+    uint32_t current_sq_tail = sq_tail.GetValue(0);
+    if (target_idx == current_sq_tail) {
+        return 0;
+    }
     auto cq_base_addr = cq_context->buf_addr;
     auto cqe_size = cq_context->cqe_size;
     auto depth = cq_context->depth;
@@ -366,15 +359,32 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_poll_cq<aclshmemi_rdma_backend_t::IN_DIE
     uint32_t cur_tail = *(__gm__ uint32_t*)(cq_ci_addr);
 
     const uint32_t shift_width = 7;
+    // GetSystemCycle advances at 50 cycles/us on Ascend A2/A3.
+    constexpr uint64_t POLL_CQ_TIMEOUT_CYCLES = 60ULL * 1000 * 1000 * 50;
+    constexpr uint32_t POLL_CQ_TIMEOUT_ERROR = 0x10000;
+    uint32_t poll_status = 0;
     AscendC::DataCopyExtParams copy_params_tail{1, 1 * sizeof(uint32_t), 0, 0, 0};
-    while (cur_tail != target_idx) {
+    while (target_idx != current_sq_tail) {
         __gm__ aclshmemi_cqe_ctx* cqe_addr =
             (__gm__ aclshmemi_cqe_ctx*)(cq_base_addr + cqe_size * (cur_tail & (depth - 1)));
+        // Bound each CQE readiness wait independently, as on HNS_1825.
+        const uint64_t start_cycles = static_cast<uint64_t>(AscendC::GetSystemCycle());
         uint32_t cqe_byte4 = *(__gm__ uint32_t*)cqe_addr;
-        while (((cqe_byte4 & (1 << shift_width)) != 0) == ((cur_tail & depth) != 0)) {
-            int64_t tmp = AscendC::GetSystemCycle(); // reserved for timeout check
+        bool cqe_ready = ((cqe_byte4 & (1 << shift_width)) != 0) != ((cur_tail & depth) != 0);
+        while (!cqe_ready && static_cast<uint64_t>(AscendC::GetSystemCycle()) - start_cycles < POLL_CQ_TIMEOUT_CYCLES) {
             dcci_cachelines((__gm__ uint8_t*)cqe_addr, 32);
             cqe_byte4 = *(__gm__ uint32_t*)cqe_addr;
+            cqe_ready = ((cqe_byte4 & (1 << shift_width)) != 0) != ((cur_tail & depth) != 0);
+        }
+        if (!cqe_ready) {
+            poll_status = POLL_CQ_TIMEOUT_ERROR;
+            ACLSHMEM_DEBUG_FUNC(aclshmemi_roce_in_die_dump_cqe, cqe_addr);
+            ACLSHMEM_DEBUG_FUNC(
+                aclshmemi_kernel_printf,
+                "Poll CQE timeout: pe=%u, qp_idx=%u, cq_tail=%u, current_sq_tail=%u, target_idx=%u, backend=%u\n", pe,
+                qp_idx, cur_tail, current_sq_tail, target_idx, (uint32_t)aclshmemi_rdma_backend_t::IN_DIE);
+            trap();
+            break;
         }
         cur_tail++;
         uint32_t wqn = cqe_addr->byte16 & 0xFFFFFF; // reserved for multi WQ share the same CQ
@@ -390,6 +400,10 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_poll_cq<aclshmemi_rdma_backend_t::IN_DIE
             trap();
             return status;
         }
+        // CQ tail counts CQEs; SQ tail counts completed WQEs, including deferred ones.
+        // DW0[31:16] is the completed WQE index. Reconstruct progress across ring wrap.
+        uint32_t wqe_idx = cqe_byte4 >> 16U;
+        current_sq_tail += ((wqe_idx - current_sq_tail) & (sq_context->depth - 1)) + 1U;
     }
 
     // Update CQ tail
@@ -400,7 +414,10 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_poll_cq<aclshmemi_rdma_backend_t::IN_DIE
 
     aclshmemi_roce_ring_cq_doorbell<aclshmemi_rdma_backend_t::IN_DIE>(
         pe, qp_idx, cur_tail, ub_local64, ub_local32, sync_id);
-    return 0;
+    // CQ doorbell consumes CQEs only; publish SQ completion independently.
+    ub_local32.SetValue(0, current_sq_tail);
+    aclshmemi_roce_write_ub_to_gm_with_sync(sq_context->tail_addr, ub_local32, sizeof(uint32_t), sync_id);
+    return poll_status;
 }
 
 /*

@@ -151,7 +151,7 @@ ACLSHMEM_DEVICE void aclshmemi_roce_ring_cq_doorbell(
  * @tparam B                     RDMA Backend type
  * @param pe                     [in] PE number of the remote PE.
  * @param qp_idx                 [in] QP index in multi-QP scenario (default 0 for single QP)
- * @param target_idx             [in] target progress index after polling; HNS_1825 and XSCALE use the target SQ
+ * @param target_idx             [in] target progress index after polling; all backends use the target SQ
  *                                    producer index because compressed CQEs make CQ and SQ indices different domains
  * @param ub_local64             [in] temporary UB local tensor of uint64_t used as workspace
  * @param ub_local32             [in] temporary UB local tensor of uint32_t used as workspace
