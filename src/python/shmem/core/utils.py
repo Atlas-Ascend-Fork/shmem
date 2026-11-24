@@ -22,6 +22,12 @@ import shmem._pyshmem as _pyshmem
 MemType = _pyshmem.MemType
 
 
+class _NativeThreadFormatter(logging.Formatter):
+    def format(self, record):
+        record.native_tid = threading.get_native_id()
+        return super().format(record)
+
+
 def setup_aclshmem_logger(log_level: str="ERROR", log_file_path: str=None) -> None:
     """
     Initialize and configure the logger for the ACLSHMEM Python interface.
@@ -48,9 +54,8 @@ def setup_aclshmem_logger(log_level: str="ERROR", log_file_path: str=None) -> No
     # Build log prefix
     host = socket.getfqdn().split(".")[0]
     pid = os.getpid()
-    tid = threading.get_native_id()
-    log_format = f"{host}:{pid}:{tid} [{pe_rank}] ACLSHMEM %(levelname)s : %(message)s"
-    formatter = logging.Formatter(log_format)
+    log_format = f"{host}:{pid}:%(native_tid)s [{pe_rank}] ACLSHMEM %(levelname)s : %(message)s"
+    formatter = _NativeThreadFormatter(log_format)
 
     # Configure console output
     console_handler = logging.StreamHandler(sys.stdout)
