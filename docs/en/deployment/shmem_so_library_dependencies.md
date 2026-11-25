@@ -124,7 +124,6 @@ cp -f ${BUILD_DIR}/lib/*.so "${INSTALL_LIB_DIR}/"
 ### 1.5.3 Command Execution After Adjustment
 Linux commands (CentOS/Ubuntu):
 ```bash
-# Run the command in the root directory.
 # For the A2/A3 platform
 bash scripts/build.sh
 # For the Ascend950 platform
@@ -196,7 +195,6 @@ Solution:
 - Delete the old directory and perform the build again.
 ```bash
 rm -rf build output install
-# Run the command in the root directory.
 # For the A2/A3 platform
 bash scripts/build.sh
 # For the Ascend950 platform

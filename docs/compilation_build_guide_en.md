@@ -14,21 +14,24 @@ Enter the root directory of SHMEM and build the project.
 
 ```shell
 cd shmem
+# A2/A3 platform
 bash scripts/build.sh
+# Ascend950 platform
+bash scripts/build.sh -soc_type Ascend950
 ```
 
-For more information about the commands, see the *README* and the `scripts/build.sh` file in the SHMEM's `master` directory.
+For more information about the commands, see the `README.md` and `scripts/build.sh` files in the root directory of the SHMEM repository.
 
 ### SHMEM Build Description
-Run `bash scripts/build.sh` from the SHMEM repository root. The default build mode generates version information and creates an installation package. By default, the RDMA capability, test cases, tests, and Python APIs are not built. The following parameters can be added to implement different functions:
+Run `bash scripts/build.sh` from the SHMEM repository root. The default build mode generates version information and creates an installation package. By default, the RDMA capability, samples, tests, and Python APIs are not built. The following parameters can be added to implement different functions:
 - `-use_cxx11_abi1`: enables `C++11 ABI`. This is the default setting.
 - `-use_cxx11_abi0`: disables `C++11 ABI`.
 - `-cann`: CANN open APIs can be used for build if the CANN version is 8.5 or later.
 - `-uttests`: builds all UT cases in the `tests/unittest` directory.
-- `-examples`: displays all cases in the `examples` directory.
+- `-examples`: builds all cases in the `examples` directory.
 - `-python_example`: provides the PyTorch access capability for some cases in the `examples` directory.
-- `-enable_rdma`: builds and enables RDMA capabilities. By default, the RDMA backend type is configured for Ascend 910B/C. For Ascend 950, you need to use `-rdma_backend` to specify the backend type.
-- `-rdma_backend`: specifies the RDMA backend type (not supported by Ascend 910B/C). The value can be `XSCALE` (Yunsilicon NICs) or `HNS_1825` (1825 NICs). This option must be used together with `-enable_rdma`. Otherwise, an error is returned. The parameter sequence is not limited.
+- `-enable_rdma`: builds and enables RDMA capabilities. The RDMA backend type is configured by default for A2/A3. For Ascend950, you need to use `-rdma_backend` to specify the backend type.
+- `-rdma_backend`: specifies the RDMA backend type (not supported by A2/A3). The value can be `XSCALE` (Yunsilicon NICs) or `HNS_1825` (1825 NICs). This option must be used together with `-enable_rdma`. Otherwise, an error is returned. The parameter sequence is not limited.
 - `-enable_ascendc_dump`: enables the `AscendC_Dump` mode for debugging the operator kernel code.
 - `-package`: builds the installation package for delivery, and generates the run package and Python wheel at the same time (including the behavior of `-python_extension`)
     * generates the run package `SHMEM\_{version}\_linux-{arch}.run` in the `{project_root}/package/{arch}/` directory.
@@ -47,11 +50,11 @@ Run `bash scripts/build.sh` from the SHMEM repository root. The default build mo
 
 ### RDMA Parameters
 
-To use the RDMA function, enable the `-enable_rdma` parameter during build. Then, you need to configure the backend based on the server type and NIC type.
+To use the RDMA function, enable the `-enable_rdma` parameter during build. Then, configure the backend based on the server type and NIC type.
 
-- Ascend 910B/C platform
+- A2/A3 platform
   - Only the `-enable_rdma` parameter is required. No additional parameter is required. The backend uses the default configuration.
-- Ascend 950PR&950DT products platform
+- Ascend950 platform
   - Use the `-enable_rdma` parameter.
   - Explicitly specify `-soc_type Ascend950`.
   - Specify the `-rdma_backend` parameter. Otherwise, the build script will report an error.
@@ -65,19 +68,19 @@ To use the RDMA function, enable the `-enable_rdma` parameter during build. Then
 **Valid command examples**:
 
 ```shell
-# Enabling RDMA on the Ascend 950PR&950DT products platform and specifying XSCALE as the backend (parameter sequence example 1)
+# Enabling RDMA on the Ascend950 platform and specifying XSCALE as the backend (parameter sequence example 1)
 bash scripts/build.sh -soc_type Ascend950 -enable_rdma -rdma_backend XSCALE
 
-# Enabling RDMA on the Ascend 950PR&950DT products platform with an HNS_1825 NIC
+# Enabling RDMA on the Ascend950 platform with an HNS_1825 NIC
 bash scripts/build.sh -soc_type Ascend950 -enable_rdma -rdma_backend HNS_1825
 
-# Enabling RDMA on the Ascend 950PR&950DT products platform and specifying XSCALE as the backend (parameter sequence example 2)
+# Enabling RDMA on the Ascend950 platform and specifying XSCALE as the backend (parameter sequence example 2)
 bash scripts/build.sh -enable_rdma -soc_type Ascend950 -rdma_backend XSCALE
 
-# Enabling RDMA on the Ascend 950PR&950DT products platform and specifying XSCALE as the backend (parameter sequence example 3)
+# Enabling RDMA on the Ascend950 platform and specifying XSCALE as the backend (parameter sequence example 3)
 bash scripts/build.sh -rdma_backend XSCALE -enable_rdma -soc_type Ascend950
 
-# Enabling RDMA on Ascend 910B/C (backend not specified)
+# Enabling RDMA on A2/A3 (backend not specified)
 bash scripts/build.sh -enable_rdma
 ```
 
@@ -88,7 +91,7 @@ bash scripts/build.sh -enable_rdma
 bash scripts/build.sh -soc_type Ascend950 -rdma_backend XSCALE
 # Error message: "Error: -rdma_backend requires -enable_rdma to be specified."
 
-# Error: -rdma_backend is used on a non-Ascend 950PR&950DT products platform.
+# Error: -rdma_backend is used on a non-Ascend950 platform.
 bash scripts/build.sh -enable_rdma -rdma_backend XSCALE
 # Error message: "Error: -rdma_backend can only be specified when SOC_TYPE is Ascend950."
 ```
@@ -128,7 +131,7 @@ When `-enable_relay` is enabled, CMake automatically adds the `ACLSHMEM_RELAY_SU
 **Valid command examples**:
 
 ```shell
-# Build examples and enable relay on the Ascend 950PR&950DT products platform
+# Build examples and enable relay on the Ascend950 platform
 bash scripts/build.sh -examples -soc_type Ascend950 -enable_relay
 
 # The reversed parameter sequence is also valid
@@ -141,7 +144,7 @@ bash scripts/build.sh -python_extension -enable_relay
 **Invalid command examples**:
 
 ```shell
-# Error: -enable_relay is used on a non-Ascend 950PR&950DT products platform (-soc_type Ascend950 not specified).
+# Error: -enable_relay is used on a non-Ascend950 platform (-soc_type Ascend950 not specified).
 bash scripts/build.sh -examples -enable_relay
 # Error message: "Error: -enable_relay requires UDMA support, which is only enabled for Ascend950."
 ```
@@ -205,8 +208,11 @@ query the actual network layer of an established route.
    - `uninstall.sh`: uninstallation script
    - `build.sh`: build script
    - `release.sh`: automatic build and packaging script
-   - `set_env.sh`: SHMEM environment variable settings
+   - `set_env.sh`: SHMEM environment variable settings file
+   - `preinstall_check.sh`: environment check script for the chip, version, topology, communication capabilities, and package artifacts
 ### run.sh Script Usage
+
+UT (unit test) case execution script.
 
 #### Optional Coverage Tools
 
@@ -246,7 +252,7 @@ Multiple parameters are provided to support custom case execution.
 ```sh
 -ranks          # Total number of ranks
 -frank          # First rank on the server
--ipport         # IP address and port
+-ipport         # host:port (the script automatically prepends tcp://)
 -fnpu           # First NPU started on each server
 -gnpus          # The number of devices used by a single server
 -test_filter    # gtest_filter
@@ -256,7 +262,15 @@ bash scripts/run.sh -ranks 4 -fnpu 2 -gnpus 4 -test_filter ScalarP # The test wi
 
 ```
 ### install.sh
-Installation/Uninstallation script of the generated .run file
+Installation/uninstallation script of the generated run package, which provides the installation and uninstallation functions.
+
+- `package-name.run --check`: performs only the environment and package capability check.
+- `package-name.run --install --check`: performs the environment check first, and then installs the package.
+- `package-name.run --install`: installs the package directly.
+- `package-name.run --install-path=/absolute/path`: installs the package to the `shmem` directory under the specified absolute path.
+
+The `WARN` messages output by `--check` indicate capabilities that are not satisfied or require manual confirmation. The current check uses the output content and final summary as the judgment basis. A successful command exit does not mean that all optional communication capabilities pass.
+
 Installation directory
 ```
 ${INSTALL_PATH}
@@ -276,10 +290,10 @@ Uninstallation script, which can be used to uninstall the SHMEM library installe
 Script for generating a package, which is used after compilation. After the compilation products are packaged, other files in the `install` directory are deleted. You are advised to use the `build.sh` script to complete the packaging.
 
 
-### build.sh
+### Build Script `build.sh`
 File name: `scripts/build.sh`
-SHMEM compilation file, which does not need to be modified
+SHMEM build file, which generally does not need to be modified.
 
-### set_env.sh
-File name: `scripts/set_env.sh`
+### Environment Variable Setup Script `set_env.sh`
+**File name**: `scripts/set_env.sh`
 After SHMEM is installed, the process-level environment variable setting script `set_env.sh` is provided to automatically set environment variables. The environment variables automatically become invalid after the user process ends.

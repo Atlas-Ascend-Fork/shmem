@@ -1,20 +1,20 @@
 # Operator Debugging Guide for Tools Used with SHMEM
 
 ## msprof
-SHMEM will adapt to the [msprof operator tuning tool](https://www.hiascend.com/document/detail/en/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0082.html) in the future.
+SHMEM will adapt to the [msprof operator tuning tool](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0082.html) in the future.
 This is not supported in the current version and will be supported in Q1.
 
 ## mssanitizer
-SHMEM has adapted to the [msSanitizer memory detection tool](https://www.hiascend.com/document/detail/en/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0039.html). The following APIs do not support this tool:
-- APIs and test cases for SDMA, RDMA, and UDMA do not support memory detection using msSanitizer.
+SHMEM has adapted to the [msSanitizer memory detection tool](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0039.html). The following APIs do not support this tool:
+- SDMA/RDMA-related APIs and test cases do not support memory detection using msSanitizer.
 
-**This function depends on the CANN version and is expected to be supported in community version 9.1.0.**
+**This function requires CANN 9.1.0 or later.**
 
 If the current CANN version does not support msSanitizer, take the following steps to install it from the source code:
 
 ### 1. Installing msSanitizer
 
-Reference: [msSanitizer Installation Guide](https://gitcode.com/Ascend/mssanitizer/blob/master/docs/en/install_guide/mssanitizer_install_guide.md)
+Reference: [msSanitizer Installation Guide](https://gitcode.com/Ascend/mssanitizer/blob/master/docs/zh/install_guide/mssanitizer_install_guide.md)
 
 Obtain the source code and compile the package.
 
@@ -36,7 +36,7 @@ If the `ASCEND_HOME_PATH` environment variable has been configured, install the 
 
 ### 2. Installing mstx
 
-Reference: [mstx Installation Guide](https://gitcode.com/Ascend/mstx/blob/master/docs/en/install_guide/mstx_install_guide.md)
+Reference: [mstx Installation Guide](https://gitcode.com/Ascend/mstx/blob/master/docs/zh/install_guide/mstx_install_guide.md)
 
 Install the compilation dependencies.
 
@@ -66,22 +66,37 @@ pip3 install --upgrade mstx-xxxxx.whl --target ${ASCEND_HOME_PATH}/tools/mstx/
 
 ### 3. Enabling msSanitizer for SHMEM
 
-Build in the `shmem/` directory.
+Build in the `shmem/` directory:
+
+- A2/A3 platform:
+
 ```sh
 bash scripts/build.sh -mssanitizer
 ```
 
-The build options vary depending on the chip model.
-- **Ascend 950**: All memory detection functions do not require the `--cce-enable-sanitizer` option. During the build, you only need to add `-g`, and msSanitizer will function normally.
-- **Other chip models (such as Ascend 910B)**: Add the `-g --cce-enable-sanitizer` option during the build to enable msSanitizer instrumentation.
+- Ascend950 platform:
 
-The current build script automatically selects the corresponding build options based on `SOC_TYPE`. No manual configuration is required.
+```sh
+bash scripts/build.sh -soc_type Ascend950 -mssanitizer
+```
+
+The build options vary depending on the chip model (the build script automatically selects the options based on `SOC_TYPE` and the bisheng version; no manual configuration is required):
+
+- **Ascend950**: CMake decides whether to build with `--cce-enable-sanitizer` based on the version timestamp of `bisheng -v`:
+  - New CANN versions: `-g --cce-enable-sanitizer` is added, which enables complete instrumentation-based detection of memory accesses related to AscendC APIs.
+  - Old CANN versions: Building Ascend950 with `--cce-enable-sanitizer` together is not yet supported, and only `-g` is added. In this case, the **memory detection function related to AscendC APIs is unavailable**. To obtain this capability, upgrade CANN and build again (for the specific version threshold, see the comparison between the current and expected timestamps in the CMake configuration log).
+
+- **Other chip models (such as Ascend910B)**: Add `-g --cce-enable-sanitizer` during the build to enable msSanitizer instrumentation.
 
 By default, the memory detection capability (**--tool memcheck**) is enabled. Generally, you can start the executable file in the following way:
 ```sh
 mssanitizer -- application parameter1 parameter2 ...
 ```
-For more details about the tool capabilities, see [msSanitizer (Anomaly Detection)](https://www.hiascend.com/document/detail/en/mindstudio/830/optools/Operatordevelopmenttools/atlasopdev_16_0039.html). Control the parameters in the following format:
+Run the following command to enable cross-device race detection in addition to race detection:
+```sh
+mssanitizer --tool=racecheck --check-cross-npu-races=yes application
+```
+For more details about the tool capabilities, see [MindStudio Sanitizer User Guide](https://gitcode.com/Ascend/mssanitizer/blob/master/docs/zh/user_guide/mssanitizer_user_guide.md) and control the parameters in the following format:
 ```sh
 mssanitizer <options> -- <user_program> <user_options>
 ```

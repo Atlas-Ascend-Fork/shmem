@@ -9,9 +9,9 @@
 The sample measures the following UDMA data-transfer operations:
 
 1. **Unidirectional Put** (`put`): Only the PE specified by `SHMEM_CYCLE_PROF_PE` calls `aclshmemx_udma_put_nbi` to transfer data to the peer PE.
-2. **Bidirectional Put** (`bi_put`): Both PEs call Put concurrently and transfer data to each other.
+2. **Ring Put** (`bi_put`): Every PE calls Put to the next PE and receives data from the previous PE; with two PEs, the two PEs transfer data to each other.
 3. **Unidirectional Get** (`get`): Only the profiling PE calls `aclshmemx_udma_get_nbi` to pull data from the peer PE.
-4. **Bidirectional Get** (`bi_get`): Both PEs call Get concurrently and pull data from each other.
+4. **Ring Get** (`bi_get`): Every PE calls Get to the next PE to read data; with two PEs, the two PEs pull data from each other.
 5. **Put + Signal** (`put_signal`): Only the profiling PE calls `aclshmemx_udma_put_signal_nbi` to transfer data and then write a remote signal. The signal value is verified after the test.
 
 ## Differences from `mte_perftest`
@@ -71,6 +71,7 @@ bash run.sh -t bi_put -pes 16 -gnpus 8 -fpe 8 -fnpu 0 -ipport tcp://192.168.1.10
 | `--ub-size <size>` | - | UB workspace size in KiB (`1 KiB = 1024 B`). The kernel uses this value to allocate its local UB workspace; low-level UDMA APIs receive the workspace address rather than this parameter value. CSV records the value in KiB. High-level UDMA RMA MTE staging requires at least 128 B UB. | 16 |
 | `--metric <bw\|lat>` | - | Metric: `bw` for bandwidth, `lat` for API issue latency while traversing all API forms. See below. | bw |
 | `--batch <n>` | - | For `bw`, number of operations before waiting for completion. For `lat`, aggregation window size. See below. | `0` |
+| `-shared_jetty <0\|1>` | - | Whether to enable shared jetty: `0` disabled (default), `1` enabled. When enabled, set `attr.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED` in the initialization attributes before initialization, and the value must be identical on all PEs. Shared jetty makes peer PEs resolved to the same (local EID, qp slot) share the underlying jetty (one SQ/CQ ring and one queue state). The wait scope of `quiet` expands to the shared group (ordinary `quiet` drains only the group that QP 0 belongs to; use `qp_quiet` to drain QPs one by one). Enabling this option requires the libhcomm.so in the runtime environment to provide the channel config API. Otherwise, initialization fails and returns `ACLSHMEM_NOT_SUPPORTED`. Meanwhile, operations that modify the queue state within the shared group (put/get/atomic submission, quiet, capacity polling) must be issued serially by the caller. Multi-QP concurrent submission (`-b > 1`) may conflict with the serialization constraint within the shared group. Confirm the combination based on the actual topology. | 0 |
 | `-pes <size>` | - | Number of PEs. | 2 |
 | `-ipport <ip:port>` | - | Communication address. | tcp://127.0.0.1:8768 |
 | `-gnpus <num>` | - | Number of NPUs. | 2 |
@@ -166,6 +167,9 @@ For `put / bi_put / get / bi_get`, `batch > 1` in `--metric bw` uses aggregation
 
 # Four QPs with aggregation submission; every QP uses batch 8.
 ./run.sh -t bi_get -d float -e 16 -b 4 --batch 8
+
+# Enable shared jetty.
+./run.sh -t put -d float -e 16 -shared_jetty 1
 ```
 
 ## Put-signal Behavior

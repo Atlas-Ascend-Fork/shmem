@@ -12,8 +12,16 @@ In this sample, all initialization process calling methods for SHMEM are impleme
 
 ### Sample Running
 Call `scripts/build.sh` to control the backend in the root directory.
+- A2/A3 platform:
+
 ```bash
 bash scripts/build.sh
+```
+
+- Ascend950 platform:
+
+```bash
+bash scripts/build.sh -soc_type Ascend950
 ```
 
 ```bash
@@ -95,8 +103,16 @@ export LD_LIBRARY_PATH=/usr/local/mpich/lib:$LD_LIBRARY_PATH
 ```
 
 Call `scripts/build.sh` in the root directory.
+- A2/A3 platform:
+
 ```bash
 bash scripts/build.sh
+```
+
+- Ascend950 platform:
+
+```bash
+bash scripts/build.sh -soc_type Ascend950
 ```
 
 ```bash
@@ -146,9 +162,17 @@ export PATH=/usr/local/mpich/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/mpich/lib:$LD_LIBRARY_PATH
 ```
 
-Call <idp:inline displayname="code" id="code3899112363513">scripts/build.sh</idp:inline> to control the backend in the root directory.
+Call `scripts/build.sh` to control the backend in the root directory.
+- A2/A3 platform:
+
 ```bash
 bash scripts/build.sh
+```
+
+- Ascend950 platform:
+
+```bash
+bash scripts/build.sh -soc_type Ascend950
 ```
 
 ```bash

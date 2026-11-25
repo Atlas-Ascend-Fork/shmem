@@ -19,16 +19,16 @@ It provides three functional validation modes:
 
 The sample demonstrates the basic flow for concurrent UDMA Put, Get, and Put-with-Signal operations from multiple QPs to the same remote PE.
 
-### Test Flow
+### Test Case Implementation
 
-1. Initialize ACL and SHMEM, configure the data path as `ACLSHMEM_DATA_OP_UDMA`, and call the process-wide `aclshmemx_set_qp_num` before SHMEM initialization to set the number of QPs per remote PE.
+1. Initialize ACL and SHMEM, configure the data path as `ACLSHMEM_DATA_OP_UDMA`, and call the process-wide `aclshmemx_set_qp_num` before SHMEM initialization to set the number of QPs per remote PE. To enable shared jetty (multiple peer PEs resolved to the same (local eid_index, qp slot) share one underlying jetty; with a single QP it degrades to the same eid_index), set `attr.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED` in the initialization attributes. This configuration is disabled by default and must be identical on all PEs.
 2. Each PE maps to one process and one NPU, and communicates with the next PE in a ring. Put and PutSignal write to the next PE; Get reads from the next PE.
 3. Each PE allocates SHMEM symmetric memory and ordinary device memory, then prepares data containing the PE ID and element position. PutSignal additionally allocates one exclusive symmetric signal word per QP.
 4. The host launches as many AIVs as QPs. Each AIV uses one QP and handles a non-overlapping data slice.
 5. After the kernel completes, results are copied back to the host and checked byte by byte. Put and PutSignal data must come from the previous PE, while Get data must come from the next PE. PutSignal also validates the independently encoded signal value of each QP.
 6. Release SHMEM, device, and ACL resources after validation.
 
-### Kernel Flow
+### Kernel Implementation
 
 1. Each AIV uses its task block ID as its QP index, and divides the total bytes into non-overlapping contiguous slices using quotient and remainder.
 2. Put calls `aclshmemx_udma_qp_put_nbi`, Get calls `aclshmemx_udma_qp_get_nbi`, and PutSignal calls `aclshmemx_udma_qp_put_signal_nbi`. Each AIV submits only its own slice.
@@ -61,6 +61,9 @@ bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 8 -op get -elems 1048576
 
 # Validate PutSignal with 4 QPs.
 bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 4 -op put_signal -elems 1048576
+
+# Validate put with 4 QPs and shared jetty enabled.
+bash examples/udma_qp_demo/run.sh -pes 2 -qp_count 4 -shared_jetty 1 -op put -elems 1048576
 
 # Bind 4 PEs starting from logical NPU 4.
 bash examples/udma_qp_demo/run.sh -pes 4 -qp_count 4 -op put -first_npu 4
@@ -111,6 +114,7 @@ On data validation failure, the program prints the first failing position, actua
 | --- | --- | --- |
 | `-pes` | `2` | Total number of PEs. It must be at least 2; the script launches the same number of processes. |
 | `-qp_count` | `2` | QPs created for each remote PE. Range: `[1, 56]`. The value must be identical on all PEs. |
+| `-shared_jetty` | `0` | Whether to enable shared jetty (`0` disabled, `1` enabled). When enabled, set `attr.runtime_config.udma_shared_jetty = ACLSHMEM_CONFIG_ENABLED` in the initialization attributes. The value must be identical on all PEs. |
 | `-qp_net_layers` | Not configured | Available only when built with `-multi_link`. Configures a UDMA route for selected QPs in `qp_idx:netLayer` form, for example `0:0,2:1`. Each `qp_idx` must be less than `qp_count` and must not be repeated. Only layers 0 and 1 are currently supported. An explicit configuration replaces the QP's default assignment; unspecified QPs use the default rotation policy across available MESH and CLOS routes. All PEs must use the same configuration. A default build does not support this option: all QPs use MESH when available, otherwise they rotate among available CLOS routes. |
 | `-op` | `put` | Operation mode: `put`, `get`, or `put_signal`. |
 | `-elems` | `1048576` | Bytes transferred by each PE. The value must be at least the QP count; uneven partitioning is supported. |

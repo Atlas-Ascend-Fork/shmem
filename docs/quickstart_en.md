@@ -1,229 +1,571 @@
 # Quick Start
 
-## Overview
-This system is designed for model and operator developers on the Ascend platform. It provides a portable and easy-to-use multi-device multi-card memory access mode, facilitates the development of inter-device data synchronization, and accelerates the development of communication or communication-computation fused operators.
+## 1 Introduction
 
-## Software Architecture
-The shared memory library APIs are classified into host-side APIs and device-side APIs.
-- Host-side APIs provide initialization, memory management, team management, and synchronization functions.
-- Device-side APIs provide memory access, synchronization, and team management functions.
+This system is designed for model and operator developers on the Ascend platform. It provides a convenient and easy-to-use multi-node multi-card memory access method, making it easy for users to synchronize data across cards during development, and accelerating the development of communication operators and communication-computation fusion operators.
 
-## Directory Structure
-For details, see [Organizational Structure of Code](code_organization_en.md).
-```
-├── 3rdparty // Dependent third-party libraries
+## 2 Software Architecture
+
+The shared memory library APIs are mainly divided into host APIs and device APIs:
+
+- Host-side APIs provide initialization, memory management, communicator management, and synchronization functions.
+- Device-side APIs provide memory access, synchronization, and communicator management functions.
+
+## 3 Directory Structure Description
+
+For details, see [code_organization](code_organization_en.md)
+
+```text
+├── 3rdparty // Third-party library dependencies
 ├── docs     // Documents
-├── examples // Usage examples
-├── include  # Header files
-├── scripts // Related scripts
-├── src      // Source Code
-├── tests    // Test cases
+├── examples // Usage samples
+├── include  // Header files
+├── scripts  // Related scripts
+├── src      // Source code
+└── tests    // Test cases
 ```
 
-## Software and Hardware Versions
+## 4 Environment Preparation
 
-### Hardware and toolchain
+### 4.1 Hardware Requirements
 
-SHMEM supports Atlas 800I A2/A3, Atlas 800T A2/A3, and Ascend 950PR/950DT products on AArch64 and x86 hosts. For a source build, prepare GCC and G++ 7.3.0 or later (use matching versions), CMake 3.19 or later, glibc 2.28 or later, and Python 3.9 or later. The build uses the CANN toolkit's `bisheng` compiler for AscendC kernels. The Python wheel has additional requirements listed under [Python installation](#python-installation).
+- Atlas series: 800I A2/A3, 800T A2/A3
+- Ascend 950PR&950DT products
+- Architecture compatibility: aarch64, x86
 
-### CANN and driver compatibility
+### 4.2 Toolchain Dependencies
 
-Use the following combinations from the [Chinese quick start](quickstart.md). Check the transfer direction as well as the CANN version when selecting a configuration.
+   - gcc >= 7.3.0 / g++ >= 7.3.0 (Note: The gcc and g++ versions must be consistent)
+   - cmake ≥ 3.19
+   - GLIBC ≥ 2.28
+   - Python >= 3.9.0
+   - bisheng (installed with the CANN toolkit, used to compile device-side AscendC kernels)
 
-| Minimum HDK | CANN release | Device to device | Device to/from host | Device to/from remote host |
-| --- | --- | --- | --- | --- |
-| 25.5.6 | 9.1.0 and later | MTE, RDMA, SDMA (CMO only on Ascend 950), UDMA (Ascend 950 only) | MTE, SDMA (A3 only for SDMA) | MTE and SDMA on A3 |
-| 25.5.1 | 9.0.0 | MTE, RDMA, SDMA (A2/A3 only for SDMA) | MTE, SDMA (A3 only for SDMA) | MTE and SDMA on A3 |
-| 25.5.1 | 8.5.0 | MTE, RDMA | MTE on A3 | MTE on A3 |
-| 25.2.3 | 8.3.RC1 | MTE, RDMA | — | — |
-
-For SDMA, install the ops package matching the toolkit release and SoC. On Ascend 950, UDMA, RDMA, and SDMA also require matching toolkit and HDK packages. For remote-host transfers on A3 with CANN 8.5.0, see the [LingQu Computing Network 1.5.0 downloads](https://support.huawei.com/enterprise/zh/ascend-computing/lingqu-computing-network-pid-258003841/software).
-
-SHMEM calls HCCP APIs when using RDMA on Atlas A2 and A3 products. The supported CANN T releases are `8.2.T101`, `8.3.T101`, `8.5.T101`, `9.0.T101`, `9.1.T101`, and `9.2.T101`.
-
-### Install CANN
-
-Download the [driver and firmware](https://www.hiascend.com/hardware/firmware-drivers) and the [CANN packages](https://www.hiascend.com/developer/download/community/result?module=cann) for your SoC, CPU architecture, and OS. Follow the [CANN installation guide](https://www.hiascend.com/document/detail/en/canncommercial/850/softwareinst/instg/instg_0000.html?Mode=PmIns&InstallType=netyum&OS=openEuler).
-
-For releases before 9.1.0, install the toolkit. Community releases also require the matching SoC ops package. Commercial releases from 8.5.0 moved components such as HCCL into the ops package. A missing ops package can leave `libhccl.so` unavailable at runtime. For example, on CANN 9.0.0 the ops package is named `Ascend-cann-910b-ops_9.0.0_linux-x86_64.run` for 910B, with `A3` or `950` in place of `910b` for those SoCs.
-
-From the directory containing the downloaded packages, set `cann_version` and `soc_name` to match their filenames. To select a custom installation directory, add `--install-path="${install_path}"` to both installation commands.
-
-```bash
-chmod +x "Ascend-cann-toolkit_${cann_version}_linux-$(uname -m).run"
-./"Ascend-cann-toolkit_${cann_version}_linux-$(uname -m).run" --install
-chmod +x "Ascend-cann-${soc_name}-ops_${cann_version}_linux-$(uname -m).run"
-./"Ascend-cann-${soc_name}-ops_${cann_version}_linux-$(uname -m).run" --install
-```
-
-Load the toolkit environment in each shell. For a custom installation, replace `/usr/local/Ascend` with the installation directory.
+By default, the project uses `bisheng` provided by the CANN toolkit as the C/C++ compiler. You must complete the CANN toolkit installation before compilation, and then run:
 
 ```bash
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
 ```
 
-### Python and other build dependencies
-
-After cloning the repository, run the following commands from its root. The second file adds the packages used by the examples. Either file can be installed first and both use the same NumPy 1.x constraint.
+If CANN is installed in a custom path, run:
 
 ```bash
+source ${install_path}/ascend-toolkit/set_env.sh
+```
+
+### 4.3 CANN
+
+#### 4.3.1 CANN Version Description
+
+| Driver and Firmware | CANN Version | D2D | D2H/H2D | D2rH/rH2D | Other Dependencies |
+| --- | --- | --- | --- | --- | --- |
+| Ascend HDK 25.5.6 or later<br>[HDK resources](https://www.hiascend.com/hardware/firmware-drivers?ids=d803%2C89dda9ba9de741349efa03687a487678%2C25%2CAArch64%2Conline_Yum) | 9.1.0 or later<br>[CANN resources](https://www.hiascend.com/developer/download/community/result?module=cann&cann=9.1.0) | MTE<br>RDMA<br>SDMA (CMO only on Ascend950)<br>UDMA (Ascend950 only) | MTE<br>SDMA (A3 only) | MTE (A3 only)<br>SDMA (A3 only) | To enable UDMA, RDMA, or SDMA on Ascend950, download the corresponding toolkit and Ascend HDK packages<br> To enable SDMA, additionally install the [ops package](https://www.hiascend.com/developer/download/community/result?module=cann) that matches the toolkit version and device |
+| Ascend HDK 25.5.1 or later<br>[HDK resources](https://www.hiascend.com/hardware/firmware-drivers?ids=d803%2C89dda9ba9de741349efa03687a487678%2C25%2CAArch64%2Conline_Yum) | 9.0.0 or later<br>[CANN resources](https://www.hiascend.com/developer/download/community/result?module=cann&cann=9.0.0) | MTE<br>RDMA<br>SDMA (A2/A3 only) | MTE<br>SDMA (A3 only) | MTE (A3 only)<br>SDMA (A3 only) | To enable SDMA, download the [ops package](https://www.hiascend.com/developer/download/community/result?module=cann) that matches the toolkit version and device type |
+| Ascend HDK 25.5.1 or later<br>[HDK resources](https://www.hiascend.com/hardware/firmware-drivers?ids=d803%2C89dda9ba9de741349efa03687a487678%2C25%2CAArch64%2Conline_Yum) | 8.5.0 or later<br>[CANN resources](https://www.hiascend.com/developer/download/community/result?module=cann) | MTE<br>RDMA | MTE (A3 only) | MTE (A3 only) | To enable A3 D2rH/rH2D: LingQu Computing Network [version 1.5.0](https://support.huawei.com/enterprise/zh/ascend-computing/lingqu-computing-network-pid-258003841/software)<br>Upgrade guide: [Installation Guide](https://support.huawei.com/enterprise/zh/ascend-computing/lingqu-computing-network-pid-258003841) |
+| Ascend HDK 25.2.3 or later<br>[HDK resources](https://www.hiascend.com/hardware/firmware-drivers?ids=d803%2C89dda9ba9de741349efa03687a487678%2C25%2CAArch64%2Conline_Yum) | 8.3.RC1 or later<br>[CANN resources](https://www.hiascend.com/developer/download/community/result?module=cann) | MTE<br>RDMA |  |  | |
+
+When SHMEM uses RDMA on Atlas A2 and A3 products, it calls HCCP APIs. Therefore, the compatibility with CANN T versions is described separately here. The currently compatible CANN T versions are `8.2.T101`, `8.3.T101`, `8.5.T101`, `9.0.T101`, `9.1.T101`, and `9.2.T101`.
+
+#### 4.3.2 Installing the CANN Packages
+
+Refer to [Install CANN Quickly](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900/softwareinst/instg/instg_0000.html?OS=openEuler&InstallType=local)
+
+Commercial releases earlier than 9.1.0 require the `.run` package of the `toolkit`. Since CANN 8.5.0, operators such as `hccl` have been migrated to the ops package. These commercial releases also require the ops package for the corresponding SoC. Otherwise, the runtime reports an error indicating that library files such as `libhccl.so` are missing.
+
+Community releases earlier than 9.1.0 require an additional `.run` installation package named `Ascend-cann-{soc_name}-ops-{cann_version}-{os_arch}.run`. Select the CANN version, and then select the versions matching the SoC, operating system, and architecture. (If the `{soc_name}-ops` operator package is unavailable, a message indicating that the `libhccl.so` library file is missing may be displayed.)
+
+Resources: [CANN 9.1.0](https://www.hiascend.com/developer/download/community/result?module=cann&cann=9.1.0) and [CANN 9.0.0](https://www.hiascend.com/developer/download/community/result?module=cann&cann=9.0.0).
+
+The ops package file names corresponding to each SoC are as follows (using CANN 9.0.0 and x86_64 as an example):
+
+| SoC Version | Remarks | ops Package File Name |
+|----------|------|-------------|
+| Ascend 910B | 910b | `Ascend-cann-910b-ops_9.0.0_linux-x86_64.run` |
+| A3 | - | `Ascend-cann-A3-ops_9.0.0_linux-x86_64.run` |
+| Ascend 950PR&950DT products | 950 | `Ascend-cann-950-ops_9.0.0_linux-x86_64.run` |
+
+Install the toolkit package
+
+```sh
+chmod +x Ascend-cann-toolkit_${cann_version}_linux-$(uname -m).run
+# Default installation path
+./Ascend-cann-toolkit_${cann_version}_linux-$(uname -m).run --install
+# Custom installation path
+./Ascend-cann-toolkit_${cann_version}_linux-$(uname -m).run --install --install-path=${install_path}
+```
+
+Install the ops package
+
+```sh
+chmod +x Ascend-cann-${soc_name}-ops_${cann_version}_linux-$(uname -m).run
+# Default installation path
+./Ascend-cann-${soc_name}-ops_${cann_version}_linux-$(uname -m).run --install
+# Custom installation path
+./Ascend-cann-${soc_name}-ops_${cann_version}_linux-$(uname -m).run --install --install-path=${install_path}
+```
+
+Configure the CANN environment variables (default installation path):
+
+```bash
+source /usr/local/Ascend/ascend-toolkit/set_env.sh
+```
+
+Configure the CANN environment variables (custom installation path):
+
+```bash
+source ${install_path}/ascend-toolkit/set_env.sh
+```
+
+### 4.4 Summary of Build and Run Dependencies
+
+| Dependency | Usage Scenario | How to Obtain | Offline Environment Preparation |
+| --- | --- | --- | --- |
+| CANN toolkit | Compilation and running of the core library, device kernels, examples, and unit tests (UTs) | Install the CANN toolkit `.run` package | Download the toolkit installation package that matches the CPU architecture in advance |
+| CANN ops package | Runtime dependency for feature support scenarios such as CANN and SDMA | Install the ops `.run` package that matches the SoC and CANN version | Download the ops package that matches the SoC, CANN version, and CPU architecture in advance |
+| bisheng | Compilation of device-side AscendC kernels | Provided with the CANN toolkit | Run `set_env.sh` after the toolkit is installed |
+| Python dependencies | Build scripts, Python examples, and tests | `requirements.txt` and `requirements-examples.txt` | Prepare pip wheels in advance or use the internal PyPI source |
+| TorchNPU | Installation and running of the Python wheel; constructing NPU tensors from SHMEM memory | Install `torch-npu` according to the official matching relationship | Download the wheel that matches CANN, Python, and the CPU architecture in advance |
+| googletest v1.14.x | Unit test build with `-uttests` | Automatically pulled from GitCode by `scripts/build.sh` | Pre-place the package in `3rdparty/googletest` |
+| nlohmann/json v3.11.3 | Build dependency on the Ascend950 platform | Automatically pulled from GitCode by `scripts/build.sh -soc_type Ascend950` | Pre-place the package in `3rdparty/json` |
+
+### 4.5 Installing the `Pytorch` Framework and the `TorchNPU` Plugin
+
+You must install this package to compile and run operators that use torch tensors as input and output.
+
+Using `CANN 9.0.0` as an example, refer to the [Ascend for PyTorch 26.0.0-Ascend Community](https://www.hiascend.com/document/detail/zh/Pytorch/2600/configandinstg/instg/docs/zh/installation_guide/installation_via_binary_package.md) document.
+
+Open the page and select the corresponding version based on the system architecture, CANN version, and Python version. Then perform the installation using the installation command provided at the bottom of the page.
+
+The following uses `Python 3.11`, `PyTorch 2.7.1`, `TorchNPU 26.0.0`, and `aarch64` as an example.
+
++ Install the `PyTorch` framework:
+
+```sh
+# Download the PyTorch framework
+wget https://download.pytorch.org/whl/cpu/torch-2.7.1%2Bcpu-cp311-cp311-manylinux_2_28_aarch64.whl
+# Install
+pip3 install torch-2.7.1+cpu-cp311-cp311-manylinux_2_28_aarch64.whl
+```
+
++ Install the `TorchNPU` plugin
+
+```sh
+# Download the TorchNPU plugin
+wget https://gitcode.com/Ascend/pytorch/releases/download/v26.0.0-pytorch2.7.1/torch_npu-2.7.1.post4-cp311-cp311-manylinux_2_28_aarch64.whl
+# Installation command
+pip3 install torch_npu-2.7.1.post4-cp311-cp311-manylinux_2_28_aarch64.whl
+```
+
+
+### 4.6 Installing Python Dependencies
+
+> **Prerequisites**: This section uses the `requirements.txt` and `requirements-examples.txt` files in the repository root directory. Complete the code cloning step in [5.1.1 Source Compilation](#511-method-1-source-compilation) first.
+
+```bash
+# Basic dependencies (hard dependencies at build time and run time)
 python3 -m pip install -r requirements.txt
+
+# Additional dependencies for running Python examples (install as needed; can run independently)
+# requirements-examples.txt has the same numpy 1.x constraint as requirements.txt
+# (numpy>=1.24.4,<=1.26.4), and pandas/matplotlib/ml_dtypes are capped at versions
+# compatible with numpy 1.x. Running it alone or in any order does not upgrade numpy
+# to 2.x (code depending on the numpy 1.x ABI behaves unpredictably under numpy 2.x).
 python3 -m pip install -r requirements-examples.txt
 ```
 
-| Dependency | When needed | Offline preparation |
-| --- | --- | --- |
-| PyTorch and TorchNPU | Python wheel and examples that work with NPU tensors | Download wheels matching CANN, Python, and the CPU architecture. |
-| googletest v1.14.x | Building unit tests with `-uttests` | Place the source tree in `3rdparty/googletest`. |
-| nlohmann/json v3.11.3 | Building for `-soc_type Ascend950` | Place the source tree in `3rdparty/json`. |
+### 4.7 Third-Party Source Code Dependencies
 
-The build script fetches the two source dependencies from GitCode when needed. For offline builds, also stage the CANN installation packages and Python wheels, or use an internal package index. Install OpenMPI 4.0 or later for MPI-based examples. For RDMA with an HNS_1825 NIC, driver and firmware versions above 30.5.1.36 require a SHMEM release later than v1.7.0.
+Based on the build options, `scripts/build.sh` automatically prepares some third-party source code dependencies:
 
-### Docker
+- `googletest v1.14.x`: Automatically pulled and installed to `3rdparty/googletest` when you run `bash scripts/build.sh -uttests`. It is used for gtest/gmock unit tests.
+- `nlohmann/json v3.11.3`: Automatically pulled to `3rdparty/json` when you run `bash scripts/build.sh -soc_type Ascend950`. It is a build dependency related to the Ascend950 platform (such as UDMA/RDMA paths).
 
-Choose a [CANN container image](https://www.hiascend.com/developer/ascendhub) for your chip and OS, then follow the same source and dependency setup inside it. See the [container quick start](https://www.hiascend.com/developer/ascendhub/detail/17da20d1c2b6493cb38765adeba85884) for device mounts. Running unit tests and device examples inside a container requires the host NPU, driver, and CANN runtime.
+If the build environment cannot access GitCode, prepare the dependency directories in an environment with Internet access in advance, and copy them to `3rdparty/` in the repository root directory:
 
-## Quick Start
-
-Load the CANN environment and run `npu-smi info` to check that your devices are visible. Choose a source build for C/C++ development, a `.run` package for C/C++ deployment, or a Python wheel for the Python API.
-
-### Build from source
-
-```bash
-git clone https://gitcode.com/cann/shmem.git
-cd shmem
+```text
+3rdparty/
+├── googletest/
+└── json/
 ```
 
-Build from the repository root. Use `bash scripts/build.sh` on A2/A3, or `bash scripts/build.sh -soc_type Ascend950` on Ascend 950. Then load the installation and check the shared library:
+### 4.8 Optional Dependencies
+
+- MPI: OpenMPI 4.0+ (distributed communication scenarios)
+- PyTorch: 1.12+ (running Python examples)
+- HNS_1825 network adapter: The network adapter driver and firmware of version 30.5.1.36 or later do not support shmem v1.7.0 or earlier (RDMA scenario)
+
+### 4.9 Docker Container Environment
+
+Based on the chip type and operating system, you can pull a container with the CANN environment preconfigured from the [Ascend image repository](https://www.hiascend.com/developer/ascendhub) for project development. For how to use Docker, refer to the [Quick Start](https://www.hiascend.com/developer/ascendhub/detail/17da20d1c2b6493cb38765adeba85884) section in the Ascend CANN image repository
+
+This repository currently does not maintain an independent Dockerfile. It is recommended that you use the official Ascend CANN container image as the base environment, and then pull the source code, prepare third-party dependencies, and compile and run the project as described in this document. Running UTs or examples in a container still requires the host machine to provide an available NPU, driver, device mounting, and the CANN runtime.
+
+## 5 Getting Started
+
+### 5.1 Installation Methods
+
+This section applies to A2/A3 and Ascend950. Before installation, complete [Environment Preparation](#4-environment-preparation), load the CANN environment variables, and run `npu-smi info` to confirm that the devices are visible.
+
+Select an installation method based on the usage scenario:
+
+| Usage Scenario | Installation Method | Artifact or Installation Location |
+| --- | --- | --- |
+| Developing C/C++ operators from source code | Source compilation | The `install/` directory of the repository |
+| Deploying C/C++ dynamic libraries | Binary run package | `/usr/local/Ascend/shmem`, `$HOME/Ascend/shmem`, or a custom path |
+| Using the Python API | pip or a local Python wheel | `site-packages` of the current Python environment |
+
+#### 5.1.1 Method 1: Source Compilation
 
 ```bash
+# Clone the code repository
+git clone https://gitcode.com/cann/shmem.git
+cd shmem
+
+# Compile the core library (xDMA capability, examples, and tests are not included by default)
+# A2/A3 platform
+bash scripts/build.sh
+# Ascend950 platform
+bash scripts/build.sh -soc_type Ascend950
+
+# Configure environment variables
 source install/set_env.sh
+
+# Confirm that the core dynamic library has been generated
 test -f install/shmem/lib/libshmem.so
 ```
 
-The default build contains the core library. See the [compilation and build guide](compilation_build_guide_en.md) to add xDMA capabilities, examples, or tests.
+The default build does not include xDMA capability. For the build parameters and parameter dependencies of communication capabilities such as RDMA, see [Compilation and Build](compilation_build_guide_en.md).
 
-### Install a binary package
+#### 5.1.2 Method 2: Binary Package Installation
 
-Build the package with `bash scripts/build.sh -package` on A2/A3 or `bash scripts/build.sh -soc_type Ascend950 -package` on Ascend 950. The `package/$(uname -m)/` directory contains the `SHMEM_{version}_linux-{arch}.run` installer and the Python wheel.
+How to obtain:
 
-From a directory containing a single matching installer, check and install the package:
+- A2/A3 platform: `bash scripts/build.sh -package`
+- Ascend950 platform: `bash scripts/build.sh -soc_type Ascend950 -package`
+
+Build artifacts are located in `package/$(uname -m)/`:
+
+- `SHMEM_{version}_linux-{arch}.run`: C/C++ library installation package.
+- `cann_shmem-*.whl`: A Python wheel that contains both the 910 and 950 backends.
+
+Here, `{version}` indicates the software version, and `{arch}` indicates the CPU architecture.
 
 ```bash
-cd "package/$(uname -m)"
-chmod +x SHMEM_*.run
-./SHMEM_*.run --check
-./SHMEM_*.run --install
+chmod +x package/$(uname -m)/SHMEM_*.run
+
+# Perform only the chip, version, topology, communication capability, and package artifact checks
+package/$(uname -m)/SHMEM_*.run --check
+
+# Choose one of the following three installation methods
+package/$(uname -m)/SHMEM_*.run --install --check  # Check first and then install
+package/$(uname -m)/SHMEM_*.run --install          # Install directly
+package/$(uname -m)/SHMEM_*.run --install-path=/opt/ascend
 ```
 
-The check reports chip count, HDK and CANN versions, supported transport engines, and package contents. Review any `WARN` entries. Use `--install --check` to check and install in one command, or `--install-path=/opt/ascend` to install under `/opt/ascend/shmem`. The custom path must be absolute. Run the installer as the owner of the CANN installation.
+Before the run package is installed, the installer checks the CANN environment variables and confirms that the current user is the owner of the CANN installation directory. `--install-path` must be an absolute path. In the example, the package is installed to `/opt/ascend/shmem`.
 
-After installation, load `/usr/local/Ascend/shmem/latest/set_env.sh` for a default root install, `"${HOME}/Ascend/shmem/latest/set_env.sh"` for a default non-root install, or `/opt/ascend/shmem/latest/set_env.sh` for the custom path above. For example:
+`--check` outputs the number of chips and devices, HDK/CANN versions, MTE/SDMA/UDMA/RDMA support status, and package artifact status. If a check item reports `WARN`, handle it according to the final summary. A successful exit of the current command does not mean that all optional communication capabilities meet the requirements. For details about the check items, see the [shmem-config Command Reference](en/tools/shmem_config_guide.md).
+
+After the terminal outputs `SHMEM {version} install success, InstallPath: {install_dir}`, load the environment variables based on the executing user:
 
 ```bash
+# Default path for the root user
 source /usr/local/Ascend/shmem/latest/set_env.sh
+
+# Default path for a non-root user
+source "${HOME}/Ascend/shmem/latest/set_env.sh"
+
+# Custom path /opt/ascend
+source /opt/ascend/shmem/latest/set_env.sh
+
+# Confirm the installation result
 test -f "${SHMEM_HOME_PATH}/shmem/lib/libshmem.so"
 ```
 
-### Python installation
+#### 5.1.3 Method 3: pip Installation
 
-The `cann-shmem` wheel supports Python 3.10 through 3.12. Install compatible PyTorch and TorchNPU wheels first. Select the combination for your CANN release, Python version, and CPU architecture from the [TorchNPU compatibility matrix](https://gitcode.com/Ascend/pytorch/blob/master/COMPATIBILITY.md).
+You can install from the Ascend PyPI source or build a local wheel in the repository root directory. Choose either of the two methods:
 
-Install SHMEM from the Ascend index:
+> **Prerequisites**: The `cann-shmem` Python wheel supports only Python 3.10 to 3.12. First install the `torch-npu` version that matches the current CANN version, Python version, and CPU architecture as described in
+> [Installing the `Pytorch` Framework and the `TorchNPU` Plugin](#45-installing-the-pytorch-framework-and-the-torchnpu-plugin). The Ascend PyPI source currently
+> does not necessarily contain `torch-npu`. If you specify only this private source in a clean environment, the following error may occur:
+> `No matching distribution found for torch-npu`.
 
 ```bash
+# Recommended: After the matched torch-npu is installed, install cann-shmem from the Ascend PyPI source
 python3 -m pip install cann-shmem \
   --index-url https://ascend.devcloud.huaweicloud.com/cann/pypi/simple/
-```
 
-If other dependencies are unavailable there, pip also accepts `--extra-index-url https://pypi.org/simple/`. Pip considers candidates from both indexes and does not guarantee source priority. For production, install the matching TorchNPU wheel first and use just the Ascend index for SHMEM.
+# Convenient method: Allow pip to query the public PyPI when the private source lacks dependencies
+python3 -m pip install cann-shmem \
+  --index-url https://ascend.devcloud.huaweicloud.com/cann/pypi/simple/ \
+  --extra-index-url https://pypi.org/simple/
 
-Alternatively, build and install a wheel from the repository root. The `--no-deps` option preserves the PyTorch and TorchNPU versions installed above.
-
-```bash
+# Or build and install a local wheel
 bash scripts/build.sh -python_extension
-source install/set_env.sh
 python3 -m pip install --no-deps --force-reinstall dist/cann_shmem-*.whl
 ```
 
-Check the selected backend and package contents:
+The `--no-deps` option in the local wheel installation command skips dependency installation and reinstalls only SHMEM, preventing the matched PyTorch and TorchNPU from being replaced. Before running the command, you must prepare these two packages according to the preceding prerequisites.
+
+`--extra-index-url` makes pip merge all candidate versions from the two sources. It does not ensure that a package with the same name is downloaded preferentially from `--index-url`. To avoid dependency confusion and the automatic selection of the latest TorchNPU version that does not match CANN, it is recommended that in a production environment you first install the matched `torch-npu` by following the official TorchNPU documentation, and then install `cann-shmem` using only the Ascend private source.
+
+The Python wheel contains both the 910 backend for A2/A3 and the 950 backend for Ascend950, and the backend is automatically selected at run time. After installation, run:
 
 ```bash
 shmem-config --version
 shmem-config --backend
-shmem-config --check
 shmem-config --diagnose
 ```
 
-Expect backend `910` on A2/A3 and `950` on Ascend 950. In the diagnostic JSON, `native_load.ok` and `backend_artifacts.complete` should be true, while `degraded` and `multi_so_conflict.detected` should be false. For a source-built wheel, run `bash tests/package_smoke/run_install_smoke.sh dist/cann_shmem-*.whl` for the full installation smoke test. See the [shmem-config command reference](zh/tools/shmem_config_guide.md) for the report fields.
+The pass criteria are as follows:
 
-### Run an example
+- In the `--diagnose` output, `native_load.ok` is `true`, and `degraded` is `false`.
+- The `--backend` output is `910` on A2/A3 and `950` on Ascend950.
+- The `--diagnose` output is valid JSON, `backend_artifacts.complete` is `true`, and `multi_so_conflict.detected` is `false`.
 
-From the repository root, build examples with `bash scripts/build.sh -examples` on A2/A3 or `bash scripts/build.sh -soc_type Ascend950 -examples` on Ascend 950. Run allgather on two devices:
+After building the wheel from the source code, you can also run the complete smoke test script:
 
 ```bash
-cd examples/allgather
+bash tests/package_smoke/run_install_smoke.sh dist/cann_shmem-*.whl
+```
+
+For details about the automatic check upon the first `import shmem`, `--check`, `--diagnose`, and other parameters, see the [shmem-config Command Reference](en/tools/shmem_config_guide.md).
+
+#### 5.1.4 General Configuration (Optional)
+
+SHMEM enables TLS communication encryption by default, and this applies to the preceding three installation methods. To disable it, you need to proactively call the API before initialization:
+
+```c
+int32_t ret = aclshmemx_set_conf_store_tls(false, NULL, 0);
+```
+
+For details, see the security statement section.
+
+### 5.2 Running Samples
+
+Use `allgather` as an example to verify the core functions:
+
+1. Compile the code in the shmem/ directory:
+
+- A2/A3 platform:
+
+```sh
+bash scripts/build.sh -examples
+```
+
+- Ascend950 platform:
+
+```sh
+bash scripts/build.sh -soc_type Ascend950 -examples
+```
+
+2. Run the demo in the shmem/examples/allgather directory:
+
+```sh
 bash run.sh -pes 2 -type int32_t
 ```
 
-The [allgather README](../examples/allgather/README_en.md) describes the data type, address, port, and local device and PE options. For a debug build, add `-debug` to the build command. See the [troubleshooting guide](en/debug/Troubleshooting_FAQs.md).
+Note: The example and other sample code are for reference only. Use them with caution in production environments.
 
-## Function self-test case
+The `run.sh` script provides parameters such as `-pes`, `-type`, `-ipport`, `-gnpus`, `-fnpu`, and `-fpe` to customize the number of cards, data type, IP port, number of NPUs, starting NPU ID, and starting PE ID of the executed test case. Example:
 
-Building tests requires the toolkit, `bisheng`, and the build dependencies above. Running them requires accessible NPUs, the driver, and the CANN runtime.
+```sh
+# Two cards, data type int32_t
+bash run.sh -pes 2 -type int32_t
+```
 
-From the repository root, build unit tests with `bash scripts/build.sh -uttests` on A2/A3 or `bash scripts/build.sh -soc_type Ascend950 -uttests` on Ascend 950. Run the suite or select a subset by name:
+For more details about the parameters, see `examples/allgather/README_en.md`. For the `-ranks` and `-test_filter` parameters of the unit test script `scripts/run.sh`, see [8.1 Running Unit Tests](#81-running-unit-tests).
+
+### 5.3 Using the debug Mode
+
+Compile the code in the source shmem/ directory:
+
+- A2/A3 platform:
+
+   ```sh
+   bash scripts/build.sh -examples -debug
+   ```
+
+- Ascend950 platform:
+
+   ```sh
+   bash scripts/build.sh -soc_type Ascend950 -examples -debug
+   ```
+
+Note: The `-examples` parameter here is optional. It only provides a [usage reference](en/debug/Troubleshooting_FAQs.md#shmem-faqs).
+
+## 6 Python-Side Test Cases
+
+[Python API List](en/api/pythonAPI.md)
+
+1. Build or install the Python wheel by following "Method 3: pip Installation" in [Installation Methods](#51-installation-methods), and complete the backend and installation integrity checks.
+
+2. Set whether to enable TLS authentication. TLS authentication is enabled by default. To disable TLS authentication, use the following API:
+
+```python
+import shmem as shm
+shm.set_conf_store_tls(False, "")   # Disable TLS authentication
+```
+
+   ```python
+   import shmem as shm
+   tls_info = "xxx"
+   shm.set_conf_store_tls(True, tls_info)      # Enable TLS authentication
+   ```
+
+3. Use torchrun to run the test demo
+
+`test.py` is a test script that you write yourself. You can write it by referring to the existing test files (for example, `core/test_init_final.py`) in the `examples/python_extension/test/` directory of the repository.
+
+```sh
+torchrun --nproc-per-node=<n> test.py # <n> is the rank size to run. Replace it with the actual value
+```
+If the log prints "test.py running success!", the demo runs successfully
+
+## 7 `unique id` Initialization Method
+
+Note: When initializing using the unique id APIs, you can manually configure the environment variable SHMEM_UID_SESSION_ID or SHMEM_UID_SOCK_IFNAME. If both variables are configured, only SHMEM_UID_SESSION_ID is read. If neither variable is configured, available network interfaces are automatically searched by default. SHMEM_UID_SESSION_ID supports IPv4 addresses, IPv6 addresses, and host names.
+SHMEM_UID_SESSION_ID configuration examples:
 
 ```bash
+export SHMEM_UID_SESSION_ID=127.0.0.1:1234
+export SHMEM_UID_SESSION_ID=[6666:6666:6666:6666:6666:6666:6666:6666]:886
+export SHMEM_UID_SESSION_ID=[6666:6666:6666:6666:6666:6666:6666:6666%eth]:886
+export SHMEM_UID_SESSION_ID=localhost:8888
+```
+
+SHMEM_UID_SOCK_IFNAME configuration examples:
+
+```bash
+export SHMEM_UID_SOCK_IFNAME=enpxxxx:inet4  # Use IPv4
+export SHMEM_UID_SOCK_IFNAME=enpxxxx:inet6  # Use IPv6
+export SHMEM_UID_SOCK_IFNAME=eth0           # Automatically detect the available protocol (prefer IPv4)
+```
+
+If neither variable is configured, available network interfaces are automatically searched by default (both IPv4 and IPv6 are supported). Search priority: non-virtual network interfaces (excluding lo/docker/veth/br-/virbr/tun/tap) >> virtual network interfaces.
+
+- Python initialization example
+
+```python
+import shmem as ash
+
+# xxx
+
+uid = ash.aclshmem_get_unique_id()
+ret = ash.aclshmem_init_using_unique_id(rank, world_size, mem_size, uid)
+
+# xxx
+```
+
+After preparing the preceding startup code `init.py`, run `torchrun --nproc-per-node 8 init.py`. Change the process count 8 based on actual requirements. For more detailed examples, refer to the `unique_id_test.py` file.
+
+- C++ initialization example
+
+```cpp
+aclshmemx_uniqueid_t uid;
+aclshmemx_init_attr_t attributes;
+int ret = aclshmemx_get_uniqueid(&uid);
+ret = aclshmemx_set_attr_uniqueid_args(my_pe, n_pes, mem_size, &uid, &attributes);
+ret = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_UNIQUEID, &attributes);
+```
+
+## 8 Testing Framework
+
+- **Unit tests:** Cover core APIs (initialization, memory operations, synchronization, and so on), located in `tests/unittest/`
+
+- **Operator generalization tests:** Target communication-computation fusion operator samples, and support dynamic test data generation and precision verification
+
+Tests and samples are divided into the compilation phase and the running phase. The compilation phase requires the CANN toolkit, `bisheng`, and corresponding third-party dependencies. In the running phase, `scripts/run.sh` and `scripts/run_examples.sh` require an available NPU, driver, CANN runtime, and correct rank/NPU parameters. A common container environment without NPUs can be used for dependency checks and compilation verification, but cannot fully verify the runtime behavior of UTs or examples.
+
+### 8.1 Running Unit Tests
+
+```bash
+# Compile and run unit tests
+# A2/A3 platform
+bash scripts/build.sh -uttests
+# Ascend950 platform
+bash scripts/build.sh -soc_type Ascend950 -uttests
 bash scripts/run.sh
-# Run tests whose names contain Init on eight devices.
+```
+
+The run.sh script provides parameters such as `-ranks` and `-test_filter` to customize the number of cards, `gtest_filter`, and other settings of the executed test cases. For example:
+
+```bash
+# Eight cards, run all *Init* test cases
 bash scripts/run.sh -ranks 8 -test_filter Init
 ```
 
-After building with `-examples`, use `bash scripts/run_examples.sh` to run the example suite. To run an individual example, follow the README in its directory under [examples](../examples/). For a new GoogleTest case, place the source under [tests/unittest](../tests/unittest/) and follow the test conventions in the [Chinese quick start](quickstart.md).
+For details about the parameters, see the "run.sh Script Usage" section in the [Compilation and Build](compilation_build_guide_en.md) document.
 
-## Python Test Cases
-
-After [installing and checking the wheel](#python-installation), run the supplied initialization test on two devices from the repository root:
+### 8.2 Compiling and Running Samples
 
 ```bash
+# A2/A3 platform
+bash scripts/build.sh -examples
+# Ascend950 platform
+bash scripts/build.sh -soc_type Ascend950 -examples
+bash scripts/run_examples.sh
+```
+
+### 8.3 Running a Sample Independently
+
+You can view the README.md in the corresponding sample directory under the examples directory
+
+### 8.4 Running Python Test Cases
+
+First install the matched PyTorch and TorchNPU by following the prerequisite description in [pip Installation](#513-method-3-pip-installation).
+The following commands use `--no-deps` to retain installed dependencies.
+
+```bash
+# Build a Python wheel that contains both the 910 and 950 backends
+bash scripts/build.sh -python_extension
+# Install the wheel package generated by the build script
+python3 -m pip install --no-deps --force-reinstall dist/cann_shmem-*.whl
+# Confirm that the runtime environment selects the correct backend
+shmem-config --backend
+shmem-config --diagnose
+```
+
+```bash
+# Run the Python test on two cards
 torchrun --nproc-per-node=2 examples/python_extension/test/init_test.py
 ```
 
-The test prints `init_test.py running success!` on success. For custom tests, see the [Python API list](en/api/pythonAPI.md) and [additional test cases](../examples/python_extension/test/).
+### 8.5 Custom Tests
 
-## Unique ID Initialization Method
+Based on the gtest framework in the `tests/` directory, follow these rules when adding new test cases:
 
-Note: When the API for the unique ID is used for initialization, you can manually configure the environment variable `SHMEM_UID_SESSION_ID` or `SHMEM_UID_SOCK_IFNAME`. If both are configured, only `SHMEM_UID_SESSION_ID` will be read. If neither is configured, available network ports are automatically searched for by default. `SHMEM_UID_SESSION_ID` supports IPv4 addresses, IPv6 addresses, and host names.
-SHMEM_UID_SESSION_ID configuration example:
+- Test file naming: `{module}_test.cc`
+- Test case naming: `{FunctionName}_{Scenario}_Test`
 
-```bash
-SHMEM_UID_SESSION_ID=127.0.0.1:1234
-SHMEM_UID_SESSION_ID=[6666:6666:6666:6666:6666:6666:6666:6666]:886
-SHMEM_UID_SESSION_ID=[6666:6666:6666:6666:6666:6666:6666:6666%eth]:886
-SHMEM_UID_SESSION_ID=localhost:8888
+## 9 Configuration and Tuning (Optional, Advanced Usage)
+
+**1. Disable TLS Encryption (Improving Communication Performance)**
+
+TLS encryption is enabled by default. In a trusted intranet environment, you can disable it to improve the communication speed:
+
+```c
+int32_t ret = aclshmemx_set_conf_store_tls(false, NULL, 0);
 ```
 
-SHMEM_UID_SOCK_IFNAME configuration example:
-
-```bash
-SHMEM_UID_SOCK_IFNAME=enpxxxx:inet4  # IPv4
-SHMEM_UID_SOCK_IFNAME=enpxxxx:inet6  # IPv6
-SHMEM_UID_SOCK_IFNAME=eth0          # Automatically detect available protocols (IPv4 preferred)
+```python
+import shmem as shm
+shm.set_conf_store_tls(False, "")
 ```
 
-If this parameter is not set, available network ports (IPv4/IPv6) are automatically searched for by default. The search priority is as follows: non-virtual network ports (excluding lo/docker/veth/br-/virbr/tun/tap) >> virtual network ports.
+**2. Adjust the Shared Memory Size**
 
-In Python, rank 0 generates the ID and broadcasts it to its peers before SHMEM initialization. The [working example](../examples/python_extension/test/unique_id_test.py) also sets the device and initializes the process group:
+Specify the shared memory pool size during initialization (16GB by default) to adapt to large-memory scenarios:
 
-```bash
-torchrun --nproc-per-node=2 examples/python_extension/test/unique_id_test.py
+```c
+aclshmemx_init_attr_t attr;
+attr.local_mem_size = 32 * 1024 * 1024 * 1024; // 32GB
+aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr);
 ```
 
-In C++, share the ID from `aclshmemx_get_uniqueid` with all PEs, then call `aclshmemx_set_attr_uniqueid_args` and `aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_UNIQUEID, &attributes)` on each PE. See the [host initialization API](../include/host/init/shmem_host_init.h) for the arguments and return values.
+**3. Performance Tuning Recommendations**
 
-## Configuration and tuning
-
-- TLS is enabled by default. Configure certificates before initialization. For a trusted test network, the C API accepts `aclshmemx_set_conf_store_tls(false, NULL, 0)` and the Python API accepts `shm.set_conf_store_tls(False, "")`. See [Security Statements](SECURITY_en.md) for the production configuration.
-- Set the per-PE symmetric heap size in bytes during initialization. For example, pass `32ULL * 1024 * 1024 * 1024` as the size to `aclshmemx_set_attr_uniqueid_args` for a 32 GiB heap on a device with sufficient memory. Use the same size on every PE.
-- Use device-side operations to reduce host/device interactions and group PEs by physical node to reduce cross-node transfers. For large transfers over RDMA, build with `-enable_rdma`. For Ascend 950, see the [build guide](compilation_build_guide_en.md) to select the RDMA backend for your NIC.
+- Prefer device-side APIs to reduce Host-Device interactions;
+- When dividing communicators into groups, divide them by physical machine node to reduce cross-node communication;
+- For large-batch data transfer, enable the RDMA protocol (add `-DSHMEM_RDMA=ON` during compilation).
