@@ -21,8 +21,7 @@ def gen_random_data(size, dtype):
 
 def golden_generate(data_len, pe_size, data_type):
     golden_dir = f"allgather_{data_len}_{pe_size}"
-    cmd = f"mkdir golden/{golden_dir}"
-    os.system(cmd)
+    os.makedirs(f"golden/{golden_dir}", exist_ok=True)
 
     input_gm = np.zeros((pe_size, data_len), dtype=data_type)
     output_gm = np.zeros((pe_size * data_len), dtype=data_type)
