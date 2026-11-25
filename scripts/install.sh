@@ -211,8 +211,8 @@ function uninstall_process()
     if [ -d "$1" ]; then
         delete_empty_recursion "$1"
     fi
-    if [ "$2" == "y" -a -z "$(ls "${shmem_dir}")" ]; then
-        rm -rf "${shmem_dir}"
+    if [ "$2" = "y" ] && [ -z "$(ls -A "${shmem_dir}" 2>/dev/null)" ]; then
+        rmdir "${shmem_dir}" 2>/dev/null || true
     fi
     print "INFO" "SHMEM $(basename "$1") uninstall success!"
 }
