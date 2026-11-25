@@ -188,8 +188,9 @@ typedef enum : uint32_t {
  *   initialization, the frozen value afterwards); ENABLED requires the channel config APIs of the
  *   running libhcomm.so (otherwise initialization fails with ACLSHMEM_NOT_SUPPORTED).
  * - uint32_t sync_timeout_us: collective/software-local sync timeout in microseconds. Zero means
- *   unspecified: use 60 seconds before the first successful init, or inherit the frozen value afterwards.
+ *   unspecified: disable timeout checks before the first successful init, or inherit the frozen value afterwards.
  *   Explicit values must be at most ACLSHMEM_SYNC_TIMEOUT_MAX_US and match any frozen value.
+ *   This setting does not cover RoCE synchronization timeout reporting or change RoCE backend timeouts.
  * - uint32_t reserved[14]: reserved for future extensions; all entries must be zero.
  */
 typedef struct aclshmem_runtime_config {

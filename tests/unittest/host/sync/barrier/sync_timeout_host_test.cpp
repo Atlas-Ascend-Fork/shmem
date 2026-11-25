@@ -86,7 +86,7 @@ void TestNormal(int rank, int ranks, uint64_t bytes, SyncTimeoutMode mode, uint6
         sync_timeout_do(2, stream, util_get_ffts_config(), mode, SyncTimeoutFault::NONE, 1, output);
         ASSERT_EQ(aclrtSynchronizeStream(stream), ACL_SUCCESS);
         ASSERT_EQ(aclrtMemcpy(host.data(), kResultBytes, output, kResultBytes, ACL_MEMCPY_DEVICE_TO_HOST), ACL_SUCCESS);
-        EXPECT_EQ(host[1], ACLSHMEM_SYNC_TIMEOUT_DEFAULT_US);
+        EXPECT_EQ(host[1], 0U);
     }
     ASSERT_EQ(aclrtFree(output), ACL_SUCCESS);
     test_finalize(stream, rank % test_gnpu_num + test_first_npu);
@@ -98,6 +98,43 @@ void RunNormal(SyncTimeoutMode mode, uint64_t timeout_us = ACLSHMEM_SYNC_TIMEOUT
     test_mutil_task(
         [mode, timeout_us](int rank, int ranks, uint64_t bytes) { TestNormal(rank, ranks, bytes, mode, timeout_us); },
         kLocalBytes, test_gnpu_num);
+}
+
+void TestLatePe(int rank, int ranks, uint64_t bytes, SyncTimeoutMode mode)
+{
+    alarm(kProcessTimeoutSeconds);
+    aclrtStream stream = nullptr;
+    test_init(rank, ranks, bytes, &stream, 0);
+    ASSERT_FALSE(::testing::Test::HasFailure());
+    ASSERT_NE(stream, nullptr);
+    uint8_t* output = nullptr;
+    ASSERT_EQ(aclrtMalloc(reinterpret_cast<void**>(&output), kResultBytes, ACL_MEM_MALLOC_NORMAL_ONLY), ACL_SUCCESS);
+    ASSERT_EQ(aclrtMemset(output, kResultBytes, 0, kResultBytes), ACL_SUCCESS);
+    // Delay PE1 beyond the fault-test thresholds. With the default configuration the
+    // wait must remain unbounded and complete once PE1 arrives.
+    if (rank == 1) {
+        usleep(300000);
+    }
+    sync_timeout_do(2, stream, util_get_ffts_config(), mode, SyncTimeoutFault::NONE, 1, output);
+    ASSERT_EQ(aclrtSynchronizeStream(stream), ACL_SUCCESS);
+    std::vector<uint64_t> host(kResultBytes / sizeof(uint64_t));
+    ASSERT_EQ(aclrtMemcpy(host.data(), kResultBytes, output, kResultBytes, ACL_MEMCPY_DEVICE_TO_HOST), ACL_SUCCESS);
+    EXPECT_EQ(host[0], 1U);
+    EXPECT_EQ(host[1], 0U);
+    ASSERT_EQ(aclshmemi_control_barrier_all(), ACLSHMEM_SUCCESS);
+    ASSERT_EQ(aclrtFree(output), ACL_SUCCESS);
+    test_finalize(stream, rank % test_gnpu_num + test_first_npu);
+    alarm(0);
+}
+
+void RunLatePe(SyncTimeoutMode mode)
+{
+    if (test_gnpu_num < 2) {
+        GTEST_SKIP() << "late-PE scenario requires at least two local PEs";
+    }
+    test_mutil_task(
+        [mode](int rank, int ranks, uint64_t bytes) { TestLatePe(rank, ranks, bytes, mode); }, kLocalBytes,
+        test_gnpu_num);
 }
 
 struct Child {
@@ -244,7 +281,7 @@ void TestConfiguration(int rank, int, uint64_t bytes)
         test_set_attr(rank, 1, bytes, test_global_ipport, &attr);
         attr.runtime_config.sync_timeout_us = value;
         ASSERT_EQ(aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr), ACLSHMEM_SUCCESS);
-        ExpectDeviceTimeout(value == 0 ? ACLSHMEM_SYNC_TIMEOUT_DEFAULT_US : value);
+        ExpectDeviceTimeout(value);
         ASSERT_EQ(aclshmem_finalize(), ACLSHMEM_SUCCESS);
     }
     EXPECT_EQ(aclrtResetDevice(device), ACL_SUCCESS);
@@ -283,7 +320,7 @@ void TestConfigurationInheritance(int rank, int, uint64_t bytes)
     ASSERT_EQ(aclshmemx_finalize(3), ACLSHMEM_SUCCESS);
     ASSERT_EQ(aclshmemx_finalize(2), ACLSHMEM_SUCCESS);
     ASSERT_EQ(init(1, 0), ACLSHMEM_SUCCESS);
-    ExpectDeviceTimeout(ACLSHMEM_SYNC_TIMEOUT_DEFAULT_US, 1);
+    ExpectDeviceTimeout(0, 1);
     ASSERT_EQ(aclshmemx_finalize(1), ACLSHMEM_SUCCESS);
     EXPECT_EQ(aclrtResetDevice(device), ACL_SUCCESS);
     EXPECT_EQ(aclFinalize(), ACL_SUCCESS);
@@ -299,8 +336,16 @@ TEST(TEST_SYNC_TIMEOUT, ConfiguredThresholdAndReset) { RunNormal(SyncTimeoutMode
 TEST(TEST_SYNC_TIMEOUT, V3Normal) { RunNormal(SyncTimeoutMode::V3); }
 TEST(TEST_SYNC_TIMEOUT, V4Normal) { RunNormal(SyncTimeoutMode::V4); }
 TEST(TEST_SYNC_TIMEOUT, PublicVecNormal) { RunNormal(SyncTimeoutMode::VEC); }
+TEST(TEST_SYNC_TIMEOUT, V3LatePeDefaultConfig) { RunLatePe(SyncTimeoutMode::V3); }
+TEST(TEST_SYNC_TIMEOUT, V4LatePeDefaultConfig) { RunLatePe(SyncTimeoutMode::V4); }
+TEST(TEST_SYNC_TIMEOUT, PublicVecLatePeDefaultConfig) { RunLatePe(SyncTimeoutMode::VEC); }
 TEST(TEST_SYNC_TIMEOUT, SoftwareLocalNormal) { RunNormal(SyncTimeoutMode::SOFT); }
 TEST(TEST_SYNC_TIMEOUT, SignalCurrentNextAndWraparound) { RunNormal(SyncTimeoutMode::SIGNAL); }
 TEST(TEST_SYNC_TIMEOUT, V3MissingPe) { RunFault(SyncTimeoutMode::V3, SyncTimeoutFault::MISSING_PE); }
 TEST(TEST_SYNC_TIMEOUT, V4MissingPe) { RunFault(SyncTimeoutMode::V4, SyncTimeoutFault::MISSING_PE, 250000); }
 TEST(TEST_SYNC_TIMEOUT, SoftwareLocalMissingCore) { RunFault(SyncTimeoutMode::SOFT, SyncTimeoutFault::MISSING_CORE); }
+
+TEST(TEST_SYNC_TIMEOUT, V3TimeoutEnabledNormal) { RunNormal(SyncTimeoutMode::V3, 5000000); }
+TEST(TEST_SYNC_TIMEOUT, V4TimeoutEnabledNormal) { RunNormal(SyncTimeoutMode::V4, 5000000); }
+TEST(TEST_SYNC_TIMEOUT, PublicVecTimeoutEnabledNormal) { RunNormal(SyncTimeoutMode::VEC, 5000000); }
+TEST(TEST_SYNC_TIMEOUT, SoftwareLocalTimeoutEnabledNormal) { RunNormal(SyncTimeoutMode::SOFT, 5000000); }

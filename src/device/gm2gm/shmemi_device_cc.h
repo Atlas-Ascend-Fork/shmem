@@ -94,14 +94,15 @@ ACLSHMEM_DEVICE __gm__ aclshmemx_sync_bit* aclshmemi_get_core_sync_counter()
     return (__gm__ aclshmemx_sync_bit*)aclshmemi_get_state()->core_sync_counter;
 }
 
-ACLSHMEM_DEVICE void aclshmemi_sync_core_soft(aclshmemi_sync_timeout* parent = nullptr)
+template <bool EnableTimeout>
+ACLSHMEM_DEVICE void aclshmemi_sync_core_soft_impl(aclshmemi_sync_context<EnableTimeout> context)
 {
     if ASCEND_IS_AIC {
         return;
     }
-    aclshmemi_sync_timeout context =
-        parent != nullptr ? *parent : aclshmemi_sync_timeout(aclshmemi_sync_algorithm::LOCAL, -1);
-    context.peer = aclshmemi_get_state()->mype;
+    if constexpr (EnableTimeout) {
+        context.peer = aclshmemi_get_state()->mype;
+    }
     MSTX_FUSE_SCOPE_START();
     int32_t cur_block_idx = AscendC::GetBlockIdx();
     int32_t block_dim = AscendC::GetBlockNum() * AscendC::GetTaskRation();
@@ -114,7 +115,7 @@ ACLSHMEM_DEVICE void aclshmemi_sync_core_soft(aclshmemi_sync_timeout* parent = n
         core_sync_stride++;
     }
     core_sync_stride = core_sync_stride > 0 ? core_sync_stride : 1;
-    int32_t count = aclshmemi_load((__gm__ int32_t*)(sync_counter)) + 1;
+    int32_t count = aclshmemi_next_generation(aclshmemi_load((__gm__ int32_t*)(sync_counter)));
 
     int32_t shift = 1;
     int32_t offset = 0;
@@ -122,10 +123,13 @@ ACLSHMEM_DEVICE void aclshmemi_sync_core_soft(aclshmemi_sync_timeout* parent = n
         int32_t next = (cur_block_idx + shift) % block_dim;
 
         aclshmemi_signal_set((__gm__ int32_t*)(sync_pool + next * core_sync_stride + offset), count);
-        context.local_round = offset;
-        context.wait_core = (cur_block_idx - shift + block_dim) % block_dim;
-        context.slot = cur_block_idx * core_sync_stride + offset;
-        aclshmemi_sync_wait((__gm__ int32_t*)(sync_pool + context.slot), count, context);
+        const int32_t slot = cur_block_idx * core_sync_stride + offset;
+        if constexpr (EnableTimeout) {
+            context.local_round = offset;
+            context.wait_core = (cur_block_idx - shift + block_dim) % block_dim;
+            context.slot = slot;
+        }
+        aclshmemi_sync_wait((__gm__ int32_t*)(sync_pool + slot), count, context);
 
         shift *= SHIFT_MULTIPLIER;
         offset++;
@@ -136,14 +140,40 @@ ACLSHMEM_DEVICE void aclshmemi_sync_core_soft(aclshmemi_sync_timeout* parent = n
     MSTX_CROSS_CORE_BARRIER_REPORT(block_dim);
 }
 
+// A standalone local barrier selects its timeout mode once on entry.
+ACLSHMEM_DEVICE void aclshmemi_sync_core_soft()
+{
+    if ASCEND_IS_AIC {
+        return;
+    }
+    const uint32_t timeout_us = aclshmemi_get_sync_timeout_us();
+    if (timeout_us == 0) {
+        aclshmemi_sync_context<false> context(aclshmemi_sync_algorithm::LOCAL, -1, 0);
+        aclshmemi_sync_core_soft_impl(context);
+    } else {
+        aclshmemi_sync_timeout context(aclshmemi_sync_algorithm::LOCAL, -1, timeout_us);
+        aclshmemi_sync_core_soft_impl(context);
+    }
+}
+
 /* Level 1: sync between vec cores (within a device) */
-template <bool IS_AIV_ONLY>
-ACLSHMEM_DEVICE void aclshmemi_sync_core(aclshmemi_sync_timeout* context = nullptr)
+template <bool IS_AIV_ONLY, bool EnableTimeout>
+ACLSHMEM_DEVICE void aclshmemi_sync_core(aclshmemi_sync_context<EnableTimeout>& context)
 {
 #ifdef __CCE_AICORE_ENABLE_MIX__
     AscendC::SyncAll<IS_AIV_ONLY>();
 #else
-    aclshmemi_sync_core_soft(context);
+    aclshmemi_sync_core_soft_impl(context);
+#endif
+}
+
+template <bool IS_AIV_ONLY>
+ACLSHMEM_DEVICE void aclshmemi_sync_core()
+{
+#ifdef __CCE_AICORE_ENABLE_MIX__
+    AscendC::SyncAll<IS_AIV_ONLY>();
+#else
+    aclshmemi_sync_core_soft();
 #endif
 }
 
@@ -258,7 +288,7 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v1(aclshmem_team_t team_idx)
 
     int shift = 1;
     int my_pe_in_team = (my_pe - start) / stride;
-    int32_t count = aclshmemi_load((__gm__ int32_t*)sync_counter) + 1;
+    int32_t count = aclshmemi_next_generation(aclshmemi_load((__gm__ int32_t*)sync_counter));
     if ASCEND_IS_AIV {
         int32_t offset = 0;
         const int multiplier = 2;
@@ -303,7 +333,7 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v2(aclshmem_team_t team)
 
     auto sync_pool = aclshmemi_get_team_sync_pool(team);
     auto sync_counter = aclshmemi_get_team_sync_counter(team);
-    int32_t count = aclshmemi_load((__gm__ int32_t*)sync_counter) + 1;
+    int32_t count = aclshmemi_next_generation(aclshmemi_load((__gm__ int32_t*)sync_counter));
     aclshmemi_sync_core<IS_AIV_ONLY>();
 
     if ASCEND_IS_AIV {
@@ -351,10 +381,10 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v2(aclshmem_team_t team)
  * respectively.
  *  Performs better than Group Dissemination Sync at small scale (eg. 8 ranks).
  */
-template <bool IS_AIV_ONLY = true>
-ACLSHMEM_DEVICE void aclshmemi_sync_npu_v3(aclshmem_team_t team_idx)
+template <bool IS_AIV_ONLY, bool EnableTimeout>
+ACLSHMEM_DEVICE void aclshmemi_sync_npu_v3_impl(aclshmem_team_t team_idx, uint32_t timeout_us)
 {
-    aclshmemi_sync_timeout timeout(aclshmemi_sync_algorithm::V3, team_idx);
+    aclshmemi_sync_context<EnableTimeout> timeout(aclshmemi_sync_algorithm::V3, team_idx, timeout_us);
     aclshmemx_team_t* team = aclshmemi_get_state()->team_pools[team_idx];
     int32_t vec_id = AscendC::GetBlockIdx();
     // V3 has a fixed local-barrier sequence, so AIVs can use the full worker
@@ -372,10 +402,12 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v3(aclshmem_team_t team_idx)
 
     int32_t k = vec_size < size ? vec_size : size;
     int32_t my_pe_in_team = (my_pe - start) / stride;
-    int32_t count = aclshmemi_load((__gm__ int32_t*)sync_counter) + 1;
+    int32_t count = aclshmemi_next_generation(aclshmemi_load((__gm__ int32_t*)sync_counter));
 
-    timeout.generation = count;
-    aclshmemi_sync_core<IS_AIV_ONLY>(&timeout);
+    if constexpr (EnableTimeout) {
+        timeout.generation = count;
+    }
+    aclshmemi_sync_core<IS_AIV_ONLY>(timeout);
 
     if ASCEND_IS_AIV {
         // Only the first k AIVs participate in remote polling. Without this
@@ -388,10 +420,12 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v3(aclshmem_team_t team_idx)
                 } else {
                     // read remote
                     int32_t remote_pe = start + i * stride;
-                    timeout.phase = aclshmemi_sync_phase::WAIT;
-                    timeout.round = 0;
-                    timeout.slot = 0;
-                    timeout.peer = remote_pe;
+                    if constexpr (EnableTimeout) {
+                        timeout.phase = aclshmemi_sync_phase::WAIT;
+                        timeout.round = 0;
+                        timeout.slot = 0;
+                        timeout.peer = remote_pe;
+                    }
                     aclshmemi_sync_wait((__gm__ int32_t*)aclshmem_ptr(sync_pool, remote_pe), count, timeout);
                 }
             }
@@ -407,10 +441,23 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v3(aclshmem_team_t team_idx)
 #endif
     }
 
-    timeout.phase = aclshmemi_sync_phase::LOCAL_EXIT;
-    aclshmemi_sync_core<IS_AIV_ONLY>(&timeout);
+    if constexpr (EnableTimeout) {
+        timeout.phase = aclshmemi_sync_phase::LOCAL_EXIT;
+    }
+    aclshmemi_sync_core<IS_AIV_ONLY>(timeout);
     MSTX_FUSE_SCOPE_END();
     MSTX_BARRIER_NPU_REPORT(size, vec_size);
+}
+
+template <bool IS_AIV_ONLY = true>
+ACLSHMEM_DEVICE void aclshmemi_sync_npu_v3(aclshmem_team_t team_idx)
+{
+    const uint32_t timeout_us = aclshmemi_get_sync_timeout_us();
+    if (timeout_us == 0) {
+        aclshmemi_sync_npu_v3_impl<IS_AIV_ONLY, false>(team_idx, 0);
+    } else {
+        aclshmemi_sync_npu_v3_impl<IS_AIV_ONLY, true>(team_idx, timeout_us);
+    }
 }
 
 /** K-ary dissemination sync (push mode).
@@ -419,10 +466,10 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v3(aclshmem_team_t team_idx)
  *  polls only local GM. It reuses the v3 per-team sync pool and counter, so no
  *  additional symmetric memory is required.
  */
-template <bool IS_AIV_ONLY = true>
-ACLSHMEM_DEVICE void aclshmemi_sync_npu_v4(aclshmem_team_t team_idx)
+template <bool IS_AIV_ONLY, bool EnableTimeout>
+ACLSHMEM_DEVICE void aclshmemi_sync_npu_v4_impl(aclshmem_team_t team_idx, uint32_t timeout_us)
 {
-    aclshmemi_sync_timeout timeout(aclshmemi_sync_algorithm::V4, team_idx);
+    aclshmemi_sync_context<EnableTimeout> timeout(aclshmemi_sync_algorithm::V4, team_idx, timeout_us);
     aclshmemx_team_t* team = aclshmemi_get_state()->team_pools[team_idx];
     int32_t vec_id = AscendC::GetBlockIdx();
     // AIC and AIV must derive identical radices and local-barrier round counts.
@@ -477,23 +524,29 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v4(aclshmem_team_t team_idx)
     if ASCEND_IS_AIV {
         dcci_cacheline((__gm__ uint8_t*)sync_counter);
     }
-    aclshmemi_sync_core<IS_AIV_ONLY>(&timeout);
+    aclshmemi_sync_core<IS_AIV_ONLY>(timeout);
     if ASCEND_IS_AIV {
         if (vec_id == 0) {
-            count = aclshmemi_load((__gm__ int32_t*)sync_counter) + 1;
+            count = aclshmemi_next_generation(aclshmemi_load((__gm__ int32_t*)sync_counter));
             aclshmemi_signal_set((__gm__ int32_t*)sync_counter, count);
         }
     }
-    timeout.phase = aclshmemi_sync_phase::LOCAL_PUBLISH;
-    aclshmemi_sync_core<IS_AIV_ONLY>(&timeout);
+    if constexpr (EnableTimeout) {
+        timeout.phase = aclshmemi_sync_phase::LOCAL_PUBLISH;
+    }
+    aclshmemi_sync_core<IS_AIV_ONLY>(timeout);
     if ASCEND_IS_AIV {
         count = aclshmemi_load((__gm__ int32_t*)sync_counter);
     }
 
-    timeout.generation = count;
+    if constexpr (EnableTimeout) {
+        timeout.generation = count;
+    }
     int32_t pow_k = 1;
     for (int32_t round = 0; round < phases; round++) {
-        timeout.round = round;
+        if constexpr (EnableTimeout) {
+            timeout.round = round;
+        }
         if ASCEND_IS_AIV {
             for (int32_t i = vec_id + 1; i <= slot_stride; i += vec_size) {
                 int32_t shift = i * pow_k;
@@ -503,9 +556,11 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v4(aclshmem_team_t team_idx)
                 int32_t to_nbr_idx = (my_pe_in_team + shift) % size;
                 int32_t to_pe = team->pe_mapping[to_nbr_idx];
                 int32_t slot = round * slot_stride + (i - 1);
-                timeout.phase = aclshmemi_sync_phase::SEND;
-                timeout.slot = slot;
-                timeout.peer = to_pe;
+                if constexpr (EnableTimeout) {
+                    timeout.phase = aclshmemi_sync_phase::SEND;
+                    timeout.slot = slot;
+                    timeout.peer = to_pe;
+                }
                 aclshmemi_signal_set((__gm__ int32_t*)aclshmem_ptr(sync_pool + slot, to_pe), count);
             }
             for (int32_t i = vec_id + 1; i <= slot_stride; i += vec_size) {
@@ -514,14 +569,18 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v4(aclshmem_team_t team_idx)
                     break;
                 }
                 int32_t slot = round * slot_stride + (i - 1);
-                timeout.phase = aclshmemi_sync_phase::WAIT;
-                timeout.slot = slot;
-                timeout.peer = team->pe_mapping[(my_pe_in_team - shift + size) % size];
+                if constexpr (EnableTimeout) {
+                    timeout.phase = aclshmemi_sync_phase::WAIT;
+                    timeout.slot = slot;
+                    timeout.peer = team->pe_mapping[(my_pe_in_team - shift + size) % size];
+                }
                 aclshmemi_sync_wait((__gm__ int32_t*)(sync_pool + slot), count, timeout);
             }
         }
-        timeout.phase = aclshmemi_sync_phase::LOCAL_EXIT;
-        aclshmemi_sync_core<IS_AIV_ONLY>(&timeout);
+        if constexpr (EnableTimeout) {
+            timeout.phase = aclshmemi_sync_phase::LOCAL_EXIT;
+        }
+        aclshmemi_sync_core<IS_AIV_ONLY>(timeout);
         pow_k *= k;
     }
 
@@ -529,6 +588,17 @@ ACLSHMEM_DEVICE void aclshmemi_sync_npu_v4(aclshmem_team_t team_idx)
     // All launched cores participate in the barrier, including AIVs outside
     // the communication worker budget. Report their actual per-side count.
     MSTX_BARRIER_NPU_REPORT(size, AscendC::GetBlockNum() * AscendC::GetTaskRation());
+}
+
+template <bool IS_AIV_ONLY = true>
+ACLSHMEM_DEVICE void aclshmemi_sync_npu_v4(aclshmem_team_t team_idx)
+{
+    const uint32_t timeout_us = aclshmemi_get_sync_timeout_us();
+    if (timeout_us == 0) {
+        aclshmemi_sync_npu_v4_impl<IS_AIV_ONLY, false>(team_idx, 0);
+    } else {
+        aclshmemi_sync_npu_v4_impl<IS_AIV_ONLY, true>(team_idx, timeout_us);
+    }
 }
 
 template <bool IS_AIV_ONLY = true>
@@ -609,7 +679,7 @@ ACLSHMEM_DEVICE void aclshmemi_barrier_cross_host(aclshmemx_team_t* team)
 
     int shift = 1;
     int my_pe_in_team = (my_pe - start) / stride;
-    int32_t count = aclshmemi_load((__gm__ int32_t*)sync_counter) + 1;
+    int32_t count = aclshmemi_next_generation(aclshmemi_load((__gm__ int32_t*)sync_counter));
     aclshmemi_store((__gm__ int32_t*)sync_counter, count);
     dcci_cacheline((__gm__ uint8_t*)sync_counter);
     while (shift < size) {

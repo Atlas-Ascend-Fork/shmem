@@ -195,7 +195,7 @@ UID 的 `addr` 来自 `SHMEM_UID_SESSION_ID` 或 `SHMEM_UID_SOCK_IFNAME`；`magi
 | `option_attr.control_operation_timeout` | 转为 `SmemGroupOption.timeoutMs` |
 | `option_attr.sockFd` | rank 0 预绑定 socket |
 | `runtime_config.udma_shared_jetty` | UDMA shared jetty 三态开关（`ACLSHMEM_CONFIG_DEFAULT/DISABLED/ENABLED`），进程级配置，见 §3.3.2 |
-| `runtime_config.sync_timeout_us` | 同步超时阈值，单位微秒；0 表示未指定，首次默认 60 秒，后续继承冻结值；显式值不得超过 `ACLSHMEM_SYNC_TIMEOUT_MAX_US` |
+| `runtime_config.sync_timeout_us` | 同步超时阈值，单位微秒；0 表示未指定，首次关闭超时检测，后续继承冻结值；显式值不得超过 `ACLSHMEM_SYNC_TIMEOUT_MAX_US` |
 | `runtime_config.reserved` | 预留槽，必须全零 |
 
 **传输通路标志**

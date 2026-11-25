@@ -290,11 +290,12 @@ ACLSHMEM_HOST_API int aclshmemx_set_udma_peer_qp_masks(const uint64_t* masks, ui
  *         Keeping it disabled works on old and new runtimes alike. reserved must be all zero
  *         (ACLSHMEM_INVALID_PARAM otherwise).
  *       - sync_timeout_us: collective/software-local sync timeout in microseconds. Zero means unspecified
- *         (60 seconds before the first successful init; the frozen value afterwards). Explicit values must
+ *         (disabled before the first successful init; the frozen value afterwards). Explicit values must
  *         fit in uint32_t ([1, ACLSHMEM_SYNC_TIMEOUT_MAX_US]). A conflicting
  *         explicit value while any instance is alive returns ACLSHMEM_NOT_SUPPORTED. Failed initialization
- *         does not publish the value; finalizing the last instance restores 60 seconds. Hardware SyncAll
- *         and RoCE waits keep their existing behavior. Configure each PE before initialization.
+ *         does not publish the value; finalizing the last instance disables these software timeout checks.
+ *         This setting does not cover RoCE synchronization timeout reporting. Hardware SyncAll and existing
+ *         RoCE backend timeouts and error handling are unchanged. Configure each PE before initialization.
  *       - The attribute layout is selected by attributes->option_attr.version, written by the header's
  *         default member initializer. Do not overwrite option_attr wholesale. Historical values
  *         {0, 0x00010018, 0x00010078, 0x000100B8} are interpreted as the legacy 120-byte layout and

@@ -18,9 +18,11 @@ Collective synchronization timeout reporting
 
 The synchronization interfaces ``aclshmem_sync``, ``aclshmem_sync_all``,
 ``aclshmemx_sync_vec`` and ``aclshmemx_sync_vec_all`` detect timeouts in
-software signal polling, including software local barriers.
+software signal polling on supported HCCS/UB paths, including software local
+barriers, when configured. RoCE synchronization timeout reporting is not
+covered by this setting.
 
-The default timeout is **60 seconds**. Set the initialization attribute
+Timeout detection is **disabled by default**. Set a positive initialization attribute
 ``runtime_config.sync_timeout_us`` to configure the threshold in microseconds::
 
     aclshmemx_init_attr_t attr{};
@@ -28,16 +30,22 @@ The default timeout is **60 seconds**. Set the initialization attribute
     attr.runtime_config.sync_timeout_us = 5000000; // 5 seconds
     int ret = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr);
 
-Zero means unspecified: use the default before the first successful initialization,
+Zero means unspecified: disable timeout checks before the first successful initialization,
 or inherit the effective process value for later instances. Explicit thresholds
 must fit in uint32_t: [1, ``ACLSHMEM_SYNC_TIMEOUT_MAX_US``] (UINT32_MAX, approximately
 71 minutes 35 seconds). While any instance is
 alive, a conflicting explicit threshold returns ``ACLSHMEM_NOT_SUPPORTED``.
 Failed initialization does not publish a new value. Finalizing the last instance
-restores the default. Set the attribute on every PE and check initialization errors.
+restores the disabled default. Set the attribute on every PE and check initialization errors.
 The threshold covers the synchronization interfaces listed above and software local
-barriers. Rebuild the library and device kernels together.
-Each core records its own start time on sync entry and shares it across phases. Time is checked every
+barriers. With timeout checks disabled, the original signal polling loop is used,
+without failure counters or clock reads. The timeout mode is selected once on entry;
+software local barriers inside the sync inherit that selection.
+Disabled software waits have no timeout: they continue until the required
+signal arrives. This does not disable existing RoCE backend timeouts or errors.
+Hardware waits retain their existing behavior.
+Rebuild the library and device kernels together.
+When enabled, each core records its own start time on sync entry and shares it across phases. Time is checked every
 1024 unsuccessful polls; the internal batch size is not printed. Signal
 polling accepts expected or expected + 1 using uint32 arithmetic, before
 checking for timeout. The threshold is not a guaranteed upper bound on
@@ -88,10 +96,11 @@ PE0/AIV1 is waiting for PE1, whose signal is still 0 instead of 1.
     Time checks require software polling to continue. They cannot interrupt
     blocked memory accesses, hardware event waits or hardware
     ``AscendC::SyncAll`` barriers. Software local barrier tests do not
-    establish timeout coverage for hardware local barriers. RoCE interfaces,
-    standalone quiet and ordinary point-to-point waits retain their existing
-    behavior. Timeout detection applies only to the software polling paths
-    covered by this mechanism.
+    establish timeout coverage for hardware local barriers. RoCE synchronization
+    timeout reporting is not supported by this setting; RoCE waits and backend
+    error handling retain their existing behavior. Standalone quiet and ordinary
+    point-to-point waits also retain their existing behavior. Timeout detection
+    applies only to the software polling paths covered by this mechanism.
 
 shmem_device_mo.h
 ---------------------------------

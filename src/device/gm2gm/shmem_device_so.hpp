@@ -413,8 +413,9 @@ ACLSHMEM_DEVICE int32_t aclshmemi_signal_wait_until_eq_for_barrier(__gm__ int32_
             return *sig_addr;
         }
 
-        // in case when peer pe enters next barrier
-        if (*sig_addr == cmp_val + 1) {
+        // in case when peer pe enters next barrier. Compare the raw bits in uint32_t so
+        // that INT32_MAX -> INT32_MIN advances without signed-overflow undefined behavior.
+        if (static_cast<uint32_t>(*sig_addr) == static_cast<uint32_t>(cmp_val) + 1U) {
             return *sig_addr;
         }
     } while (true);

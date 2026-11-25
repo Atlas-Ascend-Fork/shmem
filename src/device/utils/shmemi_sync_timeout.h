@@ -38,16 +38,32 @@ ACLSHMEM_DEVICE uint64_t aclshmemi_sync_cycle()
 #endif
 }
 
-ACLSHMEM_DEVICE uint64_t aclshmemi_get_sync_timeout_us()
+ACLSHMEM_DEVICE uint32_t aclshmemi_get_sync_timeout_us()
 {
     auto config = reinterpret_cast<__gm__ aclshmemi_device_runtime_config_t*>(
         reinterpret_cast<__gm__ uint8_t*>(aclshmemi_get_state()) + sizeof(aclshmem_device_host_state_t));
     return config->sync_timeout_us;
 }
 
-struct aclshmemi_sync_timeout {
+// Advance a barrier generation without signed overflow. The wait matchers accept both the
+// current and the next generation, so wrapping INT32_MAX -> INT32_MIN keeps the sequence
+// continuous on implementations where the value is stored as int32_t.
+ACLSHMEM_DEVICE int32_t aclshmemi_next_generation(int32_t current)
+{
+    return current == 2147483647 ? (-2147483647 - 1) : current + 1;
+}
+
+// The disabled form is the primary definition: it carries no state and performs no
+// timing. The enabled specialization below adds the timer fields and checks.
+template <bool EnableTimeout>
+struct aclshmemi_sync_context {
+    ACLSHMEM_DEVICE aclshmemi_sync_context(aclshmemi_sync_algorithm, int32_t, uint32_t) {}
+};
+
+template <>
+struct aclshmemi_sync_context<true> {
     uint64_t start = aclshmemi_sync_cycle();
-    uint64_t timeout_us = aclshmemi_get_sync_timeout_us();
+    uint64_t timeout_us;
     aclshmemi_sync_algorithm algorithm;
     int32_t team;
     aclshmemi_sync_phase phase = aclshmemi_sync_phase::LOCAL_ENTER;
@@ -58,8 +74,9 @@ struct aclshmemi_sync_timeout {
     int32_t local_round = -1;
     int32_t wait_core = -1;
 
-    ACLSHMEM_DEVICE aclshmemi_sync_timeout(aclshmemi_sync_algorithm algorithm_, int32_t team_)
-        : algorithm(algorithm_), team(team_)
+    ACLSHMEM_DEVICE aclshmemi_sync_context(
+        aclshmemi_sync_algorithm algorithm_, int32_t team_, uint32_t timeout_us_ = aclshmemi_get_sync_timeout_us())
+        : timeout_us(timeout_us_), algorithm(algorithm_), team(team_)
     {}
 
     ACLSHMEM_DEVICE void check(int64_t expected, int64_t observed)
@@ -87,19 +104,29 @@ struct aclshmemi_sync_timeout {
     }
 };
 
+using aclshmemi_sync_timeout = aclshmemi_sync_context<true>;
+
+ACLSHMEM_DEVICE int32_t aclshmemi_signal_wait_until_eq_for_barrier(__gm__ int32_t* address, int32_t expected);
+
 ACLSHMEM_DEVICE void dcci_cacheline(__gm__ uint8_t* addr);
 
-ACLSHMEM_DEVICE void aclshmemi_sync_wait(__gm__ int32_t* address, int32_t expected, aclshmemi_sync_timeout& context)
+template <bool EnableTimeout>
+ACLSHMEM_DEVICE void aclshmemi_sync_wait(
+    __gm__ int32_t* address, int32_t expected, aclshmemi_sync_context<EnableTimeout>& context)
 {
-    uint32_t failures = 0;
-    while (true) {
-        dcci_cacheline(reinterpret_cast<__gm__ uint8_t*>(address));
-        const int32_t observed = *address;
-        if (observed == expected || static_cast<uint32_t>(observed) == static_cast<uint32_t>(expected) + 1U) {
-            return;
-        }
-        if ((++failures & (ACLSHMEMI_SYNC_TIMEOUT_K - 1U)) == 0) {
-            context.check(expected, observed);
+    if constexpr (!EnableTimeout) {
+        (void)aclshmemi_signal_wait_until_eq_for_barrier(address, expected);
+    } else {
+        uint32_t failures = 0;
+        while (true) {
+            dcci_cacheline(reinterpret_cast<__gm__ uint8_t*>(address));
+            const int32_t observed = *address;
+            if (observed == expected || static_cast<uint32_t>(observed) == static_cast<uint32_t>(expected) + 1U) {
+                return;
+            }
+            if ((++failures & (ACLSHMEMI_SYNC_TIMEOUT_K - 1U)) == 0) {
+                context.check(expected, observed);
+            }
         }
     }
 }

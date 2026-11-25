@@ -264,9 +264,9 @@ Ascend950 RDMA V2 建链监听端口由系统自动分配，用户无需配置 R
 
 #### Q: 同步报出 `SHMEM_SYNC_TIMEOUT`，如何解读和处理？
 
-#### A: 同步接口的跨 PE 信号等待及卡内软件汇合支持超时检测，默认阈值为 60 秒
+#### A: 同步接口的跨 PE 信号等待及卡内软件汇合支持超时检测，默认关闭，需显式设置阈值开启
 
-在初始化属性中设置 `attr.runtime_config.sync_timeout_us`，单位为微秒。例如 `attr.runtime_config.sync_timeout_us = 5000000` 设置为 5 秒，随后调用初始化接口并检查返回值。0 表示未指定：首个实例使用默认 60 秒，后续实例继承进程中已冻结的生效值。显式值的有效范围为 `[1, ACLSHMEM_SYNC_TIMEOUT_MAX_US]`，字段类型为 `uint32_t`，上限为 `UINT32_MAX` 微秒（约 71 分 35 秒），赋值前应确保原始值不超过该范围。实例存活期间，新实例请求冲突的显式阈值返回 `ACLSHMEM_NOT_SUPPORTED`。初始化失败不提交新配置；最后一个实例释放后恢复默认值。每个 PE 分别填写该属性。不配置 RoCE 或中断硬件 `SyncAll`，库与设备内核须一起重新编译。每核从进入同步起独立计时，后续阶段共用起始时刻；分批检查失败轮询，因此阈值不是严格的退出时间上界，内部检查间隔不打印。
+在初始化属性中设置 `attr.runtime_config.sync_timeout_us`，单位为微秒。例如 `attr.runtime_config.sync_timeout_us = 5000000` 设置为 5 秒，随后调用初始化接口并检查返回值。0 表示未指定：首个实例关闭超时检测，后续实例继承进程中已冻结的生效值。显式值的有效范围为 `[1, ACLSHMEM_SYNC_TIMEOUT_MAX_US]`，字段类型为 `uint32_t`，上限为 `UINT32_MAX` 微秒（约 71 分 35 秒），赋值前应确保原始值不超过该范围。实例存活期间，新实例请求冲突的显式阈值返回 `ACLSHMEM_NOT_SUPPORTED`。初始化失败不提交新配置；最后一个实例释放后恢复关闭状态。每个 PE 分别填写该属性。该配置不支持 RoCE 同步超时上报，也不修改 RoCE 后端已有超时和错误处理；无法中断硬件 `SyncAll`，库与设备内核须一起重新编译。每核从进入同步起独立计时，后续阶段共用起始时刻；分批检查失败轮询，因此阈值不是严格的退出时间上界，内部检查间隔不打印。
 
 | 字段 | 含义 |
 | --- | --- |
@@ -295,7 +295,7 @@ Ascend950 RDMA V2 建链监听端口由系统自动分配，用户无需配置 R
 3. 跨 PE 等待时看 `peer`，软件汇合时看 `wait_core/local_round`；再结合 `generation/round/slot` 定位轮次和槽位。
 4. 对照 `expected/observed` 和 `elapsed_us/timeout_us`，确认信号差异及已等待时间。`generation` 是 team 同步轮次，`round` 是该次同步内部的算法步骤，两者不同。
 
-不适用或未知字段为 -1。下面是默认 60 秒阈值下的格式示例，不是实际故障测试记录：
+不适用或未知字段为 -1。下面是显式设置 60 秒阈值后的格式示例，不是实际故障测试记录：
 
 ```text
 SHMEM_SYNC_TIMEOUT instance=0 team=0 pe=0 core_type=1 core=1 algorithm=3 phase=4 generation=1 round=0 slot=0 peer=1 wait_core=-1 local_round=-1 expected=1 observed=0 elapsed_us=60000508 timeout_us=60000000

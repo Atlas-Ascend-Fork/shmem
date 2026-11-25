@@ -261,9 +261,10 @@ ACLSHMEM_NOT_SUPPORTED, and it resets after the last instance is finalized. The 
 be identical on every PE (explicit values must match; DEFAULT is always safe).
 
 sync_timeout_us is a uint32 microsecond threshold for collective/software-local synchronization.
-Zero is unspecified (60 seconds initially, the frozen value for later instances). Positive values
+It does not configure RoCE synchronization timeout reporting or alter existing RoCE backend timeouts.
+Zero is unspecified (timeout checks disabled initially, the frozen value for later instances). Positive values
 must be at most ACLSHMEM_SYNC_TIMEOUT_MAX_US and match the frozen value while instances are alive.
-Failed initialization does not publish it; the last finalize restores 60 seconds.
+Failed initialization does not publish it; the last finalize disables timeout checks.
 
 While shared jetty is enabled, all operations that mutate the queue state of one sharing group --
 every UDMA submission (put/get/atomic), quiet, and the in-path capacity polling -- must be issued

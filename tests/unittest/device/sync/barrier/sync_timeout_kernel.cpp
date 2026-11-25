@@ -12,6 +12,25 @@
 #include "shmem.h"
 #include "unittest/utils/sync_timeout_kernel.h"
 
+// Shared matcher vectors for both the timeout-enabled and the default contexts. The last
+// vector advances from INT32_MAX to INT32_MIN, which is the signed-overflow boundary.
+template <typename Context>
+ACLSHMEM_DEVICE void ExerciseSignalMatcher(__gm__ int32_t* signal, Context& context)
+{
+    // Current generation.
+    aclshmemi_signal_set(signal, 41);
+    aclshmemi_sync_wait(signal, 41, context);
+    // Next generation.
+    aclshmemi_signal_set(signal, 42);
+    aclshmemi_sync_wait(signal, 41, context);
+    // Signed wraparound -1 -> 0.
+    aclshmemi_signal_set(signal, 0);
+    aclshmemi_sync_wait(signal, -1, context);
+    // Signed-overflow boundary INT32_MAX -> INT32_MIN.
+    aclshmemi_signal_set(signal, (-2147483647 - 1));
+    aclshmemi_sync_wait(signal, 2147483647, context);
+}
+
 template <SyncTimeoutMode Mode>
 ACLSHMEM_DEVICE void SyncTimeoutExercise(
     uint64_t config, SyncTimeoutFault fault, uint32_t iterations, GM_ADDR output, uint64_t instance_id)
@@ -32,23 +51,22 @@ ACLSHMEM_DEVICE void SyncTimeoutExercise(
         } else if constexpr (Mode == SyncTimeoutMode::VEC) {
             aclshmemx_sync_vec(ACLSHMEM_TEAM_WORLD);
         } else if constexpr (Mode == SyncTimeoutMode::SOFT) {
-            aclshmemi_sync_timeout context(aclshmemi_sync_algorithm::LOCAL, ACLSHMEM_TEAM_WORLD);
-            aclshmemi_sync_core_soft(&context);
+            aclshmemi_sync_core_soft();
         } else {
             // Exercise the real signal matcher, including next-generation and wraparound acceptance.
             auto signal = reinterpret_cast<__gm__ int32_t*>(result + 1);
-            aclshmemi_sync_timeout context(aclshmemi_sync_algorithm::LOCAL, ACLSHMEM_TEAM_WORLD);
-            aclshmemi_signal_set(signal, 41);
-            aclshmemi_sync_wait(signal, 41, context);
-            aclshmemi_signal_set(signal, 42);
-            aclshmemi_sync_wait(signal, 41, context);
-            aclshmemi_signal_set(signal, 0);
-            aclshmemi_sync_wait(signal, -1, context);
+            const uint32_t timeout_us = aclshmemi_get_sync_timeout_us();
+            if (timeout_us == 0) {
+                aclshmemi_sync_context<false> context(aclshmemi_sync_algorithm::LOCAL, ACLSHMEM_TEAM_WORLD, 0);
+                ExerciseSignalMatcher(signal, context);
+            } else {
+                aclshmemi_sync_timeout context(aclshmemi_sync_algorithm::LOCAL, ACLSHMEM_TEAM_WORLD, timeout_us);
+                ExerciseSignalMatcher(signal, context);
+            }
         }
     }
     result[0] = iterations;
-    aclshmemi_sync_timeout context(aclshmemi_sync_algorithm::LOCAL, ACLSHMEM_TEAM_WORLD);
-    result[1] = context.timeout_us;
+    result[1] = aclshmemi_get_sync_timeout_us();
     dcci_entire_cache();
 }
 

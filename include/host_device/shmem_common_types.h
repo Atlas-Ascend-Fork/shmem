@@ -14,7 +14,7 @@
 
 #include "acl/acl_rt.h"
 
-#define ACLSHMEM_SYNC_TIMEOUT_DEFAULT_US 60000000ULL
+#define ACLSHMEM_SYNC_TIMEOUT_DEFAULT_US 0U
 // Bound the conversion for every supported device (up to 1000 cycles/us).
 #define ACLSHMEM_SYNC_TIMEOUT_MAX_US UINT32_MAX
 #ifdef __cplusplus
