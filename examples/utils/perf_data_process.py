@@ -105,7 +105,7 @@ def get_subplot_layout(n, default_cols=5):
 
 LATENCY_COLUMNS = ['PlainLat/us', 'QpLat/us', 'DeferLat/us', 'SubmitLat/us']
 
-def process_lat_csv(csv_file, output_dir, csv_headers, no_plot):
+def process_lat_csv(csv_file, output_dir, csv_headers, no_plot, ubsize_filter=None, coresize_filter=None):
     """Process a latency-schema CSV (PlainLat/QpLat/DeferLat/SubmitLat columns)."""
     generated_images = []
     headers = ['DataSize/B', 'Npus', 'Blocks', 'UBsize/KiB'] + [c for c in LATENCY_COLUMNS if c in csv_headers]
@@ -130,12 +130,20 @@ def process_lat_csv(csv_file, output_dir, csv_headers, no_plot):
 
     if no_plot:
         return generated_images, df
-    images, _ = plot_lat_dataframe(csv_file, output_dir, df)
+    images, _ = plot_lat_dataframe(csv_file, output_dir, df, ubsize_filter, coresize_filter)
     return images, df
 
-def plot_lat_dataframe(csv_file, output_dir, df):
+def plot_lat_dataframe(csv_file, output_dir, df, ubsize_filter=None, coresize_filter=None):
     """Plot latency-vs-datasize curves for each interface form."""
     generated_images = []
+    had_data = not df.empty
+    if ubsize_filter is not None:
+        df = df[df['UBsize/KiB'].isin(ubsize_filter)]
+    if coresize_filter is not None:
+        df = df[df['Blocks'].isin(coresize_filter)]
+    if had_data and df.empty:
+        print(f"WARN: {csv_file} - No data left after filtering, skipping latency chart")
+        return generated_images, df
     os.makedirs(output_dir, exist_ok=True)
     csv_basename = os.path.splitext(os.path.basename(csv_file))[0]
     lat_cols = [c for c in LATENCY_COLUMNS if c in df.columns]
@@ -189,7 +197,9 @@ def process_csv(csv_file, output_dir, ubsize_filter, coresize_filter, no_plot=Fa
             csv_headers = [name.strip() for name in next(reader, [])]
             csv_headers = ['UBsize/KiB' if name == 'UBsize/KB' else name for name in csv_headers]
             if any(col in csv_headers for col in LATENCY_COLUMNS):
-                return process_lat_csv(csv_file, output_dir, csv_headers, no_plot)
+                return process_lat_csv(
+                    csv_file, output_dir, csv_headers, no_plot, ubsize_filter, coresize_filter
+                )
             if 'CoreMaxTime/us' not in csv_headers:
                 print(f"Error: CSV file {csv_file} missing required column: CoreMaxTime/us")
                 return generated_images, df
