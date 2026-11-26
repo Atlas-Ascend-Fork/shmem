@@ -19,6 +19,7 @@
 #include "init/shmemi_user_buffer_heap.h"
 #include "mem/heap/hybm_device_mem_segment.h"
 #include "unittest_main_test.h"
+#include "user_buffer_mapping.h"
 
 namespace {
 
@@ -35,31 +36,43 @@ int CopyStatuses(const void* sendbuf, void* recvbuf, int size, aclshmemi_bootstr
 
 int FailAllgather(const void*, void*, int, aclshmemi_bootstrap_handle_t*) { return ACLSHMEM_INNER_ERROR; }
 
-bool CreateSourceMapping(aclrtDrvMemHandle handle, uint64_t size, int32_t logicDeviceId, void** sourceAddress)
+#ifdef HAS_ACLRT_MEM_FABRIC_HANDLE
+struct MappingResult {
+    aclError status;
+    const char* stage;
+
+    bool Unsupported() const { return status == ACL_ERROR_RT_FEATURE_NOT_SUPPORT; }
+};
+
+MappingResult CreateSourceMapping(aclrtDrvMemHandle handle, uint64_t size, int32_t accessId, void** address)
 {
-    if (handle == nullptr || size == 0 || sourceAddress == nullptr) {
-        return false;
+    if (handle == nullptr || size == 0 || address == nullptr) {
+        return {ACL_ERROR_INVALID_PARAM, "arguments"};
     }
-    if (aclrtReserveMemAddress(sourceAddress, size, 0, nullptr, 0) != ACL_SUCCESS) {
-        return false;
+    *address = nullptr;
+    auto status = aclrtReserveMemAddress(address, size, 0, nullptr, 0);
+    if (status != ACL_SUCCESS) {
+        return {status, "aclrtReserveMemAddress"};
     }
-    if (aclrtMapMem(*sourceAddress, size, 0, handle, 0) != ACL_SUCCESS) {
-        (void)aclrtReleaseMemAddress(*sourceAddress);
-        *sourceAddress = nullptr;
-        return false;
+    status = aclrtMapMem(*address, size, 0, handle, 0);
+    if (status != ACL_SUCCESS) {
+        (void)aclrtReleaseMemAddress(*address);
+        *address = nullptr;
+        return {status, "aclrtMapMem"};
     }
     aclrtMemAccessDesc access{};
     access.location.type = ACL_MEM_LOCATION_TYPE_DEVICE;
-    access.location.id = logicDeviceId;
+    access.location.id = accessId;
     access.flags = ACL_RT_MEM_ACCESS_FLAGS_READWRITE;
-    if (aclrtMemSetAccess(*sourceAddress, size, &access, 1) != ACL_SUCCESS) {
-        (void)aclrtUnmapMem(*sourceAddress);
-        (void)aclrtReleaseMemAddress(*sourceAddress);
-        *sourceAddress = nullptr;
-        return false;
+    status = aclrtMemSetAccess(*address, size, &access, 1);
+    if (status != ACL_SUCCESS) {
+        (void)aclrtUnmapMem(*address);
+        (void)aclrtReleaseMemAddress(*address);
+        *address = nullptr;
     }
-    return true;
+    return {status, "aclrtMemSetAccess"};
 }
+#endif
 
 void DestroySourceMapping(void* sourceAddress)
 {
@@ -201,8 +214,6 @@ void RunTwoPeMixedHeap(int rankId, int rankCount, uint64_t localMemSize, bool pr
     const int deviceId = rankId % test_gnpu_num + test_first_npu;
     ASSERT_EQ(aclInit(nullptr), ACL_SUCCESS);
     ASSERT_EQ(aclrtSetDevice(deviceId), ACL_SUCCESS);
-    int32_t logicDeviceId = -1;
-    ASSERT_EQ(aclrtGetLogicDevIdByUserDevId(deviceId, &logicDeviceId), ACL_SUCCESS);
 
     aclrtPhysicalMemProp prop{};
     prop.handleType = ACL_MEM_HANDLE_TYPE_NONE;
@@ -216,7 +227,10 @@ void RunTwoPeMixedHeap(int rankId, int rankCount, uint64_t localMemSize, bool pr
     aclrtDrvMemHandle inputHandle = nullptr;
     ASSERT_EQ(aclrtMallocPhysical(&inputHandle, externalBytes, &prop, 0), ACL_SUCCESS);
     void* sourceAddress = nullptr;
-    ASSERT_TRUE(CreateSourceMapping(inputHandle, externalBytes, logicDeviceId, &sourceAddress));
+    int32_t accessId = -1;
+    ASSERT_EQ(user_buffer_test::GetAccessDevice(deviceId, &accessId), ACL_SUCCESS);
+    const auto mapping = CreateSourceMapping(inputHandle, externalBytes, accessId, &sourceAddress);
+    ASSERT_EQ(mapping.status, ACL_SUCCESS) << mapping.stage;
 
     aclshmemx_buffer_desc_t buffer{};
     aclshmemx_buffer_optional_attr_t optionalAttr{};
@@ -324,33 +338,40 @@ TEST(UserBufferHeapTest, TwoPeVaOnlyMapsExternalAndTailAcrossCards)
 
 TEST(UserBufferHeapTest, SinglePeMixedHeapInitMallocAndFinalize)
 {
-    if (aclInit(nullptr) != ACL_SUCCESS || aclrtSetDevice(0) != ACL_SUCCESS) {
+    const int deviceId = test_first_npu;
+    if (aclInit(nullptr) != ACL_SUCCESS || aclrtSetDevice(deviceId) != ACL_SUCCESS) {
         GTEST_SKIP() << "本机没有可用的 NPU Runtime，跳过 mixed-heap 真机 smoke";
     }
-    int32_t logicDeviceId = -1;
-    ASSERT_EQ(aclrtGetLogicDevIdByUserDevId(0, &logicDeviceId), ACL_SUCCESS);
 
     aclrtPhysicalMemProp prop{};
     prop.handleType = ACL_MEM_HANDLE_TYPE_NONE;
     prop.allocationType = ACL_MEM_ALLOCATION_TYPE_PINNED;
     prop.memAttr = ACL_HBM_MEM_HUGE;
     prop.location.type = ACL_MEM_LOCATION_TYPE_DEVICE;
-    prop.location.id = 0;
+    prop.location.id = deviceId;
     size_t granularity = 0;
     ASSERT_EQ(aclrtMemGetAllocationGranularity(&prop, ACL_RT_MEM_ALLOC_GRANULARITY_MINIMUM, &granularity), ACL_SUCCESS);
     const uint64_t externalBytes = ((ACLSHMEM_PAGE_SIZE + granularity - 1) / granularity) * granularity;
     aclrtDrvMemHandle inputHandle = nullptr;
     if (aclrtMallocPhysical(&inputHandle, externalBytes, &prop, 0) != ACL_SUCCESS) {
-        (void)aclrtResetDevice(0);
+        (void)aclrtResetDevice(deviceId);
         (void)aclFinalize();
         GTEST_SKIP() << "本机不能创建 physical allocation，跳过 mixed-heap 真机 smoke";
     }
     void* sourceAddress = nullptr;
-    if (!CreateSourceMapping(inputHandle, externalBytes, logicDeviceId, &sourceAddress)) {
+    int32_t accessId = -1;
+    const auto accessStatus = user_buffer_test::GetAccessDevice(deviceId, &accessId);
+    const auto mapping = accessStatus == ACL_SUCCESS ?
+                             CreateSourceMapping(inputHandle, externalBytes, accessId, &sourceAddress) :
+                             MappingResult{accessStatus, "GetAccessDevice"};
+    if (mapping.status != ACL_SUCCESS) {
         (void)aclrtFreePhysical(inputHandle);
-        (void)aclrtResetDevice(0);
+        (void)aclrtResetDevice(deviceId);
         (void)aclFinalize();
-        GTEST_SKIP() << "本机不能建立 source VA mapping，跳过 user-buffer-heap 真机 smoke";
+        if (accessStatus == ACL_SUCCESS && mapping.Unsupported()) {
+            GTEST_SKIP() << mapping.stage << " is not supported, ret=" << mapping.status;
+        }
+        FAIL() << mapping.stage << " failed, ret=" << mapping.status;
     }
 
     aclshmemx_buffer_desc_t buffer{};
@@ -383,7 +404,7 @@ TEST(UserBufferHeapTest, SinglePeMixedHeapInitMallocAndFinalize)
 
     DestroySourceMapping(sourceAddress);
     EXPECT_EQ(aclrtFreePhysical(inputHandle), ACL_SUCCESS);
-    EXPECT_EQ(aclrtResetDevice(0), ACL_SUCCESS);
+    EXPECT_EQ(aclrtResetDevice(deviceId), ACL_SUCCESS);
     EXPECT_EQ(aclFinalize(), ACL_SUCCESS);
 }
 #endif

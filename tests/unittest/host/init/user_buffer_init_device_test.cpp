@@ -16,6 +16,7 @@
 #include "acl/acl.h"
 #include "host/shmem_host_def.h"
 #include "unittest_main_test.h"
+#include "user_buffer_mapping.h"
 
 #if defined(HAS_ACLRT_MEM_FABRIC_HANDLE) && !defined(ACLSHMEM_SOC_950)
 
@@ -62,12 +63,8 @@ protected:
     bool deviceSet_{false};
 };
 
-TEST_F(UserBufferInitDeviceTest, SetAccessUsesDriverLogicDevice)
+TEST_F(UserBufferInitDeviceTest, SetAccessUsesRuntimeDeviceId)
 {
-    int32_t logicDeviceId = -1;
-    ASSERT_EQ(aclrtGetLogicDevIdByUserDevId(userDeviceId_, &logicDeviceId), ACL_SUCCESS);
-    ASSERT_GE(logicDeviceId, 0);
-
     aclrtPhysicalMemProp property{};
     property.handleType = ACL_MEM_HANDLE_TYPE_NONE;
     property.allocationType = ACL_MEM_ALLOCATION_TYPE_PINNED;
@@ -88,7 +85,9 @@ TEST_F(UserBufferInitDeviceTest, SetAccessUsesDriverLogicDevice)
 
     aclrtMemAccessDesc access{};
     access.location.type = ACL_MEM_LOCATION_TYPE_DEVICE;
-    access.location.id = logicDeviceId;
+    int32_t accessId = -1;
+    ASSERT_EQ(user_buffer_test::GetAccessDevice(userDeviceId_, &accessId), ACL_SUCCESS);
+    access.location.id = accessId;
     access.flags = ACL_RT_MEM_ACCESS_FLAGS_READWRITE;
     const auto setAccessStatus = aclrtMemSetAccess(address_, granularity, &access, 1);
     if (setAccessStatus == ACL_ERROR_RT_FEATURE_NOT_SUPPORT) {
