@@ -602,7 +602,7 @@ endif()
 # Check whether the ACL headers and library provide aclrtMemMapSetLink.
 check_cxx_symbol_exists(aclrtMemMapSetLink "acl/acl.h" HAS_ACLRT_MEM_MAP_SET_LINK)
 
-if(USE_ACLRT_MEM_FABRIC_HANDLE AND HAS_ACLRT_MEM_MAP_SET_LINK)
+if(HAS_ACLRT_MEM_FABRIC_HANDLE AND ENABLE_CANN_BUILD AND HAS_ACLRT_MEM_MAP_SET_LINK)
     set(ACLSHMEM_ONE_MULTI_PATH ON)
     message(STATUS "Fabric Handle and aclrtMemMapSetLink symbols found, enabling ACLSHMEM_ONE_MULTI_PATH support")
 else()
