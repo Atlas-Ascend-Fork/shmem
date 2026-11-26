@@ -30,8 +30,7 @@
 static void loop_init_finalize_uid(int rank_id, int n_ranks, uint64_t local_mem_size, aclshmemx_uniqueid_t& uid)
 {
     aclshmemx_init_attr_t attr;
-    int ret = aclshmemx_set_attr_uniqueid_args(rank_id, n_ranks,
-                                                static_cast<int64_t>(local_mem_size), &uid, &attr);
+    int ret = aclshmemx_set_attr_uniqueid_args(rank_id, n_ranks, static_cast<int64_t>(local_mem_size), &uid, &attr);
     EXPECT_EQ(ret, ACLSHMEM_SUCCESS);
     ret = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_UNIQUEID, &attr);
     EXPECT_EQ(ret, ACLSHMEM_SUCCESS);
@@ -43,14 +42,12 @@ static void loop_init_finalize_uid(int rank_id, int n_ranks, uint64_t local_mem_
 // UID init/finalize first, then default init on the same port.
 // This verifies that the port is properly released after UID finalize
 // so a subsequent default-mode init can reuse the same port.
-static void uid_then_default_same_port(int rank_id, int n_ranks, uint64_t local_mem_size,
-                                        aclshmemx_uniqueid_t& uid)
+static void uid_then_default_same_port(int rank_id, int n_ranks, uint64_t local_mem_size, aclshmemx_uniqueid_t& uid)
 {
     // Step 1: UID init/finalize
     {
         aclshmemx_init_attr_t attr;
-        int ret = aclshmemx_set_attr_uniqueid_args(rank_id, n_ranks,
-                                                    static_cast<int64_t>(local_mem_size), &uid, &attr);
+        int ret = aclshmemx_set_attr_uniqueid_args(rank_id, n_ranks, static_cast<int64_t>(local_mem_size), &uid, &attr);
         EXPECT_EQ(ret, ACLSHMEM_SUCCESS);
         ret = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_UNIQUEID, &attr);
         EXPECT_EQ(ret, ACLSHMEM_SUCCESS);
@@ -73,8 +70,7 @@ static void uid_then_default_same_port(int rank_id, int n_ranks, uint64_t local_
         ipport = "tcp://" + std::string(ip_str) + ":" + std::to_string(port);
     }
 
-    SHM_LOG_INFO("uid_then_default_same_port: rank=" << rank_id
-                 << " reusing port " << ipport << " after UID finalize");
+    SHM_LOG_INFO("uid_then_default_same_port: rank=" << rank_id << " reusing port " << ipport << " after UID finalize");
 
     // Step 3: Default init on the same port
     {
@@ -82,8 +78,7 @@ static void uid_then_default_same_port(int rank_id, int n_ranks, uint64_t local_
         int ret = test_set_attr(rank_id, n_ranks, local_mem_size, ipport.c_str(), &attr);
         EXPECT_EQ(ret, ACLSHMEM_SUCCESS);
         ret = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attr);
-        EXPECT_EQ(ret, ACLSHMEM_SUCCESS) << "rank " << rank_id
-                                         << " failed to default-init on reused port " << ipport;
+        EXPECT_EQ(ret, ACLSHMEM_SUCCESS) << "rank " << rank_id << " failed to default-init on reused port " << ipport;
         aclshmem_barrier_all();
         EXPECT_EQ(aclshmem_finalize(), ACLSHMEM_SUCCESS);
     }
@@ -92,7 +87,7 @@ static void uid_then_default_same_port(int rank_id, int n_ranks, uint64_t local_
 TEST(TestFinalizeBarrier, RepeatInitFinalizeNoErrorUid)
 {
     const int process_count = test_gnpu_num;
-    uint64_t local_mem_size = 256UL * 1024UL * 1024;  // 256MB
+    uint64_t local_mem_size = 256UL * 1024UL * 1024; // 256MB
     test_mutil_task_uid_loop(loop_init_finalize_uid, local_mem_size, process_count, /*loop_count=*/5);
 }
 
@@ -103,7 +98,7 @@ TEST(TestFinalizeBarrier, RepeatInitFinalizeNoErrorUid)
 TEST(TestFinalizeBarrier, UidThenDefaultSamePort)
 {
     const int process_count = test_gnpu_num;
-    uint64_t local_mem_size = 256UL * 1024UL * 1024;  // 256MB
+    uint64_t local_mem_size = 256UL * 1024UL * 1024; // 256MB
     test_mutil_task_uid_loop(uid_then_default_same_port, local_mem_size, process_count, /*loop_count=*/3);
 }
 
@@ -121,20 +116,22 @@ TEST(ConfigStoreMagicIsolation, WrongMagicRejectedCorrectMagicAccepted)
     shm::store::StoreFactory::SetTlsInfo(false, nullptr, 0);
 
     // 1. Create server on port with magicA
-    auto srv = shm::store::StoreFactory::CreateStore(ip, port, /*isServer=*/true, /*rankId=*/0,
-                                                      /*connMaxRetry=*/-1, /*sockFd=*/-1, magicA);
+    auto srv = shm::store::StoreFactory::CreateStore(
+        ip, port, /*isServer=*/true, /*rankId=*/0,
+        /*connMaxRetry=*/120000, /*sockFd=*/-1, magicA);
     ASSERT_NE(srv, nullptr) << "server store creation with magicA should succeed";
 
     // 2. Client with WRONG magic — connMaxRetry=1 so it actually sends the wrong
     //    AccConnReq and lets the server exercise its magic-mismatch rejection path.
-    auto badClient = shm::store::StoreFactory::CreateStore(ip, port, /*isServer=*/false, /*rankId=*/1,
-                                                            /*connMaxRetry=*/1, /*sockFd=*/-1, magicB);
-    EXPECT_EQ(badClient, nullptr)
-        << "client with wrong magic (magicB) should be rejected by server with magicA";
+    auto badClient = shm::store::StoreFactory::CreateStore(
+        ip, port, /*isServer=*/false, /*rankId=*/1,
+        /*connMaxRetry=*/1, /*sockFd=*/-1, magicB);
+    EXPECT_EQ(badClient, nullptr) << "client with wrong magic (magicB) should be rejected by server with magicA";
 
     // 3. Client with CORRECT magic — should connect successfully
-    auto goodClient = shm::store::StoreFactory::CreateStore(ip, port, /*isServer=*/false, /*rankId=*/2,
-                                                             /*connMaxRetry=*/1, /*sockFd=*/-1, magicA);
+    auto goodClient = shm::store::StoreFactory::CreateStore(
+        ip, port, /*isServer=*/false, /*rankId=*/2,
+        /*connMaxRetry=*/1, /*sockFd=*/-1, magicA);
     ASSERT_NE(goodClient, nullptr) << "client with correct magic (magicA) should connect successfully";
 
     // 4. Verify basic Set/Get operations work over the magic-matched connection

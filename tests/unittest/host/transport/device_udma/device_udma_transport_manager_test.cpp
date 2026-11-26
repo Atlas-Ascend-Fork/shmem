@@ -22,7 +22,7 @@ TEST(UdmaConnectTimeoutTest, PreservesDefaultAndAcceptsExtendedTimeout)
 {
     uint32_t timeout = 0;
     ASSERT_TRUE(ParseUdmaConnectTimeout(nullptr, timeout));
-    EXPECT_EQ(timeout, 120000U);
+    EXPECT_EQ(timeout, 600000U);
     for (const auto& test :
          std::vector<std::pair<const char*, uint32_t>>{{"1000", 1000U}, {"600000", 600000U}, {"3600000", 3600000U}}) {
         ASSERT_TRUE(ParseUdmaConnectTimeout(test.first, timeout));

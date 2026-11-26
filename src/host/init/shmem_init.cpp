@@ -338,8 +338,12 @@ static int32_t check_common_attr(aclshmemx_init_attr_t* attributes)
     SHM_VALIDATE_RETURN(attributes->n_pes <= ACLSHMEM_MAX_PES, "n_pes is too large", ACLSHMEM_INVALID_VALUE);
     SHM_VALIDATE_RETURN(
         attributes->my_pe < attributes->n_pes, "my_pe is greater than or equal to n_pes", ACLSHMEM_INVALID_PARAM);
+    constexpr uint32_t max_init_timeout_seconds = std::numeric_limits<int32_t>::max() / 1000U;
+    const uint32_t timeout_seconds = attributes->option_attr.shm_init_timeout;
     SHM_VALIDATE_RETURN(
-        attributes->option_attr.shm_init_timeout != 0, "shm_init_timeout is zero", ACLSHMEM_INVALID_VALUE);
+        timeout_seconds > 0 && timeout_seconds <= max_init_timeout_seconds,
+        "shm_init_timeout must be in [1, " << max_init_timeout_seconds << "] seconds, got " << timeout_seconds,
+        ACLSHMEM_INVALID_VALUE);
     SHM_VALIDATE_RETURN(
         attributes->option_attr.control_operation_timeout != 0, "control_operation_timeout is zero",
         ACLSHMEM_INVALID_VALUE);

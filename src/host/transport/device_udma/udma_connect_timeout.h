@@ -13,23 +13,28 @@
 #include <cstdint>
 
 namespace shm::transport::device {
-constexpr uint32_t kDefaultUdmaConnectTimeoutMs = 120000;
+constexpr uint32_t kDefaultUdmaConnectTimeoutMs = 600000;
 constexpr uint32_t kMaxUdmaConnectTimeoutMs = 3600000;
 
 // Decimal milliseconds only. Keep the historical default unless explicitly configured.
 inline bool ParseUdmaConnectTimeout(const char* value, uint32_t& timeout)
 {
     timeout = kDefaultUdmaConnectTimeoutMs;
-    if (value == nullptr) return true;
-    if (*value == '\0') return false;
+    if (value == nullptr)
+        return true;
+    if (*value == '\0')
+        return false;
     uint32_t parsed = 0;
     for (const char* p = value; *p != '\0'; ++p) {
-        if (*p < '0' || *p > '9') return false;
+        if (*p < '0' || *p > '9')
+            return false;
         const uint32_t digit = static_cast<uint32_t>(*p - '0');
-        if (parsed > (kMaxUdmaConnectTimeoutMs - digit) / 10U) return false;
+        if (parsed > (kMaxUdmaConnectTimeoutMs - digit) / 10U)
+            return false;
         parsed = parsed * 10U + digit;
     }
-    if (parsed < 1000U || parsed > kMaxUdmaConnectTimeoutMs) return false;
+    if (parsed < 1000U || parsed > kMaxUdmaConnectTimeoutMs)
+        return false;
     timeout = parsed;
     return true;
 }

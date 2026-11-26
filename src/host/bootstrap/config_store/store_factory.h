@@ -8,7 +8,6 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-
 #ifndef SMEM_SMEM_STORE_FACTORY_H
 #define SMEM_SMEM_STORE_FACTORY_H
 
@@ -39,8 +38,9 @@ public:
      * @param magic session magic for distinguishing init/finalize cycles, default SMEM_DEFAULT_CONN_MAGIC
      * @return Newly created store
      */
-    static StorePtr CreateStore(const std::string &ip, uint16_t port, bool isServer, int32_t rankId = 0,
-        int32_t connMaxRetry = -1, int32_t sockFd = -1, uint16_t magic = SMEM_DEFAULT_CONN_MAGIC) noexcept;
+    static StorePtr CreateStore(
+        const std::string& ip, uint16_t port, bool isServer, int32_t rankId = 0, int32_t connMaxRetry = 120000,
+        int32_t sockFd = -1, uint16_t magic = SMEM_DEFAULT_CONN_MAGIC) noexcept;
 
     /**
      * @brief Destroy on exist store
@@ -56,7 +56,7 @@ public:
      * @param prefix Prefix of keys
      * @return prefix store.
      */
-    static StorePtr PrefixStore(const StorePtr &base, const std::string &prefix) noexcept;
+    static StorePtr PrefixStore(const StorePtr& base, const std::string& prefix) noexcept;
 
     static int GetFailedReason() noexcept;
 
@@ -67,7 +67,7 @@ public:
      * @param tlsDataLen the length of tls config info
      * @return Returns 0 on success or an error code on failure
      */
-    static int32_t SetTlsInfo(bool enable, const char *tlsData, const size_t tlsDataLen) noexcept;
+    static int32_t SetTlsInfo(bool enable, const char* tlsData, const size_t tlsDataLen) noexcept;
 
     /**
      * @brief Set the TLS private key and password.
@@ -78,16 +78,17 @@ public:
      * @param tlsInfoLen the length of tls config info
      * @return Returns 0 on success or an error code on failure
      */
-    static int32_t SetTlsPkInfo(const char *tlsPk, const uint32_t tlsPkLen, const char *tlsPkPwd,
-        const uint32_t tlsPkPwLen, const smem_decrypt_handler &h) noexcept;
+    static int32_t SetTlsPkInfo(
+        const char* tlsPk, const uint32_t tlsPkLen, const char* tlsPkPwd, const uint32_t tlsPkPwLen,
+        const smem_decrypt_handler& h) noexcept;
 
     static void ShutDownCleanupThread() noexcept;
 
 private:
     static Result InitTlsOption() noexcept;
     static void TlsCleanUp() noexcept;
-    static std::function<int(const std::string&, char*, size_t&)>
-        ConvertFunc(int (*rawFunc)(const char*, size_t, char*, size_t &)) noexcept;
+    static std::function<int(const std::string&, char*, size_t&)> ConvertFunc(
+        int (*rawFunc)(const char*, size_t, char*, size_t&)) noexcept;
     static bool enableTls;
     static std::string tlsInfo;
     static std::string tlsPkInfo;

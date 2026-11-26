@@ -17,16 +17,12 @@
 
 namespace shm {
 namespace store {
-// Connection retry max times: with usleep(1ms) per retry, 20000 retries ≈ 20s total patience.
-constexpr auto CONNECT_RETRY_MAX_TIMES = 20000;
 
 class ClientWaitContext : public ClientCommonContext {
 public:
     explicit ClientWaitContext(int64_t timeoutMs = kDefaultSendMsgTimeoutMs) noexcept
-        : finished_{false},
-          timeoutMs_{timeoutMs}
-    {
-    }
+        : finished_{false}, timeoutMs_{timeoutMs}
+    {}
 
     std::shared_ptr<shm::acc::AccTcpRequestContext> WaitFinished() noexcept override
     {
@@ -46,7 +42,7 @@ public:
         return copy;
     }
 
-    void SetFinished(const shm::acc::AccTcpRequestContext &response) noexcept override
+    void SetFinished(const shm::acc::AccTcpRequestContext& response) noexcept override
     {
         std::unique_lock<std::mutex> locker{waitMutex_};
         responseInfo_ = std::make_shared<shm::acc::AccTcpRequestContext>(response);
@@ -65,10 +61,7 @@ public:
 
         waitCond_.notify_one();
     }
-    bool Blocking() const noexcept override
-    {
-        return true;
-    }
+    bool Blocking() const noexcept override { return true; }
 
 private:
     std::mutex waitMutex_;
@@ -80,19 +73,15 @@ private:
 
 class ClientWatchContext : public ClientCommonContext {
 public:
-    explicit ClientWatchContext(std::function<void(int result, const std::vector<uint8_t> &)> nfy) noexcept
+    explicit ClientWatchContext(std::function<void(int result, const std::vector<uint8_t>&)> nfy) noexcept
         : notify_{std::move(nfy)}
-    {
-    }
+    {}
 
-    std::shared_ptr<shm::acc::AccTcpRequestContext> WaitFinished() noexcept override
-    {
-        return nullptr;
-    }
+    std::shared_ptr<shm::acc::AccTcpRequestContext> WaitFinished() noexcept override { return nullptr; }
 
-    void SetFinished(const shm::acc::AccTcpRequestContext &response) noexcept override
+    void SetFinished(const shm::acc::AccTcpRequestContext& response) noexcept override
     {
-        auto data = reinterpret_cast<const uint8_t *>(response.DataPtr());
+        auto data = reinterpret_cast<const uint8_t*>(response.DataPtr());
 
         SmemMessage responseBody;
         auto ret = SmemMessagePacker::Unpack(data, response.DataLen(), responseBody);
@@ -112,38 +101,23 @@ public:
         notify_(SUCCESS, responseBody.values[0]);
     }
 
-    void SetFailedFinish() noexcept override
-    {
-        notify_(IO_ERROR, std::vector<uint8_t>{});
-    }
+    void SetFailedFinish() noexcept override { notify_(IO_ERROR, std::vector<uint8_t>{}); }
 
-    bool Blocking() const noexcept override
-    {
-        return false;
-    }
+    bool Blocking() const noexcept override { return false; }
 
 private:
-    std::function<void(int result, const std::vector<uint8_t> &)> notify_;
+    std::function<void(int result, const std::vector<uint8_t>&)> notify_;
 };
 
 std::atomic<uint32_t> TcpConfigStore::reqSeqGen_{0};
-TcpConfigStore::TcpConfigStore(std::string ip, uint16_t port, bool isServer, int32_t rankId, int32_t sockFd,
-                               uint16_t magic) noexcept
-    : serverIp_{std::move(ip)},
-      serverPort_{port},
-      isServer_{isServer},
-      rankId_{rankId},
-      sockFd_{sockFd},
-      magic_{magic}
-{
-}
+TcpConfigStore::TcpConfigStore(
+    std::string ip, uint16_t port, bool isServer, int32_t rankId, int32_t sockFd, uint16_t magic) noexcept
+    : serverIp_{std::move(ip)}, serverPort_{port}, isServer_{isServer}, rankId_{rankId}, sockFd_{sockFd}, magic_{magic}
+{}
 
-TcpConfigStore::~TcpConfigStore() noexcept
-{
-    Shutdown();
-}
+TcpConfigStore::~TcpConfigStore() noexcept { Shutdown(); }
 
-Result TcpConfigStore::AccClientStart(const AcclinkTlsOption &tlsOption) noexcept
+Result TcpConfigStore::AccClientStart(const AcclinkTlsOption& tlsOption) noexcept
 {
     shm::acc::AccTcpServerOptions options;
     options.linkSendQueueSize = shm::acc::UNO_48;
@@ -161,10 +135,9 @@ Result TcpConfigStore::AccClientStart(const AcclinkTlsOption &tlsOption) noexcep
     return result;
 }
 
-Result TcpConfigStore::Startup(const AcclinkTlsOption &tlsOption, int reconnectRetryTimes) noexcept
+Result TcpConfigStore::Startup(const AcclinkTlsOption& tlsOption, int reconnectRetryTimes) noexcept
 {
     Result result = SM_OK;
-    auto retryMaxTimes = reconnectRetryTimes < 0 ? CONNECT_RETRY_MAX_TIMES : reconnectRetryTimes;
 
     std::lock_guard<std::mutex> guard(mutex_);
     if (accClient_ != nullptr) {
@@ -183,8 +156,8 @@ Result TcpConfigStore::Startup(const AcclinkTlsOption &tlsOption, int reconnectR
     }
 
     if (isServer_) {
-        SHM_LOG_INFO("Rank " << rankId_ << " starting as SERVER on " << serverIp_ << ":" << serverPort_
-            << " magic=" << magic_);
+        SHM_LOG_INFO(
+            "Rank " << rankId_ << " starting as SERVER on " << serverIp_ << ":" << serverPort_ << " magic=" << magic_);
         accServer_ = SmMakeRef<AccStoreServer>(serverIp_, serverPort_, sockFd_, magic_);
         if (accServer_ == nullptr) {
             SHM_LOG_ERROR("Failed to create AccStoreServer instance");
@@ -202,9 +175,9 @@ Result TcpConfigStore::Startup(const AcclinkTlsOption &tlsOption, int reconnectR
     }
 
     accClient_->RegisterNewRequestHandler(
-        0, [this](const shm::acc::AccTcpRequestContext &context) { return ReceiveResponseHandler(context); });
+        0, [this](const shm::acc::AccTcpRequestContext& context) { return ReceiveResponseHandler(context); });
     accClient_->RegisterLinkBrokenHandler(
-        [this](const shm::acc::AccTcpLinkComplexPtr &link) { return LinkBrokenHandler(link); });
+        [this](const shm::acc::AccTcpLinkComplexPtr& link) { return LinkBrokenHandler(link); });
 
     if ((result = AccClientStart(tlsOption)) != SM_OK) {
         SHM_LOG_ERROR("start acc client failed, result: " << result);
@@ -215,9 +188,9 @@ Result TcpConfigStore::Startup(const AcclinkTlsOption &tlsOption, int reconnectR
     shm::acc::AccConnReq connReq;
     connReq.rankId = rankId_;
     connReq.magic = magic_;
-    SHM_LOG_INFO("Rank " << rankId_ << " connecting as CLIENT to " << serverIp_ << ":" << serverPort_
-        << " magic=" << magic_);
-    result = accClient_->ConnectToPeerServer(serverIp_, serverPort_, connReq, retryMaxTimes, accClientLink_);
+    SHM_LOG_INFO(
+        "Rank " << rankId_ << " connecting as CLIENT to " << serverIp_ << ":" << serverPort_ << " magic=" << magic_);
+    result = accClient_->ConnectToPeerServer(serverIp_, serverPort_, connReq, reconnectRetryTimes, accClientLink_);
     if (result != 0) {
         SHM_LOG_ERROR("connect to server failed, result: " << result);
         Shutdown();
@@ -247,7 +220,7 @@ void TcpConfigStore::Shutdown(bool afterFork) noexcept
     sockFd_ = -1;
 }
 
-Result TcpConfigStore::Set(const std::string &key, const std::vector<uint8_t> &value) noexcept
+Result TcpConfigStore::Set(const std::string& key, const std::vector<uint8_t>& value) noexcept
 {
     if (key.empty() || key.length() > MAX_KEY_LEN_CLIENT) {
         SHM_LOG_ERROR("key length is invalid");
@@ -273,7 +246,7 @@ Result TcpConfigStore::Set(const std::string &key, const std::vector<uint8_t> &v
     return responseCode;
 }
 
-Result TcpConfigStore::GetReal(const std::string &key, std::vector<uint8_t> &value, int64_t timeoutMs) noexcept
+Result TcpConfigStore::GetReal(const std::string& key, std::vector<uint8_t>& value, int64_t timeoutMs) noexcept
 {
     if (key.empty() || key.length() > MAX_KEY_LEN_CLIENT) {
         SHM_LOG_ERROR("key length is invalid");
@@ -299,7 +272,7 @@ Result TcpConfigStore::GetReal(const std::string &key, std::vector<uint8_t> &val
         return responseCode;
     }
 
-    auto data = reinterpret_cast<const uint8_t *>(response->DataPtr());
+    auto data = reinterpret_cast<const uint8_t*>(response->DataPtr());
     SmemMessage responseBody;
     auto ret = SmemMessagePacker::Unpack(data, response->DataLen(), responseBody);
     if (ret < 0) {
@@ -316,7 +289,7 @@ Result TcpConfigStore::GetReal(const std::string &key, std::vector<uint8_t> &val
     return 0;
 }
 
-Result TcpConfigStore::Add(const std::string &key, int64_t increment, int64_t &value) noexcept
+Result TcpConfigStore::Add(const std::string& key, int64_t increment, int64_t& value) noexcept
 {
     if (key.empty() || key.length() > MAX_KEY_LEN_CLIENT) {
         SHM_LOG_ERROR("key length is invalid");
@@ -341,12 +314,12 @@ Result TcpConfigStore::Add(const std::string &key, int64_t increment, int64_t &v
         return responseCode;
     }
 
-    std::string data(reinterpret_cast<char *>(response->DataPtr()), response->DataLen());
+    std::string data(reinterpret_cast<char*>(response->DataPtr()), response->DataLen());
     SHM_VALIDATE_RETURN(StrToLong(data, value), "convert string to long failed.", StoreErrorCode::ERROR);
     return StoreErrorCode::SUCCESS;
 }
 
-Result TcpConfigStore::Remove(const std::string &key, bool printKeyNotExist) noexcept
+Result TcpConfigStore::Remove(const std::string& key, bool printKeyNotExist) noexcept
 {
     if (key.empty() || key.length() > MAX_KEY_LEN_CLIENT) {
         SHM_LOG_ERROR("key length is invalid");
@@ -376,7 +349,7 @@ Result TcpConfigStore::Remove(const std::string &key, bool printKeyNotExist) noe
     return responseCode;
 }
 
-Result TcpConfigStore::Append(const std::string &key, const std::vector<uint8_t> &value, uint64_t &newSize) noexcept
+Result TcpConfigStore::Append(const std::string& key, const std::vector<uint8_t>& value, uint64_t& newSize) noexcept
 {
     if (key.empty() || key.length() > MAX_KEY_LEN_CLIENT) {
         SHM_LOG_ERROR("key length is invalid");
@@ -400,7 +373,7 @@ Result TcpConfigStore::Append(const std::string &key, const std::vector<uint8_t>
         return responseCode;
     }
 
-    std::string data(reinterpret_cast<char *>(response->DataPtr()), response->DataLen());
+    std::string data(reinterpret_cast<char*>(response->DataPtr()), response->DataLen());
 
     long tmpValue = 0;
     SHM_VALIDATE_RETURN(StrToLong(data, tmpValue), "convert string to long failed.", StoreErrorCode::ERROR);
@@ -409,8 +382,9 @@ Result TcpConfigStore::Append(const std::string &key, const std::vector<uint8_t>
     return StoreErrorCode::SUCCESS;
 }
 
-Result TcpConfigStore::Cas(const std::string &key, const std::vector<uint8_t> &expect,
-                           const std::vector<uint8_t> &value, std::vector<uint8_t> &exists) noexcept
+Result TcpConfigStore::Cas(
+    const std::string& key, const std::vector<uint8_t>& expect, const std::vector<uint8_t>& value,
+    std::vector<uint8_t>& exists) noexcept
 {
     if (key.empty() || key.length() > MAX_KEY_LEN_CLIENT) {
         SHM_LOG_ERROR("key length is invalid");
@@ -435,7 +409,7 @@ Result TcpConfigStore::Cas(const std::string &key, const std::vector<uint8_t> &e
         return responseCode;
     }
 
-    auto data = reinterpret_cast<const uint8_t *>(response->DataPtr());
+    auto data = reinterpret_cast<const uint8_t*>(response->DataPtr());
     SmemMessage responseBody;
     auto ret = SmemMessagePacker::Unpack(data, response->DataLen(), responseBody);
     if (ret < 0) {
@@ -453,9 +427,9 @@ Result TcpConfigStore::Cas(const std::string &key, const std::vector<uint8_t> &e
 }
 
 Result TcpConfigStore::Watch(
-    const std::string &key,
-    const std::function<void(int result, const std::string &, const std::vector<uint8_t> &)> &notify,
-    uint32_t &wid) noexcept
+    const std::string& key,
+    const std::function<void(int result, const std::string&, const std::vector<uint8_t>&)>& notify,
+    uint32_t& wid) noexcept
 {
     if (key.empty() || key.length() > MAX_KEY_LEN_CLIENT) {
         SHM_LOG_ERROR("key length is invalid");
@@ -467,7 +441,7 @@ Result TcpConfigStore::Watch(
 
     auto packedRequest = SmemMessagePacker::Pack(request);
     auto ret = SendWatchRequest(
-        packedRequest, [key, notify](int res, const std::vector<uint8_t> &value) { notify(res, key, value); }, wid);
+        packedRequest, [key, notify](int res, const std::vector<uint8_t>& value) { notify(res, key, value); }, wid);
     if (ret != SM_OK) {
         SHM_LOG_ERROR("send get for key: " << key << ", get null response");
         return ret;
@@ -499,8 +473,7 @@ Result TcpConfigStore::Unwatch(uint32_t wid) noexcept
 }
 
 std::shared_ptr<shm::acc::AccTcpRequestContext> TcpConfigStore::SendMessageBlocked(
-    const std::vector<uint8_t> &reqBody,
-    int64_t timeoutMs) noexcept
+    const std::vector<uint8_t>& reqBody, int64_t timeoutMs) noexcept
 {
     if (accClientLink_ == nullptr) {
         SHM_LOG_ERROR("accClientLink_ is null, connection not established");
@@ -532,7 +505,7 @@ std::shared_ptr<shm::acc::AccTcpRequestContext> TcpConfigStore::SendMessageBlock
     return response;
 }
 
-Result TcpConfigStore::LinkBrokenHandler(const shm::acc::AccTcpLinkComplexPtr &link) noexcept
+Result TcpConfigStore::LinkBrokenHandler(const shm::acc::AccTcpLinkComplexPtr& link) noexcept
 {
     SHM_LOG_INFO("link broken, linkId: " << link->Id());
     std::unordered_map<uint32_t, std::shared_ptr<ClientCommonContext>> tempContext;
@@ -540,14 +513,14 @@ Result TcpConfigStore::LinkBrokenHandler(const shm::acc::AccTcpLinkComplexPtr &l
     tempContext.swap(msgClientContext_);
     msgCtxLocker.unlock();
 
-    for (auto &it : tempContext) {
+    for (auto& it : tempContext) {
         it.second->SetFailedFinish();
     }
 
     return SM_OK;
 }
 
-Result TcpConfigStore::ReceiveResponseHandler(const shm::acc::AccTcpRequestContext &context) noexcept
+Result TcpConfigStore::ReceiveResponseHandler(const shm::acc::AccTcpRequestContext& context) noexcept
 {
     SHM_LOG_DEBUG("client received message: " << context.SeqNo());
     std::shared_ptr<ClientCommonContext> clientContext;
@@ -569,9 +542,9 @@ Result TcpConfigStore::ReceiveResponseHandler(const shm::acc::AccTcpRequestConte
     return SM_OK;
 }
 
-Result TcpConfigStore::SendWatchRequest(const std::vector<uint8_t> &reqBody,
-                                        const std::function<void(int result, const std::vector<uint8_t> &)> &notify,
-                                        uint32_t &id) noexcept
+Result TcpConfigStore::SendWatchRequest(
+    const std::vector<uint8_t>& reqBody, const std::function<void(int result, const std::vector<uint8_t>&)>& notify,
+    uint32_t& id) noexcept
 {
     if (accClientLink_ == nullptr) {
         SHM_LOG_ERROR("accClientLink_ is null, connection not established");
@@ -597,5 +570,5 @@ Result TcpConfigStore::SendWatchRequest(const std::vector<uint8_t> &reqBody,
     id = seqNo;
     return SM_OK;
 }
-}  // namespace store
-}  // namespace shm
+} // namespace store
+} // namespace shm

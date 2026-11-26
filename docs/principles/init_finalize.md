@@ -174,10 +174,10 @@ UID 的 `addr` 来自 `SHMEM_UID_SESSION_ID` 或 `SHMEM_UID_SOCK_IFNAME`；`magi
 
 | 参数 | 含义 | 单位 / 说明 |
 |------|------|-------------|
-| `shm_init_timeout` | Default 且 `ip_port` 合法时，**非 PE 0** client 连 PE 0 的上限 | API 字段名为超时（秒），默认 120；Config Store **实现**将其作为 `ConnectToPeerServer` **重试次数**（每次失败 `sleep(1)`），最坏约 N 秒，详见 [config_store_bootstrap.md §10.1](config_store_bootstrap.md#101-超时汇总) |
+| `shm_init_timeout` | Config Store 各 PE 的 TCP 建链超时 | 默认 120 秒 |
 | `control_operation_timeout` | barrier/allgather 等待上限 | 秒 |
-| UID / Default→UID `timeOut` | 同 `shm_init_timeout` 的建链语义 | 固定 `DEFAULT_TIMEOUT`（120），作重试次数 |
-| UID / Default→UID `timeControlOut` | 控制面集合通信超时 | 秒（×1000 → `timeoutMs`） |
+| UID / Default→UID `timeOut` | 取自 `shm_init_timeout` | 默认 120 秒 |
+| UID / Default→UID `timeControlOut` | 读取 `option_attr.control_operation_timeout`，默认 120 | 秒（×1000 → `timeoutMs`） |
 | Acclink 收包 | `ACC_LINK_RECV_TIMEOUT` | 秒（1800，常量） |
 
 **`aclshmemx_init_attr_t` 关键字段**
@@ -191,7 +191,7 @@ UID 的 `addr` 来自 `SHMEM_UID_SESSION_ID` 或 `SHMEM_UID_SOCK_IFNAME`；`magi
 | `instance_id` | 多 instance 标识，默认 0 |
 | `option_attr.version` | 属性布局判别（头文件默认成员初始化写入 `0x000200B8`，格式 2 / 184 字节；勿整体覆盖 `option_attr`，见 §3.3.2） |
 | `option_attr.data_op_engine_type` | 传输通路位或（见下表） |
-| `option_attr.shm_init_timeout` | 传入 `CreateStore` 的 `connMaxRetry`（实现为重试次数，见 [config_store_bootstrap.md §10.1](config_store_bootstrap.md#101-超时汇总)） |
+| `option_attr.shm_init_timeout` | TCP 建链超时，默认 120 秒 |
 | `option_attr.control_operation_timeout` | 转为 `SmemGroupOption.timeoutMs` |
 | `option_attr.sockFd` | rank 0 预绑定 socket |
 | `runtime_config.udma_shared_jetty` | UDMA shared jetty 三态开关（`ACLSHMEM_CONFIG_DEFAULT/DISABLED/ENABLED`），进程级配置，见 §3.3.2 |
@@ -220,7 +220,7 @@ UID 的 `addr` 来自 `SHMEM_UID_SESSION_ID` 或 `SHMEM_UID_SOCK_IFNAME`；`magi
 | `Acclink` | TCP 建链、握手（`AccConnReq` 含 `rankId`，magic/version 校验）、可选 TLS |
 | `SmemNetGroupEngine` | 键值上实现 `GroupBarrier` / `GroupAllGather` |
 
-rank 0 `CreateStore(..., isServer=true)` 监听；各 PE client 的 `connMaxRetry`：PE 0 固定 60 次，非 PE 0 为 `shm_init_timeout`（重试次数）。多 instance 共享 `g_store_ref` 引用计数。Bootstrap `barrier` 用于 `exchange_slice` 同步与 `aclshmem_malloc` 同序约束。
+rank 0 `CreateStore(..., isServer=true)` 监听。各 PE client 的 `shm_init_timeout` 默认均为 120 秒。多 instance 共享 `g_store_ref` 引用计数。Bootstrap `barrier` 用于 `exchange_slice` 同步与 `aclshmem_malloc` 同序约束。
 
 **运行时产物**：`libshmem.so`、`libshmem_utils.so`、`aclshmem_bootstrap_config_store.so`、`aclshmem_bootstrap_mpi.so`。
 
@@ -432,7 +432,7 @@ rank 0 `CreateStore(..., isServer=true)` 监听；各 PE client 的 `connMaxRetr
 
 | 现象 | 处理 |
 |------|------|
-| init 卡在连 rank 0 | 检查 `ip_port`/UID `addr` 连通性；增大 `shm_init_timeout`（建链重试上限，默认 120≈约 120s）；详见 [config_store_bootstrap.md](config_store_bootstrap.md) §10.1 |
+| init 卡在连 rank 0 | 检查 `ip_port`/UID `addr` 连通性。可增大 `shm_init_timeout`（建链重试上限，默认 120≈约 120s），详见 [config_store_bootstrap.md §10.1](config_store_bootstrap.md#101-超时汇总) |
 | barrier/allgather 超时 | 增大 `control_operation_timeout`（秒）；确认所有 rank 已进入 init；详见 [config_store_bootstrap.md](config_store_bootstrap.md) §九 |
 | UID 握手失败 | 确认 UID 字节级一致、`magic` 已广播 |
 | finalize barrier 超时 / 卡住 | 确认 **全体 PE 均已调用** `aclshmem_finalize`；增大 `control_operation_timeout`；详见 [config_store_bootstrap.md §11](config_store_bootstrap.md#十一finalize) |

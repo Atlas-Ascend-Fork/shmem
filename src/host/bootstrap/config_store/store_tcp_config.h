@@ -8,7 +8,6 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-
 #ifndef SMEM_SMEM_TCP_CONFIG_STORE_H
 #define SMEM_SMEM_TCP_CONFIG_STORE_H
 
@@ -30,59 +29,52 @@ class ClientCommonContext {
 public:
     virtual ~ClientCommonContext() = default;
     virtual std::shared_ptr<shm::acc::AccTcpRequestContext> WaitFinished() noexcept = 0;
-    virtual void SetFinished(const shm::acc::AccTcpRequestContext &response) noexcept = 0;
+    virtual void SetFinished(const shm::acc::AccTcpRequestContext& response) noexcept = 0;
     virtual void SetFailedFinish() noexcept = 0;
     virtual bool Blocking() const noexcept = 0;
 };
 
 class TcpConfigStore : public ConfigStore {
 public:
-    TcpConfigStore(std::string ip, uint16_t port, bool isServer, int32_t rankId = 0, int32_t sockFd = -1,
-                   uint16_t magic = SMEM_DEFAULT_CONN_MAGIC) noexcept;
+    TcpConfigStore(
+        std::string ip, uint16_t port, bool isServer, int32_t rankId = 0, int32_t sockFd = -1,
+        uint16_t magic = SMEM_DEFAULT_CONN_MAGIC) noexcept;
     ~TcpConfigStore() noexcept override;
 
-    Result Startup(const AcclinkTlsOption &tlsOption, int reconnectRetryTimes = -1) noexcept;
+    Result Startup(const AcclinkTlsOption& tlsOption, int reconnectRetryTimes = 120000) noexcept;
     void Shutdown(bool afterFork = false) noexcept;
 
-    Result Set(const std::string &key, const std::vector<uint8_t> &value) noexcept override;
-    Result Add(const std::string &key, int64_t increment, int64_t &value) noexcept override;
-    Result Remove(const std::string &key, bool printKeyNotExist) noexcept override;
-    Result Append(const std::string &key, const std::vector<uint8_t> &value, uint64_t &newSize) noexcept override;
-    Result Cas(const std::string &key, const std::vector<uint8_t> &expect, const std::vector<uint8_t> &value,
-               std::vector<uint8_t> &exists) noexcept override;
-    Result Watch(const std::string &key,
-                 const std::function<void(int result, const std::string &, const std::vector<uint8_t> &)> &notify,
-                 uint32_t &wid) noexcept override;
+    Result Set(const std::string& key, const std::vector<uint8_t>& value) noexcept override;
+    Result Add(const std::string& key, int64_t increment, int64_t& value) noexcept override;
+    Result Remove(const std::string& key, bool printKeyNotExist) noexcept override;
+    Result Append(const std::string& key, const std::vector<uint8_t>& value, uint64_t& newSize) noexcept override;
+    Result Cas(
+        const std::string& key, const std::vector<uint8_t>& expect, const std::vector<uint8_t>& value,
+        std::vector<uint8_t>& exists) noexcept override;
+    Result Watch(
+        const std::string& key,
+        const std::function<void(int result, const std::string&, const std::vector<uint8_t>&)>& notify,
+        uint32_t& wid) noexcept override;
     Result Unwatch(uint32_t wid) noexcept override;
-    std::string GetCompleteKey(const std::string &key) noexcept override
-    {
-        return key;
-    }
+    std::string GetCompleteKey(const std::string& key) noexcept override { return key; }
 
-    std::string GetCommonPrefix() noexcept override
-    {
-        return "";
-    }
+    std::string GetCommonPrefix() noexcept override { return ""; }
 
-    StorePtr GetCoreStore() noexcept override
-    {
-        return this;
-    }
+    StorePtr GetCoreStore() noexcept override { return this; }
 
 protected:
-    Result GetReal(const std::string &key, std::vector<uint8_t> &value, int64_t timeoutMs) noexcept override;
+    Result GetReal(const std::string& key, std::vector<uint8_t>& value, int64_t timeoutMs) noexcept override;
 
 private:
     std::shared_ptr<shm::acc::AccTcpRequestContext> SendMessageBlocked(
-        const std::vector<uint8_t> &reqBody,
-        int64_t timeoutMs = kDefaultSendMsgTimeoutMs) noexcept;
-    Result LinkBrokenHandler(const shm::acc::AccTcpLinkComplexPtr &link) noexcept;
-    Result ReceiveResponseHandler(const shm::acc::AccTcpRequestContext &context) noexcept;
-    Result SendWatchRequest(const std::vector<uint8_t> &reqBody,
-                            const std::function<void(int result, const std::vector<uint8_t> &)> &notify,
-                            uint32_t &id) noexcept;
+        const std::vector<uint8_t>& reqBody, int64_t timeoutMs = kDefaultSendMsgTimeoutMs) noexcept;
+    Result LinkBrokenHandler(const shm::acc::AccTcpLinkComplexPtr& link) noexcept;
+    Result ReceiveResponseHandler(const shm::acc::AccTcpRequestContext& context) noexcept;
+    Result SendWatchRequest(
+        const std::vector<uint8_t>& reqBody, const std::function<void(int result, const std::vector<uint8_t>&)>& notify,
+        uint32_t& id) noexcept;
 
-    Result AccClientStart(const AcclinkTlsOption &tlsOption) noexcept;
+    Result AccClientStart(const AcclinkTlsOption& tlsOption) noexcept;
 
 private:
     AccStoreServerPtr accServer_;
@@ -102,7 +94,7 @@ private:
     uint16_t magic_;
 };
 using TcpConfigStorePtr = SmRef<TcpConfigStore>;
-}  // namespace store
-}  // namespace shm
+} // namespace store
+} // namespace shm
 
-#endif  // SMEM_SMEM_TCP_CONFIG_STORE_H
+#endif // SMEM_SMEM_TCP_CONFIG_STORE_H

@@ -32,7 +32,7 @@ SHMEM provides a profile data tracing tool. By collecting the number of system c
 
 Sets the host-side wait for Ascend950 Hcomm UDMA channels that remain in
 CONNECTING state. The value is decimal milliseconds in [1000, 3600000].
-When unset, the historical 120000 ms limit is preserved. For large jobs, for
+When unset, the historical 600000 ms limit is preserved. For large jobs, for
 example, `export SHMEM_UDMA_CONNECT_TIMEOUT_MS=600000` permits ten minutes.
 Invalid values fail initialization with ACLSHMEM_INVALID_VALUE.
 

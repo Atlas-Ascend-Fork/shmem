@@ -12,7 +12,7 @@
 
 Default / UID 模式加载 `aclshmem_bootstrap_config_store.so`，形成 **以 PE 0 为中心的星型拓扑**：
 
-- **各 PE（含 PE 0）**：均创建 `TcpConfigStore` 客户端，经 **同一 API** `ConnectToPeerServer(serverIp_, serverPort_, …)` 连向 `handle->ipport` 解析出的 `serverIp:serverPort`（与 PE 0 listener 地址相同）。`AccConnReq.rankId` 填 `my_pe`；非 PE 0 的 connect 重试上限来自 `shm_init_timeout`，PE 0 client 为固定 60 次（见 §五、§10.1）。
+- **各 PE（含 PE 0）**：均创建 `TcpConfigStore` 客户端，经 **同一 API** `ConnectToPeerServer(serverIp_, serverPort_, …)` 连向 `handle->ipport` 解析出的 `serverIp:serverPort`（与 PE 0 listener 地址相同）。`AccConnReq.rankId` 填 `my_pe`。各 PE 的 `shm_init_timeout` 默认均为 120 秒（见 §五、§10.1）。
 - **仅 PE 0 额外启动 listener**：`AccStoreServer` 在 `listenIp:listenPort` 上 accept 入站 TCP，维护内存 KV 表。PE 0 的 client 目标地址与其 listener **相同**（通常为本机 IP + 端口），并非另一套 connect 方式。
 
 Bootstrap 完成后，`g_boot_handle.barrier` / `allgather` 由 `SmemNetGroupEngine` 在 KV 表上实现，供 init 阶段 `exchange_slice`、`aclshmem_malloc` 同序等控制面同步使用。与后续 HYBM 设备堆建链无关。
@@ -84,7 +84,7 @@ Default 分支（`shmemi_bootstrap.cpp` L280–304）：
 - IPv4 → `tcp://{ip}:{port}`
 - IPv6 → `tcp6://[{ip}]:{port}`
 - `handle->sockFd = uid_args->inner_sockFd`
-- `handle->timeOut = handle->timeControlOut = DEFAULT_TIMEOUT`（120）。`timeControlOut` 为控制面超时（秒）；`timeOut` 在 Config Store 中同样按 **connect 重试次数** 使用（见 §10.1）
+- `handle->timeOut` 取自 `shm_init_timeout`，默认 120 秒（见 §10.1）。`handle->timeControlOut` 取自 `control_operation_timeout`，默认 120 秒。
 
 写入 `handle->ipport` 后，**所有 PE** 的 `serverIp_`/`serverPort_` 均指向 PE 0 公布的同一地址。
 
@@ -132,18 +132,18 @@ Default 分支（`shmemi_bootstrap.cpp` L280–304）：
 ## 五、建 Store：`init_config_store`
 
 ```cpp
-// shmemi_bootstrap_config_store.cpp:230-235
+// timeOut 默认为 120 秒，对应 connMaxRetry = 120000。
 if (handle->mype == 0)
-    CreateStore(ip, port, isServer=true, rankId=0, connMaxRetry=-1, sockFd);
+    CreateStore(ip, port, isServer=true, rankId=0, connMaxRetry=timeOut * 1000, sockFd);
 else
-    CreateStore(ip, port, isServer=false, rankId=mype, connMaxRetry=timeOut);
+    CreateStore(ip, port, isServer=false, rankId=mype, connMaxRetry=timeOut * 1000);
 ```
 
 | 参数 | PE 0（`my_pe==0`） | 非 PE 0 |
 |------|-------------------|---------|
 | `isServer` | `true`（嵌入 `AccStoreServer`） | `false` |
 | `ConnectToPeerServer` | **有**（与其余 PE 相同 API/目标地址） | **有** |
-| `connMaxRetry` | `-1` → 内部 **60** | `handle->timeOut` |
+| `connMaxRetry` | 120000 次（`shm_init_timeout` 默认 120 秒） | 同 PE 0 |
 | `connReq.rankId` | `0` | `mype` |
 | `sockFd` | 预绑定 listen fd 或 -1 | 未使用（传 -1） |
 
@@ -353,24 +353,24 @@ Bootstrap 包装：`config_store_bootstrap_allgather` 要求 `recv` 缓冲区 �
 
 **`shm_init_timeout` 命名与实现**
 
-对外字段名及 `shmem_host_def.h` 中 `DEFAULT_TIMEOUT` 注释均表述为 **init 超时（秒）**。在 Config Store 建链路径上，该值 **不做秒→次数换算**，而是原样传递：
+`shm_init_timeout` 的单位为秒，默认值为 **120 秒**。
 
 ```text
 option_attr.shm_init_timeout
   → g_boot_handle.timeOut                    [shmemi_bootstrap.cpp:289]
-  → CreateStore(..., connMaxRetry)           [shmemi_bootstrap_config_store.cpp:234]
+  → CreateStore(..., connMaxRetry = timeOut * 1000)
   → TcpConfigStore::Startup(reconnectRetryTimes)
   → ConnectToPeerServer(..., maxRetryTimes)  [acc_tcp_server_default.cpp:556]
 ```
 
-`ConnectToPeerServer` 在 `timesRetried < maxRetryTimes` 循环内调用 `connect()`，失败则 `sleep(1)` 后重试。因此数值 **N 表示最多 N 次 connect 尝试**，最坏情况下约 **N 秒** 建链窗口（默认 120 与「120 秒超时」在数值上相近），但实现上是 **重试次数上限**，不是按 wall-clock 计时的超时器。
+默认 120 秒对应 `maxRetryTimes = 120000`。连接成功时循环提前退出，实际耗时还包括 `connect()` 与握手时间。
 
 | 配置 | 典型值 | 作用 | 实现语义 |
 |------|--------|------|----------|
-| `shm_init_timeout` | 默认 120（API 按秒命名） | 非 PE 0 连 PE 0 listener | **重试次数** → `maxRetryTimes` |
-| PE 0 client 建链 | 固定 60 次 | 与同 API，连本机 `serverIp:serverPort` | `connMaxRetry=-1` → `CONNECT_RETRY_MAX_TIMES` |
+| `shm_init_timeout` | 默认 120 秒 | 各 PE 连 PE 0 listener | 默认 `maxRetryTimes = 120000` |
+| PE 0 client 建链 | 默认 120 秒 | 连本机 `serverIp:serverPort` | 同其余 PE |
 | `control_operation_timeout` | 用户 attr（秒） | barrier/allgather | `SmemGroupOption.timeoutMs = ×1000` |
-| UID 路径 `timeOut` | `DEFAULT_TIMEOUT`（120） | 非 PE 0 建链 | **重试次数**（与 `timeControlOut` 秒数语义不同） |
+| UID 路径 `timeOut` | 默认 120 秒 | 各 PE 建链 | 取自 `shm_init_timeout` |
 | `ACC_LINK_RECV_TIMEOUT` | 1800s | 握手完成后 socket `SO_RCVTIMEO` | 秒 |
 | GET 阻塞 | 请求内 `userDef` ms | Server 侧等待 key 出现的上限 | 毫秒 |
 
@@ -499,13 +499,13 @@ Finalize barrier **只**保证：已进入 finalize 的全体 PE 在拆 Bootstra
 ### 仅 PE 0 额外步骤
 
 1. `CreateStore(isServer=true)` → `AccStoreServer::Startup`：`bind/listen` 于 `listenIp:listenPort`（可在 client connect **之前** 完成，使 listener 就绪）。
-2. client 连向与 listener **相同的** `serverIp:serverPort`；`connMaxRetry` 固定 60，与 `shm_init_timeout` 无关。
+2. client 连向与 listener **相同的** `serverIp:serverPort`。`shm_init_timeout` 默认 120 秒，对应 `connMaxRetry = 120000`。
 3. 可选预绑定 `sockFd` 供 listener 复用。
 
 ### 非 PE 0
 
 1. `CreateStore(isServer=false)`，无 listener。
-2. `ConnectToPeerServer` 目标地址与 PE 0 client **相同**；`connMaxRetry = timeOut`（来自 `shm_init_timeout` 或 UID 的 `DEFAULT_TIMEOUT`）。
+2. `ConnectToPeerServer` 目标地址与 PE 0 client **相同**。`shm_init_timeout` 同样默认 120 秒。
 
 ### Finalize（与 §十一对应）
 
@@ -540,7 +540,7 @@ Finalize barrier **只**保证：已进入 finalize 的全体 PE 在拆 Bootstra
 
 ## 十四、实现注意点
 
-1. **各 PE client 建链 API 相同**；PE 0 额外持有 listener。PE 0 client 的 `connMaxRetry` 固定 60，非 PE 0 用 `shm_init_timeout` 传入的上限。
+1. **各 PE client 建链 API 相同**；PE 0 额外持有 listener。各 PE 的建链参数 `shm_init_timeout` 均默认 120 秒。
 2. **`AccTcpServer` 是传输引擎名**，每个 PE 都有一个 client 实例；listener 仅 PE 0 的 `AccStoreServer` 持有。
 3. **连接级握手**在 accept 路径校验 `AccConnReq.magic` / `AccConnReq.version` 与 `AccTcpServerOptions` 是否一致；不匹配则拒绝（与 [init_finalize.md](init_finalize.md) 中 `connection_between_ranks.png` “Check Magic” 步骤对应）。
 4. **UID 生成**依赖 env/ifa 绑端口逻辑；`magic` 在 UID 生成时写入，全体 PE 须字节级一致。
