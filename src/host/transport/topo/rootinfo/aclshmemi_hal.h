@@ -61,7 +61,7 @@ public:
     std::optional<uint32_t> get_mainboard_id(int phy_id);
     std::optional<uint32_t> get_user_id_from_phy_id(uint32_t phy_id);
     std::optional<int> get_npu_count();
-    std::string get_server_id();
+    std::optional<std::string> get_server_id(int phy_id);
     std::string get_driver_install_path();
 
     int get_ue_list(int phy_id, UEList* ue_list);

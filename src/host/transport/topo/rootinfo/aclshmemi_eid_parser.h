@@ -33,6 +33,10 @@ public:
     static int get_ub_port_id(const dcmi_urma_eid_t& eid);
     static int get_ub_die_id(const dcmi_urma_eid_t& eid);
     static bool is_ub_port_group(const dcmi_urma_eid_t& eid);
+    static bool is_uboe(const dcmi_urma_eid_t& eid);
+    static bool is_ub_rtp(const dcmi_urma_eid_t& eid);
+    static bool is_scale_out(const dcmi_urma_eid_t& eid);
+    static std::string get_cna(const dcmi_urma_eid_t& eid);
     static int get_pod_die_id(const dcmi_urma_eid_t& eid);
     static int get_server_die_id(const dcmi_urma_eid_t& eid);
 

@@ -156,6 +156,8 @@ typedef enum : uint32_t {
  * explicit entry and restore default route selection for that QP. The first implementation supports UDMA
  * netLayer 0
  * and 1 when multi-link is enabled.
+ *       Layer-0 CLOS routes are exposed as policy layer 1, together with layer-1 CLOS routes;
+ *       policy layer 0 remains MESH. A same-domain CLOS-only peer has no policy layer-0 candidate.
  *       Before initialization, all participating PEs must use the same effective
  * configuration for this engine: multi-link mode, QP count, explicitly configured qp_idx set, and requested netLayer
  * for each configured QP. The policy is sparse; QPs without an explicit entry use default route selection. For

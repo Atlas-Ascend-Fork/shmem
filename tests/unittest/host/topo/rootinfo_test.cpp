@@ -13,9 +13,12 @@
 #include <cstring>
 #include <cstdlib>
 #include <string>
+#include <vector>
+#include <nlohmann/json.hpp>
 #include "topo_addr_info.h"
 #include "mock_hal.h"
 #include "aclshmemi_hal.h"
+#include "aclshmemi_product_strategy.h"
 
 namespace shm {
 namespace topo {
@@ -70,14 +73,51 @@ TEST_F(RootInfoTest, GetInvalidParams)
     EXPECT_EQ(ret, -1);
 }
 
-TEST_F(RootInfoTest, GetSizeWithMock)
+TEST_F(RootInfoTest, GetSizeCoversLarge16FmRootInfo)
 {
-    EXPECT_CALL(MockHal::instance(), get_mainboard_id(_)).WillOnce(Return(std::optional<uint32_t>(0x6c)));
+    EXPECT_CALL(MockHal::instance(), get_mainboard_id(0)).WillRepeatedly(Return(0x27));
+    EXPECT_CALL(MockHal::instance(), get_driver_install_path()).WillRepeatedly(Return("/driver-root"));
+    EXPECT_CALL(MockHal::instance(), get_spod_info(0, _)).WillRepeatedly(Invoke([](int, dcmi_spod_info* info) {
+        *info = {};
+        info->super_pod_id = 42;
+        info->super_pod_type = ACLSHMEMI_TOPO_TYPE_SERVER_16FM;
+        return 0;
+    }));
+    EXPECT_CALL(MockHal::instance(), get_ue_list(0, _)).WillRepeatedly(Invoke([](int, UEList* list) {
+        *list = {};
+        list->ueNum = 2;
+        for (uint8_t die = 0; die < 2; ++die) {
+            for (uint8_t port = 0; port < 20; ++port) {
+                add_ub_eid(list->ueList[die], 3, die, port);
+            }
+        }
+        return 0;
+    }));
+    size_t capacity = 0;
+    ASSERT_EQ(topo_addr_info_get_size(0, &capacity), 0);
+    ASSERT_GT(capacity, 4096U);
+    char small[4096]{};
+    size_t required = sizeof(small);
+    EXPECT_EQ(topo_addr_info_get(0, small, &required), -1);
+    EXPECT_EQ(required, capacity);
+    EXPECT_EQ(small[0], '\0');
+    std::vector<char> buffer(capacity, 'x');
+    size_t actual = capacity;
+    ASSERT_EQ(topo_addr_info_get(0, buffer.data(), &actual), 0);
+    EXPECT_EQ(actual + 1, capacity);
+    EXPECT_EQ(buffer[actual], '\0');
+    EXPECT_EQ(std::strlen(buffer.data()), actual);
+    const auto root = nlohmann::json::parse(buffer.data());
+    EXPECT_EQ(root["rank_list"][0]["level_list"][0]["rank_addr_list"].size(), 40U);
+}
 
+TEST_F(RootInfoTest, GetSizePropagatesGenerationFailure)
+{
+    EXPECT_CALL(MockHal::instance(), get_mainboard_id(0)).WillOnce(Return(0x27));
+    EXPECT_CALL(MockHal::instance(), get_ue_list(0, _)).WillOnce(Return(-1));
     size_t size = 0;
-    int ret = topo_addr_info_get_size(0, &size);
-    EXPECT_EQ(ret, 0);
-    EXPECT_EQ(size, 4096);
+    EXPECT_EQ(topo_addr_info_get_size(0, &size), -1);
+    EXPECT_EQ(size, 0U);
 }
 
 TEST_F(RootInfoTest, GetSizeNoDevice)
@@ -107,9 +147,67 @@ TEST_F(RootInfoTest, GetTopoFilePathNoDevice)
     EXPECT_EQ(ret, -1);
 }
 
+TEST_F(RootInfoTest, GetTopoFilePathDoesNotGenerateRootInfo)
+{
+    struct Case {
+        uint32_t board;
+        const char* filename;
+    };
+    const Case cases[] = {
+        {0x68, "atlas_350_1.json"},     {0x6a, "atlas_350_2.json"}, {0x6c, "atlas_350_3.json"},
+        {0x07, "atlas_950_1.json"},     {0x03, "atlas_950_1.json"}, {0x2d, "atlas_950_2.json"},
+        {0x2f, "atlas_950_2.json"},     {0x44, "atlas_850_3.json"}, {0x46, "atlas_550EL_100.json"},
+        {0x48, "atlas_550EL_200.json"}, {0x23, "atlas_850_1.json"}, {0x25, "atlas_850_1.json"},
+        {0x27, "atlas_850_1.json"},     {0x29, "atlas_850_1.json"}, {0x2b, "atlas_850_1.json"},
+    };
+    EXPECT_CALL(MockHal::instance(), get_ue_list(_, _)).Times(0);
+    EXPECT_CALL(MockHal::instance(), get_npu_count()).Times(0);
+    for (const auto& test : cases) {
+        SCOPED_TRACE(test.board);
+        EXPECT_CALL(MockHal::instance(), get_mainboard_id(0)).WillOnce(Return(test.board));
+        EXPECT_CALL(MockHal::instance(), get_driver_install_path()).WillOnce(Return("/driver-root"));
+        EXPECT_CALL(MockHal::instance(), get_spod_info(_, _))
+            .Times(test.board == 0x23 || test.board == 0x25 || test.board == 0x27 ? 1 : 0)
+            .WillRepeatedly(Invoke([](int, dcmi_spod_info* info) {
+                *info = {};
+                return 0;
+            }));
+        char path[256]{};
+        ASSERT_EQ(topo_addr_info_get_topo_file_path(0, path, sizeof(path)), 0);
+        EXPECT_EQ(std::string(path), std::string("/driver-root/driver/topo/950/") + test.filename);
+    }
+}
+
+TEST_F(RootInfoTest, GetTopoFilePathSelects16FMWithoutQueryingEntities)
+{
+    EXPECT_CALL(MockHal::instance(), get_mainboard_id(0)).WillOnce(Return(0x27));
+    EXPECT_CALL(MockHal::instance(), get_spod_info(0, _)).WillOnce(Invoke([](int, dcmi_spod_info* info) {
+        *info = {};
+        info->super_pod_type = ACLSHMEMI_TOPO_TYPE_SERVER_16FM;
+        return 0;
+    }));
+    EXPECT_CALL(MockHal::instance(), get_driver_install_path()).WillOnce(Return("/driver-root"));
+    EXPECT_CALL(MockHal::instance(), get_ue_list(_, _)).Times(0);
+    char path[256]{};
+    ASSERT_EQ(topo_addr_info_get_topo_file_path(0, path, sizeof(path)), 0);
+    EXPECT_STREQ(path, "/driver-root/driver/topo/950/atlas_850_2.json");
+}
+
+TEST_F(RootInfoTest, GetTopoFilePathRejectsFailedTopologyQuery)
+{
+    EXPECT_CALL(MockHal::instance(), get_mainboard_id(0)).WillOnce(Return(0x27));
+    EXPECT_CALL(MockHal::instance(), get_spod_info(0, _)).WillOnce(Return(-1));
+    EXPECT_CALL(MockHal::instance(), get_ue_list(_, _)).Times(0);
+    EXPECT_CALL(MockHal::instance(), get_driver_install_path()).Times(0);
+    char path[256]{};
+    EXPECT_EQ(topo_addr_info_get_topo_file_path(0, path, sizeof(path)), -1);
+    EXPECT_STREQ(path, "");
+}
+
 TEST_F(RootInfoTest, GetWithMockCard4PMesh)
 {
     EXPECT_CALL(MockHal::instance(), get_mainboard_id(_)).WillOnce(Return(std::optional<uint32_t>(0x6c)));
+    EXPECT_CALL(MockHal::instance(), get_server_id(0)).WillOnce(Return("sp_42_srv_1"));
     EXPECT_CALL(MockHal::instance(), get_ue_list(_, _)).WillOnce(Invoke([](int phy_id, UEList* ue_list) {
         memset(ue_list, 0, sizeof(UEList));
         ue_list->ueNum = 1;

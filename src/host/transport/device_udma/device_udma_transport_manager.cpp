@@ -1927,6 +1927,7 @@ bool UdmaTransportManager::BuildSyncEndpoints(
         endpoint.netType = rank_addr->levelInfo->netType;
         endpoint.fabric = ResolveEndpointFabric(endpoint.netType, topo_info, root_info.localId, rank_addr->ports);
         endpoint.addrType = rank_addr->addrType;
+        endpoint.isUbRtp = rank_addr->addrType == RankAddrType::EID && EidConverter::IsUbRtp(rank_addr->eidData);
         endpoint.planeId = rank_addr->planeId;
         endpoint.ports = rank_addr->ports;
         endpoint.eidIndex = item.first;

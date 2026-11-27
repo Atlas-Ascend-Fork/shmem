@@ -539,6 +539,11 @@ bool TopoReader::ParseRdmaNetAddr(uint32_t phyId, net_addr_t& outIp)
         return false;
     }
 
+    return ParseRdmaNetAddrJson(rootInfoJson, phyId, outIp);
+}
+
+bool TopoReader::ParseRdmaNetAddrJson(const nlohmann::json& rootInfoJson, uint32_t phyId, net_addr_t& outIp)
+{
     if (!rootInfoJson.contains("rank_list") || !rootInfoJson["rank_list"].is_array()) {
         SHM_LOG_ERROR("Rootinfo: missing or invalid rank_list, phyId " << phyId);
         return false;
@@ -578,6 +583,11 @@ bool TopoReader::ParseRdmaNetAddr(uint32_t phyId, net_addr_t& outIp)
 
             const auto& rankAddrListJson = levelJson["rank_addr_list"];
             for (const auto& rankAddrJson : rankAddrListJson) {
+                // UBOE CNA/IP identifies a UB device endpoint, not a RoCE NIC.
+                const auto plane = rankAddrJson.find("plane_id");
+                if (plane != rankAddrJson.end() && plane->is_string() && *plane == "plane_uboe") {
+                    continue;
+                }
                 if (!rankAddrJson.contains("addr_type")) {
                     continue;
                 }
@@ -617,6 +627,14 @@ bool TopoReader::ParseRdmaNetAddr(uint32_t phyId, net_addr_t& outIp)
         SHM_LOG_ERROR("Rootinfo: no valid CLOS address found for phyId " << phyId);
     }
     return found;
+}
+
+bool EidConverter::IsUbRtp(const EidData& raw)
+{
+    constexpr size_t UB_PROTOCOL_FLAG_BYTE = 7;
+    constexpr uint8_t UB_PROTOCOL_MASK = 0xc0;
+    constexpr uint8_t UB_PROTOCOL_RTP = 0x80;
+    return (raw[UB_PROTOCOL_FLAG_BYTE] & UB_PROTOCOL_MASK) == UB_PROTOCOL_RTP;
 }
 
 bool EidConverter::Convert(RankAddrType addrType, const nlohmann::json& addr, EidData& raw)
@@ -813,7 +831,7 @@ bool PortInClosTopo(const TopoInfo& topoInfo, const EidPort& port)
 
 bool IsMeshEndpoint(const TopoInfo& topoInfo, const SyncEndpoint& endpoint)
 {
-    if (endpoint.addrType != RankAddrType::EID) {
+    if (endpoint.addrType != RankAddrType::EID || endpoint.isUbRtp) {
         return false;
     }
     if (endpoint.netType == NetType::Mesh) {
@@ -848,6 +866,12 @@ std::string LayerZeroNetInstanceId(
     }
     for (const auto& endpoint : rankIdxToSyncEndpoint[rank]) {
         if (endpoint.netLayer == 0 && !endpoint.netInstanceId.empty() && IsMeshEndpoint(topoInfo, endpoint)) {
+            return endpoint.netInstanceId;
+        }
+    }
+    for (const auto& endpoint : rankIdxToSyncEndpoint[rank]) {
+        if (endpoint.netLayer == 0 && endpoint.addrType == RankAddrType::EID && !endpoint.isUbRtp &&
+            endpoint.netType == NetType::Clos && !endpoint.netInstanceId.empty()) {
             return endpoint.netInstanceId;
         }
     }
@@ -899,7 +923,12 @@ uint32_t EffectiveRouteNetLayer(
     // TOPO_FILE_DESC level. Keep that raw value for topology edge/endpoint
     // matching, but expose the product-level network semantics as Mesh=0 and
     // CLOS=1 to per-QP policy selection, saved routes and the public getter.
-    if (UsesMergedBaseLayer(rootInfo, topoInfo) && rawNetLayer == 0 && fabric == TopoFabric::Clos) {
+    // Explicit layer-0 CLOS (550EL) also belongs to the CLOS policy pool.
+    // Preserve raw layers for topology matching; only policy/route metadata is normalized.
+    const bool hasBaseClos = std::any_of(rootInfo.levels.begin(), rootInfo.levels.end(), [](const auto& level) {
+        return level != nullptr && level->netLayer == 0 && level->netType == NetType::Clos;
+    });
+    if (rawNetLayer == 0 && fabric == TopoFabric::Clos && (hasBaseClos || UsesMergedBaseLayer(rootInfo, topoInfo))) {
         return 1;
     }
     return rawNetLayer;
@@ -928,8 +957,9 @@ bool EndpointMatchesResolvedFabric(
 {
     // The direct UDMA backend creates channels from EIDs. IP-address entries belong
     // to RoCE/RDMA discovery and must not become UDMA candidates merely because
-    // their layer, fabric or port happens to match a topology edge.
-    if (endpoint.addrType != RankAddrType::EID) {
+    // their layer, fabric or port happens to match a topology edge. RTP EIDs also
+    // require a different connection protocol and cannot use the CTP backend.
+    if (endpoint.addrType != RankAddrType::EID || endpoint.isUbRtp) {
         return false;
     }
     if (EndpointMatchesFabric(endpoint, fabric)) {
@@ -1201,8 +1231,8 @@ bool TopoQuerier::GetEidRouteMesh1D(uint32_t targetRank, EidRoute& route)
         return false;
     }
 
-    // Driver Mesh edges use server-local IDs, so TOPO_FILE_DESC must retain
-    // the layer-0 instance boundary before those IDs are matched.
+    // Mesh local IDs are scoped to the layer-0 network instance, which may span
+    // servers for 16FM. Check that boundary before matching topology edges.
     const std::string myInstance = MeshNetInstanceId(topoInfo_, rankIdxToSyncEndpoint_, myRank_);
     const std::string targetInstance = MeshNetInstanceId(topoInfo_, rankIdxToSyncEndpoint_, targetRank);
     const bool hasExplicitMeshLevel = !myInstance.empty() || !targetInstance.empty();

@@ -20,17 +20,11 @@ aclshmemi_topo_addr_info_manager_t& aclshmemi_topo_addr_info_manager_t::instance
 
 std::optional<size_t> aclshmemi_topo_addr_info_manager_t::get_size(int phy_id)
 {
-    auto mainboard_id = hal_.get_mainboard_id(phy_id);
-    if (!mainboard_id) {
+    const auto json = get_root_info_json(phy_id);
+    if (!json) {
         return std::nullopt;
     }
-
-    auto strategy = aclshmemi_product_strategy_t::create(*mainboard_id);
-    if (!strategy) {
-        return std::nullopt;
-    }
-
-    return strategy->get_root_info_size();
+    return json->size() + 1;
 }
 
 std::optional<std::string> aclshmemi_topo_addr_info_manager_t::get_topo_file_path(int phy_id)
@@ -40,26 +34,22 @@ std::optional<std::string> aclshmemi_topo_addr_info_manager_t::get_topo_file_pat
         return std::nullopt;
     }
 
-    std::string driver_path = hal_.get_driver_install_path();
-
+    uint32_t spod_type = ACLSHMEMI_TOPO_TYPE_IGNORE;
     switch (*mainboard_id) {
-        case ACLSHMEMI_MAIN_BOARD_ID_CARD_NOMESH:
-            return driver_path + "/driver/topo/950/atlas_350_1.json";
-        case ACLSHMEMI_MAIN_BOARD_ID_CARD_2PMESH:
-            return driver_path + "/driver/topo/950/atlas_350_2.json";
-        case ACLSHMEMI_MAIN_BOARD_ID_CARD_4PMESH:
-            return driver_path + "/driver/topo/950/atlas_350_3.json";
-        case ACLSHMEMI_MAIN_BOARD_ID_SERVER_8PMESH:
         case ACLSHMEMI_MAIN_BOARD_ID_SERVER_TYPE1:
-            return driver_path + "/driver/topo/950/atlas_850_1.json";
-        case ACLSHMEMI_MAIN_BOARD_ID_SERVER_UBX:
-            return driver_path + "/driver/topo/950/atlas_850_3.json";
-        case ACLSHMEMI_MAIN_BOARD_ID_POD:
-        case ACLSHMEMI_MAIN_BOARD_ID_POD_2D:
-            return driver_path + "/driver/topo/950/atlas_950_1.json";
+        case ACLSHMEMI_MAIN_BOARD_ID_SERVER_8PMESH:
+        case ACLSHMEMI_MAIN_BOARD_ID_SERVER_8PMESH_UBOE: {
+            dcmi_spod_info spod{};
+            if (hal_.get_spod_info(phy_id, &spod) != 0) {
+                return std::nullopt;
+            }
+            spod_type = spod.super_pod_type;
+            break;
+        }
         default:
-            return std::nullopt;
+            break;
     }
+    return aclshmemi_topo_file_path(hal_.get_driver_install_path(), *mainboard_id, spod_type);
 }
 
 std::optional<std::string> aclshmemi_topo_addr_info_manager_t::get_root_info_json(int phy_id)

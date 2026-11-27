@@ -32,6 +32,11 @@ constexpr int UB_PORT_AND_DIE_POS = 5;
 constexpr int UB_PORT_MASK = 0x3F;
 constexpr int UB_DIE_OFFSET = 6;
 constexpr int UB_PORT_GROUP_ID = 0x3F;
+// The top two bits of EID byte 7 identify the scale-out protocol.
+constexpr size_t UB_PROTOCOL_FLAG_BYTE = 7;
+constexpr uint8_t UB_PROTOCOL_MASK = 0xC0;
+constexpr uint8_t UB_PROTOCOL_UBOE = 0xC0;
+constexpr uint8_t UB_PROTOCOL_RTP = 0x80;
 } // namespace
 
 std::optional<int> aclshmemi_eid_parser_t::get_fe_id(const std::string& eid_hex_str)
@@ -122,6 +127,24 @@ int aclshmemi_eid_parser_t::get_ub_die_id(const dcmi_urma_eid_t& eid)
 bool aclshmemi_eid_parser_t::is_ub_port_group(const dcmi_urma_eid_t& eid)
 {
     return get_ub_port_id(eid) == UB_PORT_GROUP_ID;
+}
+
+bool aclshmemi_eid_parser_t::is_uboe(const dcmi_urma_eid_t& eid)
+{
+    return (eid.raw[UB_PROTOCOL_FLAG_BYTE] & UB_PROTOCOL_MASK) == UB_PROTOCOL_UBOE;
+}
+
+bool aclshmemi_eid_parser_t::is_ub_rtp(const dcmi_urma_eid_t& eid)
+{
+    return (eid.raw[UB_PROTOCOL_FLAG_BYTE] & UB_PROTOCOL_MASK) == UB_PROTOCOL_RTP;
+}
+
+bool aclshmemi_eid_parser_t::is_scale_out(const dcmi_urma_eid_t& eid) { return is_uboe(eid) || is_ub_rtp(eid); }
+
+std::string aclshmemi_eid_parser_t::get_cna(const dcmi_urma_eid_t& eid)
+{
+    return std::to_string(eid.raw[6]) + "." + std::to_string(eid.raw[12]) + "." + std::to_string(eid.raw[13]) + "." +
+           std::to_string(eid.raw[14]);
 }
 
 int aclshmemi_eid_parser_t::get_pod_die_id(const dcmi_urma_eid_t& eid) { return get_ub_die_id(eid); }

@@ -110,6 +110,7 @@ struct SyncEndpoint {
     RankAddrType addrType{RankAddrType::EID};
     // Canonical Endpoint index for shared direct UDMA; preserves the route's eidIndex.
     std::optional<EidIndex> endpointEidIndex{};
+    bool isUbRtp{false}; // Direct UDMA currently creates CTP connections only.
 };
 
 inline void to_json(nlohmann::json& json, const SyncEndpoint& endpoint)
@@ -120,6 +121,7 @@ inline void to_json(nlohmann::json& json, const SyncEndpoint& endpoint)
         {"netType", static_cast<uint32_t>(endpoint.netType)},
         {"fabric", static_cast<uint32_t>(endpoint.fabric)},
         {"addrType", static_cast<uint32_t>(endpoint.addrType)},
+        {"isUbRtp", endpoint.isUbRtp},
         {"planeId", endpoint.planeId},
         {"ports", endpoint.ports},
         {"eidIndex", endpoint.eidIndex},
@@ -165,6 +167,7 @@ inline void from_json(const nlohmann::json& json, SyncEndpoint& endpoint)
     if (json.contains("endpointEidIndex")) {
         endpoint.endpointEidIndex = json.at("endpointEidIndex").get<EidIndex>();
     }
+    endpoint.isUbRtp = json.value("isUbRtp", false);
 }
 
 struct EidRoute {
@@ -181,6 +184,7 @@ struct EidRoute {
 class EidConverter {
 public:
     static bool Convert(RankAddrType addrType, const nlohmann::json& addr, EidData& raw);
+    static bool IsUbRtp(const EidData& raw);
 
 private:
     static bool FromPlainEid(RankAddrType addrType, const nlohmann::json& addr, EidData& raw);
@@ -199,6 +203,8 @@ public:
     static bool GetEidCount(const RootInfo& root, uint32_t& count);
 
     static bool ParseRdmaNetAddr(uint32_t phyId, net_addr_t& outIp);
+    // Parse an already loaded RootInfo without repeating file or hardware queries.
+    static bool ParseRdmaNetAddrJson(const nlohmann::json& rootInfoJson, uint32_t phyId, net_addr_t& outIp);
 
 private:
     static bool LoadRootInfoJson(uint32_t phyId, nlohmann::json& out);
