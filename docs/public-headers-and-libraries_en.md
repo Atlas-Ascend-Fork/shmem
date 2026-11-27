@@ -58,7 +58,7 @@ Unified entry point: `shmem.h` (includes the following header files conditionall
 | `device/gm2gm/engine/shmem_device_mte.h` | None | MTE engine: symmetric address translation and contiguous/non-contiguous asynchronous put/get | Depends on CANN |
 | `device/gm2gm/engine/shmem_device_rdma.h` | None | RDMA engine: asynchronous RMA where both the local and remote operands must point to symmetric memory and the full transfer range must not exceed the respective memory allocations | Depends on CANN; the Host side must enable `ACLSHMEM_RDMA_SUPPORT` (Ascend950 additionally requires specifying an RDMA backend) |
 | `device/gm2gm/engine/shmem_device_sdma.h` | None | SDMA engine: parameter settings and asynchronous put/get | Depends on CANN |
-| `device/gm2gm/engine/shmem_device_udma.h` | None | UDMA engine: low-level asynchronous RMA | Targets only Ascend950 and requires CANN 9.1.0 or later; loads and checks the required HCOMM resource interfaces during initialization |
+| `device/gm2gm/engine/shmem_device_udma.h` | None | UDMA engine: low-level asynchronous RMA, inline value write, and write-with-reduce | Targets only Ascend950 and requires CANN 9.1.0 or later |
 | `device/ub2gm/shmem_device_rma.h` | None | UB↔GM standard RMA (UB-side get/put, and so on) | Depends on CANN |
 | `device/ub2gm/engine/shmem_device_mte.h` | None | MTE engine asynchronous copy for UB↔GM | Depends on CANN |
 | `device/team/shmem_device_team.h` | None | Device-side Team/PE query and PE translation | Depends on CANN |

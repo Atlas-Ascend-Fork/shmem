@@ -99,6 +99,7 @@ include/
     ├── torch_binding                          // pytorch binding样例
     ├── udma_atomic_add                        // udma atomic add样例
     ├── udma_demo                              // udma实现样例
+    ├── udma_put_value_reduce                  // udma立即数写与归约写样例
     └── utils                                  // 样例公共工具
 ```
 

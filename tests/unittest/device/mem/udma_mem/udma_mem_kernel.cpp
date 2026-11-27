@@ -1273,3 +1273,108 @@ void test_udma_highlevel_put_signal_split(
     UDMAHighLevelPutSignalSplitTest<<<block_dim, nullptr, stream>>>(
         gva, sig_addr, elem_size, signal, family, nbi, use_tensor);
 }
+
+// Layout per rank: [src][sum dst][max dst][min dst] slots, followed by one put-value slot per rank.
+// The sample (examples/udma_put_value_reduce) uses a compact 5-region-per-PE layout for the same
+// feature; keep both layouts in sync when the slot semantics change.
+constexpr uint32_t UDMA_REDUCE_REGIONS_PER_RANK = 4;
+constexpr uint32_t UDMA_REDUCE_ELEMS = MESSAGE_SIZE / sizeof(int32_t);
+constexpr uint64_t UDMA_PUT_VALUE_MAGIC = 0x5A5A000000000000ULL;
+
+extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void UDMAPutValueReduceTest(GM_ADDR gva)
+{
+    const int64_t rank = aclshmem_my_pe();
+    const int64_t rank_size = aclshmem_n_pes();
+    const uint64_t value_base = static_cast<uint64_t>(rank_size) * UDMA_REDUCE_REGIONS_PER_RANK * MESSAGE_SIZE;
+    const uint64_t value = UDMA_PUT_VALUE_MAGIC | static_cast<uint64_t>(rank);
+    __gm__ int32_t* src = reinterpret_cast<__gm__ int32_t*>(
+        gva + static_cast<uint64_t>(rank) * UDMA_REDUCE_REGIONS_PER_RANK * MESSAGE_SIZE);
+    __gm__ int32_t* sum_dst = src + MESSAGE_SIZE / sizeof(int32_t);
+    __gm__ int32_t* max_dst = src + 2 * MESSAGE_SIZE / sizeof(int32_t);
+    __gm__ int32_t* min_dst = src + 3 * MESSAGE_SIZE / sizeof(int32_t);
+
+    for (int64_t peer = 0; peer < rank_size; peer++) {
+        if (peer == rank) {
+            continue;
+        }
+        GM_ADDR value_dst = gva + value_base + static_cast<uint64_t>(rank) * MESSAGE_SIZE;
+        aclshmemx_udma_put_value_nbi<uint64_t>(
+            reinterpret_cast<__gm__ uint64_t*>(value_dst), value, static_cast<int32_t>(peer));
+        aclshmemx_udma_quiet(static_cast<int32_t>(peer));
+
+        aclshmemx_udma_put_reduce_nbi<int32_t, ACLSHMEMX_REDUCE_ADD>(
+            sum_dst, src, UDMA_REDUCE_ELEMS, static_cast<int32_t>(peer));
+        aclshmemx_udma_quiet(static_cast<int32_t>(peer));
+        aclshmemx_udma_put_reduce_nbi<int32_t, ACLSHMEMX_REDUCE_MAX>(
+            max_dst, src, UDMA_REDUCE_ELEMS, static_cast<int32_t>(peer));
+        aclshmemx_udma_quiet(static_cast<int32_t>(peer));
+        aclshmemx_udma_put_reduce_nbi<int32_t, ACLSHMEMX_REDUCE_MIN>(
+            min_dst, src, UDMA_REDUCE_ELEMS, static_cast<int32_t>(peer));
+        aclshmemx_udma_quiet(static_cast<int32_t>(peer));
+    }
+}
+
+void test_udma_put_value_reduce(uint32_t block_dim, void* stream, uint8_t* gva)
+{
+    UDMAPutValueReduceTest<<<block_dim, nullptr, stream>>>(gva);
+}
+
+// Type-encoding coverage: each reduce dtype (except int32, covered above) gets a 64-byte
+// src/dst slot pair, followed by one inline-value slot.
+constexpr uint32_t UDMA_TYPE_SLOT_BYTES = 64;
+constexpr uint32_t UDMA_TYPE_REDUCE_TYPES = 6;
+constexpr uint32_t UDMA_TYPE_VALUE_SLOT = UDMA_TYPE_REDUCE_TYPES * 2;
+constexpr uint32_t UDMA_TYPE_SLOTS_PER_RANK = UDMA_TYPE_VALUE_SLOT + 1;
+
+extern "C" [[bisheng::core_ratio(0, 1)]] __global__ __aicore__ void UDMAPutValueTypeCoverageTest(GM_ADDR gva)
+{
+    const int64_t rank = aclshmem_my_pe();
+    const int64_t rank_size = aclshmem_n_pes();
+    __gm__ uint8_t* base = gva + static_cast<uint64_t>(rank) * UDMA_TYPE_SLOTS_PER_RANK * UDMA_TYPE_SLOT_BYTES;
+    __gm__ int8_t* int8_src = reinterpret_cast<__gm__ int8_t*>(base);
+    __gm__ int8_t* int8_dst = reinterpret_cast<__gm__ int8_t*>(base + UDMA_TYPE_SLOT_BYTES);
+    __gm__ int16_t* int16_src = reinterpret_cast<__gm__ int16_t*>(base + 2 * UDMA_TYPE_SLOT_BYTES);
+    __gm__ int16_t* int16_dst = reinterpret_cast<__gm__ int16_t*>(base + 3 * UDMA_TYPE_SLOT_BYTES);
+    __gm__ uint32_t* uint32_src = reinterpret_cast<__gm__ uint32_t*>(base + 4 * UDMA_TYPE_SLOT_BYTES);
+    __gm__ uint32_t* uint32_dst = reinterpret_cast<__gm__ uint32_t*>(base + 5 * UDMA_TYPE_SLOT_BYTES);
+    __gm__ half* half_src = reinterpret_cast<__gm__ half*>(base + 6 * UDMA_TYPE_SLOT_BYTES);
+    __gm__ half* half_dst = reinterpret_cast<__gm__ half*>(base + 7 * UDMA_TYPE_SLOT_BYTES);
+    __gm__ float* float_src = reinterpret_cast<__gm__ float*>(base + 8 * UDMA_TYPE_SLOT_BYTES);
+    __gm__ float* float_dst = reinterpret_cast<__gm__ float*>(base + 9 * UDMA_TYPE_SLOT_BYTES);
+    __gm__ bfloat16_t* bf16_src = reinterpret_cast<__gm__ bfloat16_t*>(base + 10 * UDMA_TYPE_SLOT_BYTES);
+    __gm__ bfloat16_t* bf16_dst = reinterpret_cast<__gm__ bfloat16_t*>(base + 11 * UDMA_TYPE_SLOT_BYTES);
+    __gm__ half* value_dst = reinterpret_cast<__gm__ half*>(base + UDMA_TYPE_VALUE_SLOT * UDMA_TYPE_SLOT_BYTES);
+    const half inline_value = static_cast<half>(1.0f);
+
+    for (int64_t peer = 0; peer < rank_size; peer++) {
+        if (peer == rank) {
+            continue;
+        }
+        const int32_t target = static_cast<int32_t>(peer);
+        aclshmemx_udma_put_reduce_nbi<int8_t, ACLSHMEMX_REDUCE_ADD>(
+            int8_dst, int8_src, UDMA_TYPE_SLOT_BYTES / sizeof(int8_t), target);
+        aclshmemx_udma_quiet(target);
+        aclshmemx_udma_put_reduce_nbi<int16_t, ACLSHMEMX_REDUCE_ADD>(
+            int16_dst, int16_src, UDMA_TYPE_SLOT_BYTES / sizeof(int16_t), target);
+        aclshmemx_udma_quiet(target);
+        aclshmemx_udma_put_reduce_nbi<uint32_t, ACLSHMEMX_REDUCE_ADD>(
+            uint32_dst, uint32_src, UDMA_TYPE_SLOT_BYTES / sizeof(uint32_t), target);
+        aclshmemx_udma_quiet(target);
+        aclshmemx_udma_put_reduce_nbi<half, ACLSHMEMX_REDUCE_ADD>(
+            half_dst, half_src, UDMA_TYPE_SLOT_BYTES / sizeof(half), target);
+        aclshmemx_udma_quiet(target);
+        aclshmemx_udma_put_reduce_nbi<float, ACLSHMEMX_REDUCE_ADD>(
+            float_dst, float_src, UDMA_TYPE_SLOT_BYTES / sizeof(float), target);
+        aclshmemx_udma_quiet(target);
+        aclshmemx_udma_put_reduce_nbi<bfloat16_t, ACLSHMEMX_REDUCE_ADD>(
+            bf16_dst, bf16_src, UDMA_TYPE_SLOT_BYTES / sizeof(bfloat16_t), target);
+        aclshmemx_udma_quiet(target);
+        aclshmemx_udma_put_value_nbi<half>(value_dst, inline_value, target);
+        aclshmemx_udma_quiet(target);
+    }
+}
+
+void test_udma_put_value_type_coverage(uint32_t block_dim, void* stream, uint8_t* gva)
+{
+    UDMAPutValueTypeCoverageTest<<<block_dim, nullptr, stream>>>(gva);
+}

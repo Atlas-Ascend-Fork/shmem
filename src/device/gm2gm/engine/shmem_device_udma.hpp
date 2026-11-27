@@ -44,8 +44,14 @@ constexpr uint32_t ACLSHMEM_UDMA_FLAG_ODR_MASK = 0x7U;
 constexpr uint32_t ACLSHMEM_UDMA_FLAG_FENCE_SHIFT = 3U;
 constexpr uint32_t ACLSHMEM_UDMA_FLAG_SE_SHIFT = 4U;
 constexpr uint32_t ACLSHMEM_UDMA_FLAG_CQE_SHIFT = 5U;
+constexpr uint32_t ACLSHMEM_UDMA_FLAG_INLINE = 0x40U;
 constexpr uint32_t ACLSHMEM_UDMA_FLAG_UDF = 0x80U;
+constexpr uint32_t ACLSHMEM_UDMA_INLINE_MSG_LEN_SHIFT = 22U;
+constexpr uint32_t ACLSHMEM_UDMA_INVALID_REDUCE_DATA_TYPE = 0xFFFFFFFFU;
+constexpr uint32_t ACLSHMEM_UDMA_REDUCE_DATA_TYPE_SHIFT = 8U;
+constexpr uint32_t ACLSHMEM_UDMA_REDUCE_OPCODE_SHIFT = 12U;
 constexpr uint32_t ACLSHMEM_UDMA_CQE_ENTRY_IDX_MOD = 1U << 16;
+constexpr uint64_t ACLSHMEM_UDMA_MAX_REQ_BYTES = 256ULL * 1024ULL * 1024ULL;
 static_assert(
     shm::UDMA_SQ_BASKBLK_CNT <= ACLSHMEM_UDMA_CQE_ENTRY_IDX_MOD,
     "UDMA CQE entry_idx is 16-bit and must cover the SQ BB count");
@@ -87,7 +93,9 @@ ACLSHMEM_DEVICE constexpr void aclshmemi_udma_require_defer_no_cqe()
     static_assert(CONFIG.cqe == 0U, "UDMA aggregate defer operations require CONFIG.cqe == 0");
 }
 
-template <aclshmemi_udma_opcode_t OP_CODE, const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT>
+template <
+    aclshmemi_udma_opcode_t OP_CODE, const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT,
+    bool INLINE = false>
 ACLSHMEM_DEVICE constexpr uint32_t aclshmemi_udma_build_flag()
 {
     aclshmemi_udma_check_config<CONFIG>();
@@ -95,6 +103,9 @@ ACLSHMEM_DEVICE constexpr uint32_t aclshmemi_udma_build_flag()
                     (CONFIG.se << ACLSHMEM_UDMA_FLAG_SE_SHIFT) | (CONFIG.cqe << ACLSHMEM_UDMA_FLAG_CQE_SHIFT);
     if constexpr (OP_CODE == aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_REDUCE) {
         flag |= ACLSHMEM_UDMA_FLAG_UDF;
+    }
+    if constexpr (INLINE) {
+        flag |= ACLSHMEM_UDMA_FLAG_INLINE;
     }
     return flag;
 }
@@ -365,7 +376,8 @@ ACLSHMEM_DEVICE void aclshmemi_dump_sge(__gm__ uint8_t* wqe_addr, uint32_t sge_n
 
 ACLSHMEM_DEVICE constexpr uint32_t aclshmemi_udma_get_wqe_bb_cnt_by_opcode(uint32_t opcode)
 {
-    // 暂时不考虑inline功能，inline场景需要考虑inline data的大小
+    // Inline writes count as one WRITE BB; the static_assert in aclshmemi_udma_post_send keeps the inline
+    // payload inside the same WQEBB, so no extra BB is needed for them.
     if (opcode == static_cast<uint32_t>(aclshmemi_udma_opcode_t::UDMA_OPCODE_FAA) ||
         opcode == static_cast<uint32_t>(aclshmemi_udma_opcode_t::UDMA_OP_CAS) ||
         opcode == static_cast<uint32_t>(aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_NOTIFY)) {
@@ -383,6 +395,39 @@ ACLSHMEM_DEVICE constexpr uint32_t get_wqe_bb_cnt()
 ACLSHMEM_DEVICE constexpr uint32_t aclshmemi_udma_get_wqe_bb_cnt(uint32_t opcode)
 {
     return aclshmemi_udma_get_wqe_bb_cnt_by_opcode(opcode);
+}
+
+// Bytes actually populated in one WQE. The fill routines write the SQE plus, depending on the
+// encoding, an SGE header, a notify context and/or in-WQE AMO data; the remaining bytes of the
+// WQEBB span are left untouched, so cache maintenance uses this size instead of wqe_size.
+template <typename T, aclshmemi_udma_opcode_t OP_CODE, bool INLINE = false>
+ACLSHMEM_DEVICE constexpr uint32_t aclshmemi_udma_get_filled_wqe_bytes()
+{
+    if constexpr (INLINE) {
+        return sizeof(aclshmemi_sqe_ctx_t) + sizeof(T);
+    } else if constexpr (OP_CODE == aclshmemi_udma_opcode_t::UDMA_OPCODE_FAA) {
+        return sizeof(aclshmemi_sqe_ctx_t) + sizeof(aclshmemi_sge_ctx_t) + sizeof(T);
+    } else if constexpr (OP_CODE == aclshmemi_udma_opcode_t::UDMA_OP_CAS) {
+        return sizeof(aclshmemi_sqe_ctx_t) + sizeof(aclshmemi_sge_ctx_t) + 2U * sizeof(T);
+    } else if constexpr (OP_CODE == aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_NOTIFY) {
+        return sizeof(aclshmemi_sqe_ctx_t) + sizeof(aclshmemi_notify_ctx_t) + sizeof(aclshmemi_sge_ctx_t);
+    } else {
+        return sizeof(aclshmemi_sqe_ctx_t) + sizeof(aclshmemi_sge_ctx_t);
+    }
+}
+
+// Flush only the cache lines covered by the populated part of a contiguous WQE. The WQE start
+// is WQEBB-aligned (one BB is one cache line) and no supported encoding fills more than two
+// lines, so at most two single-line clean+invalidates are issued.
+template <uint32_t FILLED_BYTES>
+ACLSHMEM_DEVICE void aclshmemi_udma_flush_filled_wqe(__gm__ uint8_t* wqe_addr)
+{
+    static_assert(FILLED_BYTES > 0U, "filled WQE bytes must be positive");
+    static_assert(FILLED_BYTES <= 2U * ACLSHMEM_DATA_CACHE_LINE_SIZE, "filled WQE must fit in two cache lines");
+    dcci_cacheline(wqe_addr);
+    if constexpr (FILLED_BYTES > ACLSHMEM_DATA_CACHE_LINE_SIZE) {
+        dcci_cacheline(wqe_addr + ACLSHMEM_DATA_CACHE_LINE_SIZE);
+    }
 }
 
 template <typename T, aclshmemi_udma_opcode_t OP_CODE, typename SQE_PTR>
@@ -436,12 +481,10 @@ ACLSHMEM_DEVICE void aclshmemi_fill_sge_ctx(
         *swap_data_addr = params.value; // fill in swap_data
         __gm__ T* cmp_data_addr = (__gm__ T*)((__gm__ uint8_t*)swap_data_addr + sizeof(T));
         *cmp_data_addr = params.cond; // fill in cmp_data
-    } else if constexpr (OP_CODE == aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_REDUCE) {
-        auto amo_addr = qp_ctx_entry->amo_addr;
-        *(__gm__ T*)amo_addr = params.value;
-        dcci_cachelines((__gm__ uint8_t*)amo_addr, sizeof(T));
-        aclshmemi_fill_sge_header_ctx(sge_ctx, message_len, amo_addr);
     } else {
+        // WRITE_WITH_REDUCE sources its operand through the SGE: the vector form points at the
+        // caller's local buffer, and the scalar form travels as WQE inline data and never
+        // reaches this fill.
         aclshmemi_fill_sge_header_ctx(sge_ctx, message_len, reinterpret_cast<uint64_t>(local_addr));
     }
 }
@@ -523,15 +566,49 @@ ACLSHMEM_DEVICE void aclshmemi_udma_debug_check_aggregate_batch_size(uint32_t pe
     }
 }
 
-template <typename T, aclshmemi_udma_opcode_t OP_CODE>
+template <typename T>
+ACLSHMEM_DEVICE constexpr uint32_t aclshmemi_udma_reduce_data_type()
+{
+    if constexpr (AscendC::IsSameType<T, int8_t>::value) {
+        return 0x0U;
+    } else if constexpr (AscendC::IsSameType<T, int16_t>::value) {
+        return 0x1U;
+    } else if constexpr (AscendC::IsSameType<T, int32_t>::value) {
+        return 0x2U;
+    } else if constexpr (AscendC::IsSameType<T, uint32_t>::value) {
+        return 0x5U;
+    } else if constexpr (AscendC::IsSameType<T, half>::value) {
+        return 0x6U; // fp16
+    } else if constexpr (AscendC::IsSameType<T, float>::value) {
+        return 0x7U; // fp32
+    } else if constexpr (AscendC::IsSameType<T, bfloat16_t>::value) {
+        return 0x8U; // bf16
+    } else {
+        return ACLSHMEM_UDMA_INVALID_REDUCE_DATA_TYPE;
+    }
+}
+
+template <aclshmemx_reduce_op_t REDUCE_OP>
+ACLSHMEM_DEVICE constexpr uint32_t aclshmemi_udma_reduce_opcode()
+{
+    static_assert(
+        REDUCE_OP == ACLSHMEMX_REDUCE_ADD || REDUCE_OP == ACLSHMEMX_REDUCE_MAX || REDUCE_OP == ACLSHMEMX_REDUCE_MIN,
+        "UDMA put reduce supports ACLSHMEMX_REDUCE_ADD, ACLSHMEMX_REDUCE_MAX and ACLSHMEMX_REDUCE_MIN");
+    if constexpr (REDUCE_OP == ACLSHMEMX_REDUCE_MAX) {
+        return 0x8U;
+    } else if constexpr (REDUCE_OP == ACLSHMEMX_REDUCE_MIN) {
+        return 0x9U;
+    } else {
+        return 0xAU;
+    }
+}
+
+template <typename T, aclshmemi_udma_opcode_t OP_CODE, aclshmemx_reduce_op_t REDUCE_OP = ACLSHMEMX_REDUCE_ADD>
 ACLSHMEM_DEVICE constexpr uint32_t aclshmemi_udma_get_reduce_attr()
 {
     if constexpr (OP_CODE == aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_REDUCE) {
-        uint32_t reduce_data_type = 0;
-        if constexpr (AscendC::IsSameType<T, float>::value) {
-            reduce_data_type = 0x7; // fp32
-        }
-        return (reduce_data_type << 8) | (0xaU << 12);
+        return (aclshmemi_udma_reduce_data_type<T>() << ACLSHMEM_UDMA_REDUCE_DATA_TYPE_SHIFT) |
+               (aclshmemi_udma_reduce_opcode<REDUCE_OP>() << ACLSHMEM_UDMA_REDUCE_OPCODE_SHIFT);
     } else {
         return 0;
     }
@@ -539,27 +616,31 @@ ACLSHMEM_DEVICE constexpr uint32_t aclshmemi_udma_get_reduce_attr()
 
 template <
     typename T, aclshmemi_udma_opcode_t OP_CODE, typename SQE_PTR = __gm__ aclshmemi_sqe_ctx_t*,
-    const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT>
+    const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT, bool INLINE = false,
+    aclshmemx_reduce_op_t REDUCE_OP = ACLSHMEMX_REDUCE_ADD>
 ACLSHMEM_DEVICE void aclshmemi_udma_fill_sqe_base_ctx(
     SQE_PTR sqe_ctx, __gm__ uint8_t* remote_addr, __gm__ aclshmemi_ubmem_info_t* remote_mem_info, uint32_t cur_head,
-    const aclshmemi_udma_addr_ctx_t& addr_ctx)
+    const aclshmemi_udma_addr_ctx_t& addr_ctx, T inline_value = T{})
 {
     ACLSHMEM_DEBUG_FUNC(assert_remote_jetty_type_valid, remote_mem_info);
     using SqeQwordPtr = typename AscendC::Std::conditional<
         AscendC::IsSameType<SQE_PTR, __ubuf__ aclshmemi_sqe_ctx_t*>::value, __ubuf__ uint64_t*, __gm__ uint64_t*>::type;
     SqeQwordPtr sqe64 = (SqeQwordPtr)sqe_ctx;
 
-    constexpr uint32_t flag = aclshmemi_udma_build_flag<OP_CODE, CONFIG>();
+    constexpr uint32_t flag = aclshmemi_udma_build_flag<OP_CODE, CONFIG, INLINE>();
     constexpr uint32_t opcode = OP_CODE == aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_REDUCE ?
                                     static_cast<uint32_t>(aclshmemi_udma_opcode_t::UDMA_OP_WRITE) :
                                     static_cast<uint32_t>(OP_CODE);
     uint32_t dw0 = (flag << 16) | (static_cast<uint32_t>(remote_mem_info->token_value_valid) << 28) |
                    (ACLSHMEM_UDMA_REMOTE_JETTY_TYPE << 29);
     uint32_t dw1 = (remote_mem_info->target_hint & 0xFFU) | (opcode << 8);
-    uint32_t dw2 = (remote_mem_info->tpn & 0xFFFFFFU) | (1U << 24);
+    if constexpr (INLINE) {
+        dw1 |= static_cast<uint32_t>(sizeof(T)) << ACLSHMEM_UDMA_INLINE_MSG_LEN_SHIFT;
+    }
+    uint32_t dw2 = (remote_mem_info->tpn & 0xFFFFFFU) | ((INLINE ? 0U : 1U) << 24);
     uint32_t dw3 = remote_mem_info->tid & 0xFFFFFU;
     uint32_t dw4 = remote_mem_info->rmt_token_value;
-    uint32_t dw5 = aclshmemi_udma_get_reduce_attr<T, OP_CODE>();
+    uint32_t dw5 = aclshmemi_udma_get_reduce_attr<T, OP_CODE, REDUCE_OP>();
     __gm__ uint64_t* rmt_eid = (__gm__ uint64_t*)(remote_mem_info->eid_addr);
     sqe64[0] = static_cast<uint64_t>(dw0) | (static_cast<uint64_t>(dw1) << 32);
     sqe64[1] = static_cast<uint64_t>(dw2) | (static_cast<uint64_t>(dw3) << 32);
@@ -568,17 +649,34 @@ ACLSHMEM_DEVICE void aclshmemi_udma_fill_sqe_base_ctx(
     sqe64[4] = static_cast<uint64_t>(dw4) | (static_cast<uint64_t>(dw5) << 32);
     sqe64[5] = reinterpret_cast<uint64_t>(aclshmemi_remote_mr_addr(
         remote_addr, reinterpret_cast<const void*>(addr_ctx.heap_base), addr_ctx.remote_mr_base));
+    if constexpr (INLINE) {
+        // The inline payload follows the SQE inside the same WQEBB.
+        if constexpr (AscendC::IsSameType<SQE_PTR, __ubuf__ aclshmemi_sqe_ctx_t*>::value) {
+            // UB is not a cached HBM view: the later MTE3 copy publishes it, so no cache
+            // maintenance is needed for this assignment.
+            *(__ubuf__ T*)((__ubuf__ uint8_t*)sqe_ctx + sizeof(aclshmemi_sqe_ctx_t)) = inline_value;
+        } else {
+            *(__gm__ T*)((__gm__ uint8_t*)sqe_ctx + sizeof(aclshmemi_sqe_ctx_t)) = inline_value;
+            // Push only the populated part (SQE + inline payload, one cache line) instead of
+            // the whole WQEBB span.
+            aclshmemi_udma_flush_filled_wqe<aclshmemi_udma_get_filled_wqe_bytes<T, OP_CODE, true>()>(
+                (__gm__ uint8_t*)sqe_ctx);
+        }
+    } else {
+        (void)inline_value;
+    }
     (void)cur_head;
 }
 
 template <
     typename T, aclshmemi_udma_opcode_t OP_CODE, typename SQE_PTR = __gm__ aclshmemi_sqe_ctx_t*,
-    const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT>
+    const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT,
+    aclshmemx_reduce_op_t REDUCE_OP = ACLSHMEMX_REDUCE_ADD>
 ACLSHMEM_DEVICE void aclshmemi_udma_fill_sqe_ctx(
     SQE_PTR sqe_ctx, __gm__ uint8_t* remote_addr, __gm__ aclshmemi_ubmem_info_t* remote_mem_info, uint32_t cur_head,
     const aclshmemi_udma_params_t<T, OP_CODE>& params, const aclshmemi_udma_addr_ctx_t& addr_ctx)
 {
-    aclshmemi_udma_fill_sqe_base_ctx<T, OP_CODE, SQE_PTR, CONFIG>(
+    aclshmemi_udma_fill_sqe_base_ctx<T, OP_CODE, SQE_PTR, CONFIG, false, REDUCE_OP>(
         sqe_ctx, remote_addr, remote_mem_info, cur_head, addr_ctx);
     aclshmemi_fill_notify_data<T, OP_CODE>(sqe_ctx, remote_mem_info, params, addr_ctx);
 }
@@ -771,14 +869,15 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_udma_compute_slot(uint32_t pe, uint32_t relay
 
 template <
     typename T, aclshmemi_udma_opcode_t OP_CODE,
-    const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT>
+    const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT,
+    aclshmemx_reduce_op_t REDUCE_OP = ACLSHMEMX_REDUCE_ADD>
 ACLSHMEM_DEVICE void aclshmemi_udma_fill_contiguous_wqe(
     __gm__ aclshmemi_sqe_ctx_t* sqe_ctx, __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry,
     __gm__ aclshmemi_ubmem_info_t* remote_mem_info, __gm__ uint8_t* remote_addr, __gm__ uint8_t* local_addr,
     uint32_t cur_head, uint64_t message_len, const aclshmemi_udma_params_t<T, OP_CODE>& params,
     const aclshmemi_udma_addr_ctx_t& addr_ctx)
 {
-    aclshmemi_udma_fill_sqe_ctx<T, OP_CODE, __gm__ aclshmemi_sqe_ctx_t*, CONFIG>(
+    aclshmemi_udma_fill_sqe_ctx<T, OP_CODE, __gm__ aclshmemi_sqe_ctx_t*, CONFIG, REDUCE_OP>(
         sqe_ctx, remote_addr, remote_mem_info, cur_head, params, addr_ctx);
     __gm__ aclshmemi_sge_ctx_t* sge_ctx =
         (__gm__ aclshmemi_sge_ctx_t*)(aclshmemi_udma_get_sge_ctx<OP_CODE>((__gm__ uint8_t*)sqe_ctx));
@@ -860,24 +959,26 @@ ACLSHMEM_DEVICE void aclshmemi_udma_fill_multi_bb_wrap_wqe(
 
 template <
     typename T, aclshmemi_udma_opcode_t OP_CODE,
-    const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT>
+    const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT,
+    aclshmemx_reduce_op_t REDUCE_OP = ACLSHMEMX_REDUCE_ADD>
 ACLSHMEM_DEVICE void aclshmemi_udma_fill_post_send_wqe(
     __gm__ aclshmemi_udma_wq_ctx_t* qp_ctx_entry, __gm__ aclshmemi_ubmem_info_t* remote_mem_info,
     __gm__ uint8_t* remote_addr, __gm__ uint8_t* local_addr, uint32_t cur_head, uint32_t wqe_size, uint64_t message_len,
     const aclshmemi_udma_params_t<T, OP_CODE>& params, const aclshmemi_udma_addr_ctx_t& addr_ctx)
 {
     constexpr uint32_t WQE_BB_CNT = get_wqe_bb_cnt<OP_CODE>();
+    constexpr uint32_t FILLED_BYTES = aclshmemi_udma_get_filled_wqe_bytes<T, OP_CODE>();
     __gm__ aclshmemi_sqe_ctx_t* sqe_ctx = aclshmemi_udma_get_sqe_ctx(qp_ctx_entry, cur_head, wqe_size);
     if constexpr (WQE_BB_CNT == 1) {
-        aclshmemi_udma_fill_contiguous_wqe<T, OP_CODE, CONFIG>(
+        aclshmemi_udma_fill_contiguous_wqe<T, OP_CODE, CONFIG, REDUCE_OP>(
             sqe_ctx, qp_ctx_entry, remote_mem_info, remote_addr, local_addr, cur_head, message_len, params, addr_ctx);
-        dcci_cachelines((__gm__ uint8_t*)sqe_ctx, wqe_size);
+        aclshmemi_udma_flush_filled_wqe<FILLED_BYTES>((__gm__ uint8_t*)sqe_ctx);
     } else {
         if (!aclshmemi_udma_sq_span_wraps<WQE_BB_CNT>(cur_head)) {
-            aclshmemi_udma_fill_contiguous_wqe<T, OP_CODE, CONFIG>(
+            aclshmemi_udma_fill_contiguous_wqe<T, OP_CODE, CONFIG, REDUCE_OP>(
                 sqe_ctx, qp_ctx_entry, remote_mem_info, remote_addr, local_addr, cur_head, message_len, params,
                 addr_ctx);
-            dcci_cachelines((__gm__ uint8_t*)sqe_ctx, wqe_size * WQE_BB_CNT);
+            aclshmemi_udma_flush_filled_wqe<FILLED_BYTES>((__gm__ uint8_t*)sqe_ctx);
         } else {
             aclshmemi_udma_fill_multi_bb_wrap_wqe<T, OP_CODE, CONFIG>(
                 sqe_ctx, qp_ctx_entry, remote_mem_info, remote_addr, local_addr, cur_head, wqe_size, message_len,
@@ -889,11 +990,16 @@ ACLSHMEM_DEVICE void aclshmemi_udma_fill_post_send_wqe(
 
 template <
     typename T, aclshmemi_udma_opcode_t OP_CODE,
-    const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT>
+    const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT, bool INLINE = false,
+    aclshmemx_reduce_op_t REDUCE_OP = ACLSHMEMX_REDUCE_ADD>
 ACLSHMEM_DEVICE void aclshmemi_udma_post_send(
     __gm__ uint8_t* remote_addr, __gm__ uint8_t* local_addr, uint32_t pe, uint32_t qp_idx, uint64_t message_len,
-    const aclshmemi_udma_params_t<T, OP_CODE>& params, uint32_t relay_pe = static_cast<uint32_t>(-1))
+    const aclshmemi_udma_params_t<T, OP_CODE>& params, uint32_t relay_pe = static_cast<uint32_t>(-1),
+    T inline_value = T{})
 {
+    static_assert(
+        !INLINE || sizeof(aclshmemi_sqe_ctx_t) + sizeof(T) <= ACLSHMEM_UDMA_DATA_MOVER_WQE_SIZE,
+        "UDMA inline payload must fit in one WQEBB");
     aclshmemi_udma_require_standalone_cqe<CONFIG>();
     __gm__ aclshmemi_aiv_udma_info_t* udma_info = aclshmemi_udma_qp_info_fetch();
     ACLSHMEM_DEBUG_FUNC(assert_not_self_send, pe);
@@ -918,8 +1024,16 @@ ACLSHMEM_DEVICE void aclshmemi_udma_post_send(
     aclshmemi_udma_addr_ctx_t addr_ctx{reinterpret_cast<uint64_t>(device_state->heap_base), remote_mem_info->addr};
     // Write SQE to HBM
     uint32_t posted_head = cur_head;
-    aclshmemi_udma_fill_post_send_wqe<T, OP_CODE, CONFIG>(
-        qp_ctx_entry, remote_mem_info, remote_addr, local_addr, cur_head, wqe_size, message_len, params, addr_ctx);
+    if constexpr (INLINE) {
+        // Inline write: the payload lives in the same WQEBB as the SQE, so there is no SGE.
+        // fill_sqe_base_ctx flushes the populated part of the WQE for the GM case.
+        __gm__ aclshmemi_sqe_ctx_t* sqe_ctx = aclshmemi_udma_get_sqe_ctx(qp_ctx_entry, cur_head, wqe_size);
+        aclshmemi_udma_fill_sqe_base_ctx<T, OP_CODE, __gm__ aclshmemi_sqe_ctx_t*, CONFIG, true, REDUCE_OP>(
+            sqe_ctx, remote_addr, remote_mem_info, cur_head, addr_ctx, inline_value);
+    } else {
+        aclshmemi_udma_fill_post_send_wqe<T, OP_CODE, CONFIG, REDUCE_OP>(
+            qp_ctx_entry, remote_mem_info, remote_addr, local_addr, cur_head, wqe_size, message_len, params, addr_ctx);
+    }
     cur_head += WQE_BB_CNT;
     // Only advance the group-wide CQE counter when this op actually requests a CQE.
     if constexpr (CONFIG.cqe != 0) {
@@ -1153,6 +1267,8 @@ ACLSHMEM_DEVICE void aclshmemi_udma_submit_send_wqes(
 // MTE3 path only supports UDMA_OP_WRITE / UDMA_OP_WRITE_WITH_NOTIFY / UDMA_OP_READ
 // (the data-mover opcodes). FAA / CAS / WRITE_WITH_REDUCE remain on PIPE_S because
 // their SGE side fills GM-resident AMO data which is incompatible with UB staging.
+// Inline writes (put_value) also remain on PIPE_S: the payload is part of the SQE block,
+// so there is no separate SGE to stage.
 template <
     typename T, aclshmemi_udma_opcode_t OP_CODE,
     const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT>
@@ -1248,6 +1364,15 @@ ACLSHMEM_DEVICE void aclshmemi_udma_write(
     aclshmemi_udma_post_send<T, aclshmemi_udma_opcode_t::UDMA_OP_WRITE, CONFIG>(
         reinterpret_cast<__gm__ uint8_t*>(dest_dma_addr), reinterpret_cast<__gm__ uint8_t*>(src_dma_addr), pe, qp_idx,
         message_len, {}, relay_pe);
+}
+
+template <typename T, const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT>
+ACLSHMEM_DEVICE void aclshmemi_udma_write_value(__gm__ T* dest_dma_addr, T value, uint32_t pe, uint32_t qp_idx)
+{
+    static_assert(sizeof(T) <= sizeof(uint64_t), "UDMA inline write value supports at most 8 bytes");
+    aclshmemi_udma_post_send<T, aclshmemi_udma_opcode_t::UDMA_OP_WRITE, CONFIG, true>(
+        reinterpret_cast<__gm__ uint8_t*>(dest_dma_addr), nullptr, pe, qp_idx, sizeof(T), {}, static_cast<uint32_t>(-1),
+        value);
 }
 
 template <
@@ -1740,6 +1865,43 @@ ACLSHMEM_DEVICE void aclshmemx_udma_put_nbi(
         elem_size, pe, sync_id, action);
 }
 
+template <typename T, const aclshmemx_udma_op_config_t& CONFIG>
+ACLSHMEM_DEVICE void aclshmemx_udma_put_value_nbi(__gm__ T* dst, T value, int pe)
+{
+    static_assert(sizeof(T) <= sizeof(uint64_t), "UDMA put value supports at most 8 bytes");
+    if constexpr (ACLSHMEM_UDMA_SUPPORTED) {
+        aclshmemi_udma_write_value<T, CONFIG>(dst, value, static_cast<uint32_t>(pe), 0);
+    } else {
+        ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "UDMA is supported only on Ascend950 or later\n");
+    }
+}
+
+template <typename T, aclshmemx_reduce_op_t REDUCE_OP, const aclshmemx_udma_op_config_t& CONFIG>
+ACLSHMEM_DEVICE void aclshmemx_udma_put_reduce_nbi(__gm__ T* dst, __gm__ T* src, uint32_t elem_size, int pe)
+{
+    static_assert(
+        aclshmemi_udma_reduce_data_type<T>() != ACLSHMEM_UDMA_INVALID_REDUCE_DATA_TYPE,
+        "UDMA put reduce supports int8_t, int16_t, int32_t, uint32_t, half, float and bfloat16_t");
+    static_assert(
+        REDUCE_OP == ACLSHMEMX_REDUCE_ADD || REDUCE_OP == ACLSHMEMX_REDUCE_MAX || REDUCE_OP == ACLSHMEMX_REDUCE_MIN,
+        "UDMA put reduce supports ACLSHMEMX_REDUCE_ADD, ACLSHMEMX_REDUCE_MAX and ACLSHMEMX_REDUCE_MIN");
+    if constexpr (ACLSHMEM_UDMA_SUPPORTED) {
+        const uint64_t message_len = static_cast<uint64_t>(elem_size) * sizeof(T);
+        // Reduce is a read-modify-write; an over-limit length would be silently truncated in the SGE.
+        if (message_len > ACLSHMEM_UDMA_MAX_REQ_BYTES) {
+            ACLSHMEM_DEBUG_FUNC(
+                aclshmemi_kernel_abort, "udma put reduce: message_len=%llu exceeds 256 MB\n",
+                static_cast<unsigned long long>(message_len));
+        }
+        aclshmemi_udma_params_t<T, aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_REDUCE> reduce_params{};
+        aclshmemi_udma_post_send<T, aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_REDUCE, CONFIG, false, REDUCE_OP>(
+            reinterpret_cast<__gm__ uint8_t*>(dst), reinterpret_cast<__gm__ uint8_t*>(src), static_cast<uint32_t>(pe),
+            0, message_len, reduce_params);
+    } else {
+        ACLSHMEM_DEBUG_FUNC(aclshmemi_kernel_abort, "UDMA is supported only on Ascend950 or later\n");
+    }
+}
+
 ACLSHMEM_DEVICE bool aclshmemi_udma_relay_params_valid(int pe, int relay_pe)
 {
     int rank_count = aclshmemi_get_total_pe();
@@ -2148,9 +2310,13 @@ ACLSHMEM_DEVICE void aclshmemx_udma_atomic_add(__gm__ T* dst, T value, int32_t p
         }
         aclshmemi_udma_params_t<T, aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_REDUCE> atomic_params{
             .value = value, .cond = 0};
-        if constexpr (AscendC::IsSameType<T, float>::value) { // float使用write with reduce逻辑处理
-            aclshmemi_udma_post_send<T, aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_REDUCE, CONFIG>(
-                reinterpret_cast<__gm__ uint8_t*>(dst), nullptr, pe, 0, sizeof(T), atomic_params);
+        if constexpr (AscendC::IsSameType<T, float>::value) {
+            // float has no FAA encoding on this platform. Carry the single operand as WQE
+            // inline data and let the UDF reduce path apply the ADD at the destination.
+            aclshmemi_udma_post_send<
+                T, aclshmemi_udma_opcode_t::UDMA_OP_WRITE_WITH_REDUCE, CONFIG, true, ACLSHMEMX_REDUCE_ADD>(
+                reinterpret_cast<__gm__ uint8_t*>(dst), nullptr, pe, 0, sizeof(T), atomic_params,
+                static_cast<uint32_t>(-1), value);
         } else {
             aclshmemi_udma_post_send<T, aclshmemi_udma_opcode_t::UDMA_OPCODE_FAA, CONFIG>(
                 reinterpret_cast<__gm__ uint8_t*>(dst), nullptr, pe, 0, sizeof(T), atomic_params);

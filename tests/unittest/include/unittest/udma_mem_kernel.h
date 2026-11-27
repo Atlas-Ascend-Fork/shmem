@@ -73,5 +73,7 @@ void test_udma_highlevel_local_rma(uint32_t block_dim, void* stream, uint8_t* sy
 void test_udma_highlevel_get_semantics(
     uint32_t block_dim, void* stream, uint8_t* symmetric, uint8_t* status, uint64_t config);
 void test_udma_highlevel_put_semantics(uint32_t block_dim, void* stream, uint8_t* symmetric, uint64_t config);
+void test_udma_put_value_reduce(uint32_t block_dim, void* stream, uint8_t* gva);
+void test_udma_put_value_type_coverage(uint32_t block_dim, void* stream, uint8_t* gva);
 
 #endif // UDMA_MEM_KERNEL_H

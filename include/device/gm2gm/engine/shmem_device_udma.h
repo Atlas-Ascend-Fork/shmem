@@ -368,6 +368,74 @@ ACLSHMEM_DEVICE void aclshmemx_udma_put_nbi(
 /** @} */
 
 /**
+ * @name aclshmemx_udma_put_value_nbi
+ * @brief Asynchronously write one inline scalar value to a symmetric address on the specified PE with UDMA.
+ *
+ * @warning When using UDMA as the underlying transport, concurrent RMA/AMO operations to the same PE are not
+ *          supported.
+ *
+ * @details The value travels inside the WRITE WQE (inline write) instead of being read from a local source buffer,
+ *          so the caller does not provide a source address. A normal return only means the WQE was submitted; it
+ *          does not mean the value is visible on @p pe. Call @ref aclshmemx_udma_quiet before reading the remote
+ *          destination or reusing resources that the write depends on.
+ *
+ * @tparam T                  Element type of the value. Supported types are int8_t, uint8_t, int16_t, uint16_t,
+ *                            half, bfloat16_t, int32_t, uint32_t, float, int64_t, uint64_t and double.
+ *                            sizeof(T) must not exceed 8 bytes.
+ * @tparam CONFIG             WQE control configuration. Requires CONFIG.cqe != 0.
+ * @param dst               [in] Symmetric destination address on the target PE specified by pe.
+ * @param value             [in] Value written to dst.
+ * @param pe                [in] Valid remote PE that owns dst. Must satisfy 0 <= pe < aclshmem_n_pes() and
+ *                          pe != aclshmem_my_pe(), and the UDMA connection to pe must already be established
+ *                          during SHMEM initialization.
+ * @note Device-side interface. Call it from an AICore kernel after SHMEM initialization.
+ * @note The void return cannot report a rejected target. In a debug build a self target aborts the kernel;
+ *       release builds rely on the caller to satisfy the preconditions above.
+ *
+ * @{
+ */
+template <typename T, const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT>
+ACLSHMEM_DEVICE void aclshmemx_udma_put_value_nbi(__gm__ T* dst, T value, int pe);
+/** @} */
+
+/**
+ * @name aclshmemx_udma_put_reduce_nbi
+ * @brief Asynchronously write local data to a symmetric address on the specified PE while reducing it into the
+ *        remote destination with UDMA.
+ *
+ * @warning When using UDMA as the underlying transport, concurrent RMA/AMO operations to the same PE are not
+ *          supported.
+ *
+ * @details The remote UDMA engine combines each source element with the existing destination element using
+ *          @p REDUCE_OP. A normal return only means the WQE was submitted; it does not mean the reduction is
+ *          visible on @p pe. Call @ref aclshmemx_udma_quiet before reading the destination or reusing @p src.
+ *
+ * @tparam T                  Element type of the reduction. Supported types are int8_t, int16_t, int32_t, uint32_t,
+ *                            half, float and bfloat16_t.
+ * @tparam REDUCE_OP          Element-wise reduction operation applied on the destination: ACLSHMEMX_REDUCE_ADD,
+ *                            ACLSHMEMX_REDUCE_MAX or ACLSHMEMX_REDUCE_MIN. The public aclshmemx_reduce_op_t type is
+ *                            shared with the other data-plane engines; unsupported operations are rejected at compile
+ *                            time.
+ * @tparam CONFIG             WQE control configuration. Requires CONFIG.cqe != 0.
+ * @param dst               [in] Symmetric destination address on the target PE specified by pe.
+ * @param src               [in] Local source address.
+ * @param elem_size         [in] Number of T elements to reduce. One request must not exceed 256 MB.
+ * @param pe                [in] Valid remote PE that owns dst. Must satisfy 0 <= pe < aclshmem_n_pes() and
+ *                          pe != aclshmem_my_pe(), and the UDMA connection to pe must already be established
+ *                          during SHMEM initialization.
+ * @note Device-side interface. Call it from an AICore kernel after SHMEM initialization.
+ * @note The void return cannot report a rejected target. In a debug build a self target aborts the kernel;
+ *       release builds rely on the caller to satisfy the preconditions above.
+ *
+ * @{
+ */
+template <
+    typename T, aclshmemx_reduce_op_t REDUCE_OP,
+    const aclshmemx_udma_op_config_t& CONFIG = ACLSHMEMX_UDMA_OP_CONFIG_DEFAULT>
+ACLSHMEM_DEVICE void aclshmemx_udma_put_reduce_nbi(__gm__ T* dst, __gm__ T* src, uint32_t elem_size, int pe);
+/** @} */
+
+/**
  * @brief Direct-mode asynchronous UDMA Get on an explicitly selected QP.
  * @note qp_idx must be smaller than the UDMA QP count configured at initialization. This is checked only in debug
  *       builds; release builds require the caller to pass a valid QP index.

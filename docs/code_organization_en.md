@@ -99,6 +99,7 @@ include/
     ├── torch_binding                          // PyTorch binding sample
     ├── udma_atomic_add                        // UDMA atomic add sample
     ├── udma_demo                              // UDMA implementation sample
+    ├── udma_put_value_reduce                  // UDMA inline value write and reduce write sample
     └── utils                                  // Common utilities for samples
 ```
 

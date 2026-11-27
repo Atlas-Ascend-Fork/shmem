@@ -11,6 +11,8 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <cstdint>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <string>
 
@@ -1056,3 +1058,225 @@ TEST(TestMemApi, TestShmemUDMA4QpDataPath) { run_udma_qp_data_path_test(4); }
 
 TEST(TestMemApi, TestShmemUDMA8QpDataPath) { run_udma_qp_data_path_test(8); }
 #endif
+
+namespace {
+
+constexpr size_t UDMA_REDUCE_SLOT_BYTES = 64;
+// Keep in sync with the sample layout in examples/udma_put_value_reduce/udma_put_value_reduce_kernel.h.
+constexpr uint32_t UDMA_REDUCE_REGIONS_PER_RANK = 4;
+constexpr uint32_t UDMA_REDUCE_ELEMS = UDMA_REDUCE_SLOT_BYTES / sizeof(int32_t);
+constexpr uint64_t UDMA_PUT_VALUE_MAGIC = 0x5A5A000000000000ULL;
+
+int32_t udma_reduce_src_value(int rank, uint32_t elem) { return rank * 100 + static_cast<int32_t>(elem); }
+
+// Seed the destination one below, equal to, or one above the source so both operands win for
+// MAX/MIN depending on the element index.
+int32_t udma_reduce_seed_value(int rank, uint32_t elem)
+{
+    return udma_reduce_src_value(rank, elem) + static_cast<int32_t>(elem % 3) - 1;
+}
+
+void prepare_udma_put_value_reduce_input(std::vector<int32_t>& data, int rank_size)
+{
+    const size_t slot_words = UDMA_REDUCE_SLOT_BYTES / sizeof(int32_t);
+    for (int writer = 0; writer < rank_size; ++writer) {
+        int32_t* src = data.data() + static_cast<size_t>(writer) * UDMA_REDUCE_REGIONS_PER_RANK * slot_words;
+        int32_t* sum_dst = src + slot_words;
+        int32_t* max_dst = src + 2 * slot_words;
+        int32_t* min_dst = src + 3 * slot_words;
+        for (uint32_t i = 0; i < UDMA_REDUCE_ELEMS; ++i) {
+            src[i] = udma_reduce_src_value(writer, i);
+            sum_dst[i] = 1;
+            max_dst[i] = udma_reduce_seed_value(writer, i);
+            min_dst[i] = udma_reduce_seed_value(writer, i);
+        }
+    }
+}
+
+void verify_udma_put_value_reduce_output(const std::vector<int32_t>& data, int rank_size, int rank_id)
+{
+    const size_t slot_words = UDMA_REDUCE_SLOT_BYTES / sizeof(int32_t);
+    for (int writer = 0; writer < rank_size; ++writer) {
+        if (writer == rank_id) {
+            continue; // a PE does not send to itself, so its own slot keeps the host-initialized value
+        }
+        const int32_t* src = data.data() + static_cast<size_t>(writer) * UDMA_REDUCE_REGIONS_PER_RANK * slot_words;
+        // UDMA WRITE_WITH_REDUCE reduces element-wise: dst[i] OP src[i].
+        // The peer's reduce applies the writer's src[i] into dst[i] of the same
+        // symmetric slot, so the expected value of element i is the
+        // host-initialized seed reduced with the writer's own src[i] --
+        // not a reduction across all elements.
+        const int32_t* sum_dst = src + slot_words;
+        const int32_t* max_dst = src + 2 * slot_words;
+        const int32_t* min_dst = src + 3 * slot_words;
+        for (uint32_t i = 0; i < UDMA_REDUCE_ELEMS; ++i) {
+            const int32_t src_value = udma_reduce_src_value(writer, i);
+            const int32_t seed_value = udma_reduce_seed_value(writer, i);
+            ASSERT_EQ(sum_dst[i], 1 + src_value) << "writer=" << writer << ", elem=" << i;
+            ASSERT_EQ(max_dst[i], std::max(src_value, seed_value)) << "writer=" << writer << ", elem=" << i;
+            ASSERT_EQ(min_dst[i], std::min(src_value, seed_value)) << "writer=" << writer << ", elem=" << i;
+        }
+    }
+
+    const uint8_t* value_region = reinterpret_cast<const uint8_t*>(
+        data.data() + static_cast<size_t>(rank_size) * UDMA_REDUCE_REGIONS_PER_RANK * slot_words);
+    for (int writer = 0; writer < rank_size; ++writer) {
+        if (writer == rank_id) {
+            continue;
+        }
+        uint64_t actual_value = 0;
+        std::memcpy(
+            &actual_value, value_region + static_cast<size_t>(writer) * UDMA_REDUCE_SLOT_BYTES, sizeof(actual_value));
+        ASSERT_EQ(actual_value, UDMA_PUT_VALUE_MAGIC | static_cast<uint64_t>(writer)) << "writer=" << writer;
+    }
+}
+
+void test_aclshmem_udma_put_value_reduce(int rank_id, int n_ranks, uint64_t local_mem_size)
+{
+    const int32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    aclrtStream stream = nullptr;
+    ASSERT_EQ(test_udma_init(rank_id, n_ranks, local_mem_size, &stream), 0);
+    ASSERT_NE(stream, nullptr);
+
+    const size_t slot_words = UDMA_REDUCE_SLOT_BYTES / sizeof(int32_t);
+    const size_t total_words = static_cast<size_t>(n_ranks) * (UDMA_REDUCE_REGIONS_PER_RANK + 1) * slot_words;
+    const size_t total_bytes = total_words * sizeof(int32_t);
+    auto* symmetric = static_cast<uint8_t*>(aclshmem_malloc(total_bytes));
+    ASSERT_NE(symmetric, nullptr);
+
+    std::vector<int32_t> host_data(total_words, 0);
+    prepare_udma_put_value_reduce_input(host_data, n_ranks);
+    ASSERT_EQ(aclrtMemcpy(symmetric, total_bytes, host_data.data(), total_bytes, ACL_MEMCPY_HOST_TO_DEVICE), 0);
+
+    ASSERT_EQ(aclshmemi_control_barrier_all(), 0);
+    test_udma_put_value_reduce(1, stream, symmetric);
+    ASSERT_EQ(aclrtSynchronizeStream(stream), 0);
+    ASSERT_EQ(aclshmemi_control_barrier_all(), 0);
+
+    ASSERT_EQ(aclrtMemcpy(host_data.data(), total_bytes, symmetric, total_bytes, ACL_MEMCPY_DEVICE_TO_HOST), 0);
+    verify_udma_put_value_reduce_output(host_data, n_ranks, rank_id);
+
+    aclshmem_free(symmetric);
+    test_finalize(stream, device_id);
+}
+
+// Type-encoding coverage: int32 is covered above; each remaining reduce dtype gets a 64-byte
+// src/dst slot pair, followed by one inline-value slot.
+constexpr uint32_t UDMA_TYPE_SLOT_BYTES = 64;
+constexpr uint32_t UDMA_TYPE_REDUCE_TYPES = 6;
+constexpr uint32_t UDMA_TYPE_VALUE_SLOT = UDMA_TYPE_REDUCE_TYPES * 2;
+constexpr uint32_t UDMA_TYPE_SLOTS_PER_RANK = UDMA_TYPE_VALUE_SLOT + 1;
+constexpr uint32_t UDMA_TYPE_RANK_BYTES = UDMA_TYPE_SLOTS_PER_RANK * UDMA_TYPE_SLOT_BYTES;
+
+template <typename T>
+void fill_udma_type_slot(uint8_t* slot, T value)
+{
+    for (size_t i = 0; i < UDMA_TYPE_SLOT_BYTES / sizeof(T); ++i) {
+        std::memcpy(slot + i * sizeof(T), &value, sizeof(T));
+    }
+}
+
+template <typename T>
+void expect_udma_type_slot(const uint8_t* slot, T expected, int writer, const char* type_name)
+{
+    for (size_t i = 0; i < UDMA_TYPE_SLOT_BYTES / sizeof(T); ++i) {
+        T actual{};
+        std::memcpy(&actual, slot + i * sizeof(T), sizeof(T));
+        EXPECT_EQ(actual, expected) << "writer=" << writer << ", type=" << type_name << ", elem=" << i;
+    }
+}
+
+void prepare_udma_type_coverage_input(std::vector<uint8_t>& data, int rank_size)
+{
+    for (int writer = 0; writer < rank_size; ++writer) {
+        uint8_t* base = data.data() + static_cast<size_t>(writer) * UDMA_TYPE_RANK_BYTES;
+        fill_udma_type_slot<int8_t>(base + 0 * UDMA_TYPE_SLOT_BYTES, 1);
+        fill_udma_type_slot<int8_t>(base + 1 * UDMA_TYPE_SLOT_BYTES, 2);
+        fill_udma_type_slot<int16_t>(base + 2 * UDMA_TYPE_SLOT_BYTES, 1);
+        fill_udma_type_slot<int16_t>(base + 3 * UDMA_TYPE_SLOT_BYTES, 2);
+        fill_udma_type_slot<uint32_t>(base + 4 * UDMA_TYPE_SLOT_BYTES, 1U);
+        fill_udma_type_slot<uint32_t>(base + 5 * UDMA_TYPE_SLOT_BYTES, 2U);
+        fill_udma_type_slot<uint16_t>(base + 6 * UDMA_TYPE_SLOT_BYTES, 0x3C00U); // half 1.0
+        fill_udma_type_slot<uint16_t>(base + 7 * UDMA_TYPE_SLOT_BYTES, 0x3C00U);
+        fill_udma_type_slot<uint32_t>(base + 8 * UDMA_TYPE_SLOT_BYTES, 0x3F800000U); // float 1.0
+        fill_udma_type_slot<uint32_t>(base + 9 * UDMA_TYPE_SLOT_BYTES, 0x3F800000U);
+        fill_udma_type_slot<uint16_t>(base + 10 * UDMA_TYPE_SLOT_BYTES, 0x3F80U); // bfloat16 1.0
+        fill_udma_type_slot<uint16_t>(base + 11 * UDMA_TYPE_SLOT_BYTES, 0x3F80U);
+    }
+}
+
+void verify_udma_type_coverage_output(const std::vector<uint8_t>& data, int rank_size, int rank_id)
+{
+    for (int writer = 0; writer < rank_size; ++writer) {
+        if (writer == rank_id) {
+            continue;
+        }
+        const uint8_t* base = data.data() + static_cast<size_t>(writer) * UDMA_TYPE_RANK_BYTES;
+        expect_udma_type_slot<int8_t>(base + 1 * UDMA_TYPE_SLOT_BYTES, 3, writer, "int8_t");
+        expect_udma_type_slot<int16_t>(base + 3 * UDMA_TYPE_SLOT_BYTES, 3, writer, "int16_t");
+        expect_udma_type_slot<uint32_t>(base + 5 * UDMA_TYPE_SLOT_BYTES, 3U, writer, "uint32_t");
+        expect_udma_type_slot<uint16_t>(base + 7 * UDMA_TYPE_SLOT_BYTES, 0x4000U, writer, "half");        // 2.0
+        expect_udma_type_slot<uint32_t>(base + 9 * UDMA_TYPE_SLOT_BYTES, 0x40000000U, writer, "float");   // 2.0f
+        expect_udma_type_slot<uint16_t>(base + 11 * UDMA_TYPE_SLOT_BYTES, 0x4000U, writer, "bfloat16_t"); // 2.0
+        uint16_t actual_value = 0;
+        std::memcpy(&actual_value, base + UDMA_TYPE_VALUE_SLOT * UDMA_TYPE_SLOT_BYTES, sizeof(actual_value));
+        EXPECT_EQ(actual_value, 0x3C00U) << "writer=" << writer << ", half inline value";
+    }
+}
+
+void test_aclshmem_udma_put_value_type_coverage(int rank_id, int n_ranks, uint64_t local_mem_size)
+{
+    const int32_t device_id = rank_id % test_gnpu_num + test_first_npu;
+    aclrtStream stream = nullptr;
+    ASSERT_EQ(test_udma_init(rank_id, n_ranks, local_mem_size, &stream), 0);
+    ASSERT_NE(stream, nullptr);
+
+    const size_t total_bytes = static_cast<size_t>(n_ranks) * UDMA_TYPE_RANK_BYTES;
+    auto* symmetric = static_cast<uint8_t*>(aclshmem_malloc(total_bytes));
+    ASSERT_NE(symmetric, nullptr);
+
+    std::vector<uint8_t> host_data(total_bytes, 0);
+    prepare_udma_type_coverage_input(host_data, n_ranks);
+    ASSERT_EQ(aclrtMemcpy(symmetric, total_bytes, host_data.data(), total_bytes, ACL_MEMCPY_HOST_TO_DEVICE), 0);
+
+    ASSERT_EQ(aclshmemi_control_barrier_all(), 0);
+    test_udma_put_value_type_coverage(1, stream, symmetric);
+    ASSERT_EQ(aclrtSynchronizeStream(stream), 0);
+    ASSERT_EQ(aclshmemi_control_barrier_all(), 0);
+
+    ASSERT_EQ(aclrtMemcpy(host_data.data(), total_bytes, symmetric, total_bytes, ACL_MEMCPY_DEVICE_TO_HOST), 0);
+    verify_udma_type_coverage_output(host_data, n_ranks, rank_id);
+
+    aclshmem_free(symmetric);
+    test_finalize(stream, device_id);
+}
+
+} // namespace
+
+TEST(TestMemApi, TestShmemUDMAPutValueReduce)
+{
+    const char* soc_name = aclrtGetSocName();
+    if (soc_name == nullptr || std::string(soc_name).find("Ascend950") == std::string::npos) {
+        GTEST_SKIP() << "UDMA put value/reduce test requires Ascend950";
+    }
+    const int process_count = test_gnpu_num;
+    if (process_count < 2) {
+        GTEST_SKIP() << "UDMA put value/reduce test requires at least 2 NPUs";
+    }
+    const uint64_t local_mem_size = 1024UL * 1024UL * 1024UL;
+    test_mutil_task(test_aclshmem_udma_put_value_reduce, local_mem_size, process_count);
+}
+
+TEST(TestMemApi, TestShmemUDMAPutValueTypeCoverage)
+{
+    const char* soc_name = aclrtGetSocName();
+    if (soc_name == nullptr || std::string(soc_name).find("Ascend950") == std::string::npos) {
+        GTEST_SKIP() << "UDMA type coverage test requires Ascend950";
+    }
+    const int process_count = test_gnpu_num;
+    if (process_count < 2) {
+        GTEST_SKIP() << "UDMA type coverage test requires at least 2 NPUs";
+    }
+    const uint64_t local_mem_size = 1024UL * 1024UL * 1024UL;
+    test_mutil_task(test_aclshmem_udma_put_value_type_coverage, local_mem_size, process_count);
+}
