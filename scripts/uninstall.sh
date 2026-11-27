@@ -82,14 +82,14 @@ function uninstall_process()
     fi
     print "INFO" "UninstallPath: $1"
     print "INFO" "SHMEM $(basename "$1") uninstall start!"
-    shmem_dir=$(cd "${1}/..";pwd)
+    shmem_dir=$(cd "${1}/.." && pwd) || return 1
     delete_latest "$1"
     delete_install_files "$1"
     if [ -d "$1" ]; then
         delete_empty_recursion "$1"
     fi
-    if [ -z "$(ls "${shmem_dir}")" ]; then
-        rm -rf "${shmem_dir}"
+    if [ -z "$(ls -A "${shmem_dir}" 2>/dev/null)" ]; then
+        rmdir "${shmem_dir}" 2>/dev/null || true
     fi
     print "INFO" "SHMEM $(basename "$1") uninstall success!"
 }
